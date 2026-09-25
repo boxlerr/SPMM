@@ -36,6 +36,7 @@ import { toast } from "@/lib/toast";
 import {
     ahoraISO,
     consulta as armarConsulta,
+    faltaDeLinea,
     hoyISO,
     mpGet,
     mpPut,
@@ -43,6 +44,8 @@ import {
     type CambiosDeLote,
     type CambiosLinea,
     type CambiosLoteIn,
+    type Corte,
+    type CorteIn,
     type FechaISO,
     type Linea,
     type LineaPendiente,
@@ -58,22 +61,24 @@ export interface ConsultaPendientes {
     ot: number | null;
 }
 
-const redondear3 = (n: number) => Math.round(n * 1000) / 1000;
+/** Qué universo se pide, como texto: para saber si lo que hay en pantalla es de ESTA consulta. */
+const claveDe = (q: ConsultaPendientes) => (q.ot ? `ot:${q.ot}` : q.todasAbiertas ? "abiertas" : `semana:${q.semana}`);
 
 /**
- * Lo que falta conseguir de una línea.
- *
- * ESPEJO de la regla del backend (`falta` de Pendientes): 0 si está disponible o
- * pedida; si no, la cantidad menos lo reservado. Existe sólo porque el guardado de una
- * línea devuelve la línea sin `falta` (es un dato de Pendientes, no de la línea): sin
- * esto, la columna quedaba vieja hasta recargar la semana. Cada vez que se carga la
- * semana, vale la que manda el backend.
+ * Lo que se le cambia a una línea desde Pendientes: lo del PUT de la línea y, además, sus
+ * cortes (el diálogo «Editar cortes»), que van por su propia ruta y reemplazan todos.
+ * `sugerido_m` es sólo para dibujar mientras contesta el servidor (que manda el suyo).
  */
-export function faltaDe(l: Pick<Linea, "disponible" | "pedido" | "reserva" | "cantidad" | "cantidad_reservada">): number {
-    if (l.disponible || l.pedido) return 0;
-    const cubierto = l.reserva ? (l.cantidad_reservada ?? 0) : 0;
-    return Math.max(0, redondear3((l.cantidad ?? 0) - cubierto));
-}
+export type CambiosVista = CambiosLinea & { cortes?: CorteIn[]; sugerido_m?: number | null };
+
+/**
+ * Lo que falta conseguir de una línea: la regla del backend (`falta` de Pendientes), que
+ * vive en lib/materiaPrima porque también decide el estado de la línea (`estadoLinea`).
+ * Se recalcula acá sólo porque el guardado de una línea la devuelve sin `falta` (es un
+ * dato de Pendientes, no de la línea): sin esto, la columna quedaba vieja hasta recargar
+ * la semana. Cada vez que se carga la semana, vale la que manda el backend.
+ */
+export const faltaDe = faltaDeLinea;
 
 /**
  * Cómo se ve una línea apenas se toca, antes de que conteste el backend. Estampa quién y
@@ -81,8 +86,19 @@ export function faltaDe(l: Pick<Linea, "disponible" | "pedido" | "reserva" | "ca
  * copia las consecuencias que la persona espera ver ya: «Disponible» pone la fecha de
  * entrega de hoy si no tenía, sacar la reserva borra lo reservado.
  */
-export function aplicarCambios(l: LineaPendiente, c: CambiosLinea): LineaPendiente {
-    const n: LineaPendiente = { ...l, ...c } as LineaPendiente;
+export function aplicarCambios(l: LineaPendiente, c: CambiosVista): LineaPendiente {
+    const { cortes, ...resto } = c;
+    const n: LineaPendiente = { ...l, ...resto } as LineaPendiente;
+    if (cortes) {
+        // Ids negativos: los de verdad los pone el backend, y llegan con su respuesta.
+        n.cortes = cortes.map((x, i): Corte => ({
+            id: -(i + 1),
+            cantidad: x.cantidad,
+            largo_mm: x.largo_mm ?? null,
+            ancho_mm: x.ancho_mm ?? null,
+            texto_original: null,
+        }));
+    }
     const yo = usuarioActual();
     const ahora = ahoraISO();
     if (c.pedido !== undefined && c.pedido !== l.pedido) {
@@ -108,13 +124,15 @@ export function aplicarCambios(l: LineaPendiente, c: CambiosLinea): LineaPendien
     return n;
 }
 
-type Parche = { n: number; cambios: CambiosLinea };
+type Parche = { n: number; cambios: CambiosVista };
 
 /** Cómo terminó el último guardado, para el indicador de la barra. */
 export type EstadoGuardado = "guardando" | "guardado" | "error" | null;
 
 export function usePendientes(q: ConsultaPendientes, confirmar: Confirmar) {
     const [datos, setDatos] = useState<Pendientes | null>(null);
+    /** De qué consulta son los `datos` (ver `claveDe`). */
+    const [claveDatos, setClaveDatos] = useState<string | null>(null);
     /** Cuántas veces llegaron datos nuevos del servidor: cuándo se vuelve a armar la lista que se ve. */
     const [carga, setCarga] = useState(0);
     const [cargando, setCargando] = useState(true);
@@ -159,9 +177,13 @@ export function usePendientes(q: ConsultaPendientes, confirmar: Confirmar) {
             return;
         }
         setError(null);
+        setClaveDatos(claveDe({ semana: q.semana, todasAbiertas: q.todasAbiertas, ot: q.ot }));
         const d = r.data;
         setDatos({
             semana: d.semana ?? null,
+            // De dónde sale la semana (plan del Integral o planificador): sin él, la
+            // pantalla dice «planificador de Metlosys», que es lo de un backend de antes.
+            fuente_semana: d.fuente_semana === "integral" || d.fuente_semana === "spmm" ? d.fuente_semana : null,
             resumen: d.resumen ?? { ot_count: 0, lineas_a_pedir: 0, lineas_esperando: 0, lineas_listas: 0 },
             ots: Array.isArray(d.ots) ? d.ots : [],
             lineas: Array.isArray(d.lineas) ? d.lineas.map((l) => ({ ...l, celdas: l.celdas ?? [], cortes: l.cortes ?? [] })) : [],
@@ -220,7 +242,7 @@ export function usePendientes(q: ConsultaPendientes, confirmar: Confirmar) {
         return p;
     }, []);
 
-    const ponerParche = (ids: number[], n: number, cambios: CambiosLinea) =>
+    const ponerParche = (ids: number[], n: number, cambios: CambiosVista) =>
         setParches((p) => {
             const nuevo = { ...p };
             for (const id of ids) nuevo[id] = [...(p[id] ?? []), { n, cambios }];
@@ -246,39 +268,63 @@ export function usePendientes(q: ConsultaPendientes, confirmar: Confirmar) {
     /**
      * Guardar un cambio de UNA línea. Casi nadie lo tiene que esperar: lo que se ve ya
      * cambió, y si falla vuelve solo. La promesa se cumple cuando terminó, con la
-     * pregunta del 409 incluida: la espera la casilla de la reserva, para no aceptar un
-     * segundo clic mientras tanto (ver `useEnvioSinRepetir`).
+     * pregunta del 409 incluida, y dice si quedó guardado (`false` si falló o si la
+     * persona canceló el 409). La esperan la casilla de la reserva, para no aceptar un
+     * segundo clic mientras tanto (ver `useEnvioSinRepetir`), y la de «Disponible», que
+     * pregunta el casillero sólo si la marca quedó.
+     *
+     * Los cortes (si vienen) van primero y por su ruta (`PUT …/lineas/{id}/cortes`, que
+     * reemplaza todos); el resto, después, por el PUT de la línea. Es el orden de la
+     * solapa de la OT: «Usar sugerencia» cambia la cantidad por la de los cortes nuevos.
      */
     const guardar = useCallback(
-        (id: number, cambios: CambiosLinea): Promise<void> => {
+        (id: number, cambios: CambiosVista): Promise<boolean> => {
             const n = ++contador.current;
             ponerParche([id], n, cambios);
-            return encolar([id], async () => {
+            return encolar([id], async (): Promise<boolean> => {
                 setEnVuelo((v) => v + 1);
                 try {
+                    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- sugerido_m es sólo para dibujar
+                    const { cortes, sugerido_m, ...resto } = cambios;
+                    if (cortes) {
+                        const rc = await mpPut<Linea>(`${API_URL}/materia-prima/lineas/${id}/cortes`, { cortes });
+                        if (!rc.ok || !rc.data) {
+                            sacarParche([id], n);
+                            setUltimo("error");
+                            toast.error(`No se guardaron los cortes de ${nombreDe(id)}: ${rc.error ?? "el servidor no contestó."}`);
+                            return false;
+                        }
+                        aplicarRespuesta([rc.data]);
+                        if (!Object.keys(resto).length) {
+                            sacarParche([id], n);
+                            setUltimo("ok");
+                            return true;
+                        }
+                    }
                     const url = `${API_URL}/materia-prima/lineas/${id}`;
-                    let r = await mpPut<Linea>(url, cambios);
+                    let r = await mpPut<Linea>(url, resto);
                     if (r.requiereConfirmacion) {
                         const si = await confirmarRef.current({ titulo: `Antes de guardar ${nombreDe(id)}`, motivo: r.error ?? "" });
                         if (!si) {
                             sacarParche([id], n);
-                            return;
+                            return false;
                         }
-                        r = await mpPut<Linea>(url, cambios, { forzar: true });
+                        r = await mpPut<Linea>(url, resto, { forzar: true });
                     }
                     if (r.ok && r.data) {
                         aplicarRespuesta([r.data]);
                         sacarParche([id], n);
                         setUltimo("ok");
-                        return;
+                        return true;
                     }
                     sacarParche([id], n);
                     setUltimo("error");
                     toast.error(`No se guardó ${nombreDe(id)}: ${r.error ?? "el servidor no contestó."}`);
+                    return false;
                 } finally {
                     setEnVuelo((v) => v - 1);
                 }
-            }).then(() => undefined);
+            }).then((quedo) => quedo === true);
         },
         // eslint-disable-next-line react-hooks/exhaustive-deps -- ponerParche/sacarParche/nombreDe sólo usan setters y refs
         [encolar, aplicarRespuesta],
@@ -346,6 +392,12 @@ export function usePendientes(q: ConsultaPendientes, confirmar: Confirmar) {
 
     return {
         datos,
+        /**
+         * Los `datos` son de la consulta de ahora. Entre que cambia la consulta y llega la
+         * respuesta hay un dibujo en que `cargando` todavía es false (se prende en el
+         * efecto que pide): sin esto, un vacío de antes se leía como vacío de ahora.
+         */
+        alDia: claveDatos === claveDe(q),
         lineas,
         carga,
         cargando,

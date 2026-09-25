@@ -30,11 +30,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import {
+    enMetros,
     estadoLinea,
     fmtCantidad,
     fmtFechaHora,
     fmtPrecio,
     leerCantidad,
+    metrosQueSeMuestran,
 } from "@/lib/materiaPrima";
 import { SelectorProveedor } from "@/app/materia-prima/_components/SelectorProveedor";
 import { useEnvioSinRepetir } from "@/app/materia-prima/_components/PendientesForzar";
@@ -632,17 +634,23 @@ function CasillaReserva({ fila: f, edita, onGuardar }: {
     );
 }
 
-/** El botón de los cortes: cuántos hay y, si se puede calcular, cuántos metros harían falta. */
+/**
+ * El botón de los cortes: cuántos hay y cuántos metros harían falta, sólo si esos metros
+ * dicen algo: la línea va en metros, o los cortes son de barra (sin ancho). Una chapa en
+ * Kg cortada en 1.220 × 600 no «lleva 2,45 m» (la misma regla que Pendientes:
+ * `metrosQueSeMuestran`).
+ */
 function BotonCortes({ fila: f, disabled, onAbrir }: { fila: FilaMP; disabled?: boolean; onAbrir: () => void }) {
     const n = f.cortes.reduce((s, c) => s + (c.cantidad || 0), 0);
     const detalle = f.cortes.length ? f.cortes.map(textoCorte).join("\n") : "Sin cortes cargados";
-    const difiere = f.sugerido_m !== null && (f.unidad ?? "").toUpperCase() === "MTS" && Math.abs(f.sugerido_m - f.cantidad) > 0.0005;
+    const metros = f.cortes.length ? metrosQueSeMuestran(f) : null;
+    const difiere = metros !== null && enMetros(f) && Math.abs(metros - f.cantidad) > 0.0005;
     return (
         <button
             type="button"
             disabled={disabled}
             onClick={onAbrir}
-            title={`${detalle}${f.sugerido_m !== null ? `\nSugerido: ${fmtCantidad(f.sugerido_m)} m` : ""}\n(tocá para ver o cargar los cortes)`}
+            title={`${detalle}${metros !== null ? `\nSugerido: ${fmtCantidad(metros)} m` : ""}\n(tocá para ver o cargar los cortes)`}
             className={cn(
                 "inline-flex w-full items-center gap-1 rounded-md border px-1.5 py-1 text-[11px] transition-colors disabled:opacity-50",
                 f.cortes.length
@@ -653,7 +661,7 @@ function BotonCortes({ fila: f, disabled, onAbrir }: { fila: FilaMP; disabled?: 
             <Scissors className="h-3 w-3 shrink-0" />
             <span className="truncate tabular-nums">
                 {f.cortes.length ? `${n}` : "Cortes"}
-                {f.cortes.length && f.sugerido_m !== null ? ` · ${fmtCantidad(f.sugerido_m)} m` : ""}
+                {metros !== null ? ` · ${fmtCantidad(metros)} m` : ""}
             </span>
             {difiere && <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-label="La cantidad no es la sugerida" />}
         </button>

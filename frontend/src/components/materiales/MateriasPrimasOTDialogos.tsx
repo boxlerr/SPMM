@@ -16,9 +16,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
+    enMetros,
     fmtCantidad,
     fmtFecha,
     leerCantidad,
+    metrosQueSeMuestran,
     type CorteIn,
     type HistorialOT,
     type LineaHistorial,
@@ -76,6 +78,11 @@ export interface DialogoCortesProps {
  * largos, sugiere cuántos metros pedir —sumando la sierra— y «Usar sugerencia» pone esa
  * cantidad en la línea. No la cambia sola: el que carga decide (a veces se compra la
  * barra entera).
+ *
+ * Los metros se sugieren sólo si dicen algo (`metrosQueSeMuestran`, la regla de
+ * Pendientes y del botón de la fila): la línea va en metros, o ningún corte tiene ancho.
+ * Con cortes de chapa en una línea en Kg no hay «Usar sugerencia»: pasarla a metros
+ * sería cambiarle la unidad a una chapa.
  */
 export function DialogoCortes({ fila, edita, espesorSierraMm, onCerrar, onGuardar }: DialogoCortesProps) {
     const [renglones, setRenglones] = useState<RenglonCorte[]>([]);
@@ -112,12 +119,15 @@ export function DialogoCortes({ fila, edita, espesorSierraMm, onCerrar, onGuarda
     const leidos = renglones.map(leerRenglon);
     const error = leidos.find((x) => x.error)?.error ?? null;
     const cortes = leidos.map((x) => x.corte).filter((c): c is CorteIn => c !== null);
-    const sugerencia = error ? null : sugerenciaMetros(cortes.map((c) => ({ cantidad: c.cantidad, largo_mm: c.largo_mm })), espesorSierraMm);
+    const calculada = error ? null : sugerenciaMetros(cortes.map((c) => ({ cantidad: c.cantidad, largo_mm: c.largo_mm })), espesorSierraMm);
+    // Con los cortes como están escritos: agregar un ancho a una línea en Kg la apaga.
+    const sugerencia = metrosQueSeMuestran({ unidad: fila?.unidad, sugerido_m: calculada, cortes });
+    const deChapa = calculada !== null && sugerencia === null;
     const cambiaron = JSON.stringify(cortes) !== inicial.current;
     const hayHeredados = renglones.some((r) => r.textoOriginal);
-    const enMetros = (fila?.unidad ?? "").toUpperCase() === "MTS";
+    const vaEnMetros = enMetros({ unidad: fila?.unidad });
     const cantidadNueva = usarSugerencia && sugerencia !== null ? sugerencia : null;
-    const hayQueGuardar = cambiaron || (cantidadNueva !== null && (cantidadNueva !== fila?.cantidad || !enMetros));
+    const hayQueGuardar = cambiaron || (cantidadNueva !== null && (cantidadNueva !== fila?.cantidad || !vaEnMetros));
 
     const cambiar = (clave: number, campo: "cantidad" | "largo" | "ancho", valor: string) =>
         setRenglones((rs) => {
@@ -251,20 +261,22 @@ export function DialogoCortes({ fila, edita, espesorSierraMm, onCerrar, onGuarda
                                             size="sm"
                                             variant="outline"
                                             className="h-7 text-xs"
-                                            disabled={enMetros && sugerencia === fila?.cantidad}
+                                            disabled={vaEnMetros && sugerencia === fila?.cantidad}
                                             onClick={() => setUsarSugerencia(true)}
-                                            title={enMetros ? "Poner esta cantidad en la línea" : `La línea va en ${fila?.unidad ?? "otra unidad"}: pasa a metros con esta cantidad`}
+                                            title={vaEnMetros ? "Poner esta cantidad en la línea" : `La línea va en ${fila?.unidad ?? "otra unidad"}: pasa a metros con esta cantidad`}
                                         >
-                                            Usar sugerencia{enMetros ? "" : " (pasa a Mts)"}
+                                            Usar sugerencia{vaEnMetros ? "" : " (pasa a Mts)"}
                                         </Button>
                                     )
                                 )}
                             </div>
                         ) : (
                             <span className="text-gray-500">
-                                {cortes.length
-                                    ? "Para sugerir cuántos metros pedir, todos los cortes tienen que tener largo."
-                                    : "Cargá los cortes (piezas × largo) y te sugiere cuántos metros pedir."}
+                                {deChapa
+                                    ? `Son cortes de chapa (con ancho) y la línea va en ${fila?.unidad?.trim() || "unidades"}, no en metros: no se sugieren metros.`
+                                    : cortes.length
+                                        ? "Para sugerir cuántos metros pedir, todos los cortes tienen que tener largo."
+                                        : "Cargá los cortes (piezas × largo) y te sugiere cuántos metros pedir."}
                             </span>
                         )}
                     </div>

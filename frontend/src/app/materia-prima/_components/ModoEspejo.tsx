@@ -31,9 +31,9 @@
  *    inservible después de la prueba. Un error se vuelve a probar solo cada tanto, así
  *    un tropiezo al entrar no deja la pantalla editable durante la prueba.
  *
- * «SE ACTUALIZAN SOLAS», CADA 30 MINUTOS
+ * «SE ACTUALIZAN SOLAS», CADA 10 MINUTOS
  *
- * Lo del Integral lo trae el sync cada 30 minutos: el cartel lo dice con esas palabras
+ * Lo del Integral lo trae el sync cada 10 minutos (hasta el 25/09 eran 30): el cartel lo dice con esas palabras
  * (el texto es el del backend, `aviso_dueno`; el de la pantalla, `AVISO_ESPEJO`, dice lo
  * mismo), para que nadie espere verlo al instante y lo cargue dos veces. Lo que sí tiene
  * que ser cierto es que, cuando llega, se vea sin recargar: en modo espejo

@@ -43,16 +43,22 @@ import { useCaneraDePantalla } from "./CaneraDatos";
 import { CaneraElegirCelda } from "./CaneraElegirCelda";
 import { SelectorProveedor } from "./SelectorProveedor";
 import { useEnvioSinRepetir } from "./PendientesForzar";
+import { CeldaCortes, corteMasLargo } from "./PendientesCortes";
 
 /** Lo que una fila le pide a la pantalla. Un solo objeto que no cambia, para que `memo` sirva. */
 export interface AccionesFila {
-    /** Se cumple cuando terminó (409 incluido); sólo la reserva la espera. */
-    guardar: (id: number, cambios: CambiosLinea) => Promise<void>;
+    /**
+     * Se cumple cuando terminó (409 incluido), con `true` si quedó guardado. La esperan la
+     * reserva (para no aceptar otro clic) y «Disponible» (pregunta el casillero sólo si quedó).
+     */
+    guardar: (id: number, cambios: CambiosLinea) => Promise<boolean>;
     /** Tildar/destildar la fila; con Shift, todo el tramo desde la última tocada. */
     seleccionar: (id: number, conShift: boolean) => void;
     abrirOT: (idOrden: number) => void;
     verInsumo: (idPieza: number) => void;
     ubicar: (linea: LineaPendiente, celda: string) => void;
+    /** Abrir el diálogo de cortes de la línea (sólo en modo edición). */
+    editarCortes: (idLinea: number) => void;
 }
 
 export interface FilaPendienteProps {
@@ -64,6 +70,12 @@ export interface FilaPendienteProps {
     primera: boolean;
     /** Tramos alternados de OT (el «cebra»): se lee dónde empieza y termina cada una. */
     zebra: boolean;
+    /**
+     * Los casilleros que dicen las observaciones de las líneas de la OT («E4 - soporte…»,
+     * como se anotaba en el viejo), separados por espacio. Sólo se muestran si la cañera
+     * no tiene a la OT. Texto y no lista: así `memo` compara por valor.
+     */
+    coordObs?: string;
     acciones: AccionesFila;
 }
 
@@ -85,7 +97,7 @@ function fondoDeFila(estado: ReturnType<typeof estadoLinea>, zebra: boolean, sel
     return zebra ? "bg-gray-50" : "bg-white";
 }
 
-function FilaPendienteBase({ linea: l, ot, edita, seleccionada, primera, zebra, acciones }: FilaPendienteProps) {
+function FilaPendienteBase({ linea: l, ot, edita, seleccionada, primera, zebra, coordObs, acciones }: FilaPendienteProps) {
     const estado = estadoLinea(l);
     const hoy = hoyISO();
     const vencida = !!l.fecha_requerida && l.fecha_requerida < hoy && !l.disponible;
@@ -200,6 +212,10 @@ function FilaPendienteBase({ linea: l, ot, edita, seleccionada, primera, zebra, 
             <td className="w-[64px] text-right font-semibold tabular-nums">{fmtCantidad(l.cantidad)}</td>
             <td className="w-[44px] text-gray-500">{l.unidad ?? ""}</td>
 
+            <td className="w-[124px] min-w-[124px]">
+                <CeldaCortes linea={l} edita={edita} onEditar={acciones.editarCortes} />
+            </td>
+
             <td className="w-[170px] min-w-[170px]">
                 {edita ? (
                     <SelectorProveedor
@@ -240,17 +256,17 @@ function FilaPendienteBase({ linea: l, ot, edita, seleccionada, primera, zebra, 
                 <CasillaReserva linea={l} edita={edita} onGuardar={guardar} />
             </td>
             <td className="w-[52px] text-center">
-                <Casilla
-                    marcada={l.disponible}
-                    disabled={!edita}
-                    tono="accent-green-600"
-                    onCambiar={(v) => guardar({ disponible: v })}
+                <CasillaDisponible
+                    linea={l}
+                    edita={edita}
+                    onGuardar={guardar}
+                    onUbicar={acciones.ubicar}
                     titulo={
                         l.disponible
-                            ? `Disponible ${quien(l.disponible_por, l.disponible_en)}`
+                            ? `${`Disponible ${quien(l.disponible_por, l.disponible_en)}`.trim()}: cortado y en la cañera`
                             : l.reserva
-                                ? "Marcar disponible: retira del stock lo reservado"
-                                : "Marcar como disponible para producción"
+                                ? "Marcar disponible (cortado y en la cañera): retira del stock lo reservado"
+                                : "Marcar disponible: está cortado y en la cañera, el operario lo puede retirar"
                     }
                 />
             </td>
@@ -302,12 +318,18 @@ function FilaPendienteBase({ linea: l, ot, edita, seleccionada, primera, zebra, 
             </td>
 
             <td className="w-[110px] min-w-[110px]">
-                <CeldaCanera linea={l} edita={edita} onUbicar={acciones.ubicar} />
+                <CeldaCanera linea={l} edita={edita} coordObs={coordObs} onUbicar={acciones.ubicar} />
             </td>
 
             <td className="w-[48px] text-center">
                 {l.recortes_disponibles > 0 && (
-                    <BotonRecortes idPieza={l.id_pieza} cantidad={l.recortes_disponibles} codigo={l.codigo} onVerInsumo={acciones.verInsumo} />
+                    <BotonRecortes
+                        idPieza={l.id_pieza}
+                        cantidad={l.recortes_disponibles}
+                        codigo={l.codigo}
+                        largoMaximo={corteMasLargo(l.cortes)}
+                        onVerInsumo={acciones.verInsumo}
+                    />
                 )}
             </td>
         </tr>
@@ -371,7 +393,13 @@ function CeldaTexto({
     }, [valor, editando]);
 
     if (disabled) {
-        return <span className="block truncate text-gray-700" title={valor ?? ""}>{valor || <span className="text-gray-300">—</span>}</span>;
+        // Dos renglones y no uno: en sólo lectura (la prueba piloto) la observación es lo
+        // que Maxi lee para pedir («Pedir a DANIEL», «Mercadolibre», el remito).
+        return (
+            <span className="line-clamp-2 break-words text-gray-700" title={valor ?? ""}>
+                {valor || <span className="text-gray-300">—</span>}
+            </span>
+        );
     }
 
     return (
@@ -605,6 +633,118 @@ function CasillaReserva({
 }
 
 /**
+ * Las OT a las que ya se les preguntó el casillero en esta pantalla: se pregunta una vez.
+ * La usa también «Marcar disponible» en lote (PendientesTab), para no preguntar dos veces.
+ */
+export const casilleroPreguntado = new Set<number>();
+
+/**
+ * «Disp»: el material está cortado y en la cañera, el operario lo puede retirar (Lucas,
+ * 23/09: «cuando está disponible quiere decir que está cortado… y después, una vez que
+ * están, le pone coordenadas»).
+ *
+ * Por eso, al tildarla en una OT que todavía no tiene casillero, pregunta en cuál quedó,
+ * con el mismo selector de «Ubicar». Pregunta cuando el guardado de «Disponible» salió
+ * bien: si falla (o se cancela el aviso del 409), la marca vuelve atrás y no se pregunta
+ * nada (preguntar en qué casillero quedó algo que no quedó disponible confunde). Sin
+ * bloquear: se cierra con «Ahora no» (o tocando afuera) y no vuelve a salir para esa OT.
+ */
+function CasillaDisponible({
+    linea: l,
+    edita,
+    titulo,
+    onGuardar,
+    onUbicar,
+}: {
+    linea: LineaPendiente;
+    edita: boolean;
+    titulo: string;
+    onGuardar: (c: CambiosLinea) => Promise<boolean>;
+    onUbicar: (linea: LineaPendiente, celda: string) => void;
+}) {
+    const ctx = useCaneraDePantalla();
+    const [preguntar, setPreguntar] = useState(false);
+    const casilla = useRef<HTMLInputElement>(null);
+    const canera = ctx?.estado.canera ?? null;
+    // La cañera de cuando contesta el guardado, no la del clic: en el medio pudo haber
+    // llegado (o alguien pudo haber ubicado la OT desde otra fila).
+    const ctxRef = useRef(ctx);
+    ctxRef.current = ctx;
+
+    const sinCasillero = () => {
+        const c = ctxRef.current;
+        return !!c?.estado.canera && !(c.celdasPorOT.get(l.id_orden_trabajo) ?? []).length;
+    };
+
+    const cambiar = async (v: boolean) => {
+        const preguntaria =
+            v && edita && l.numero_ot !== null && l.numero_ot !== undefined && !casilleroPreguntado.has(l.id_orden_trabajo) && sinCasillero();
+        // Se aparta la OT ya: dos tildes seguidas en la misma OT no preguntan dos veces.
+        if (preguntaria) casilleroPreguntado.add(l.id_orden_trabajo);
+        const quedo = await onGuardar({ disponible: v });
+        if (!preguntaria) return;
+        if (!quedo) {
+            // No quedó disponible: la próxima vez que se tilde, que pregunte.
+            casilleroPreguntado.delete(l.id_orden_trabajo);
+            return;
+        }
+        if (sinCasillero()) setPreguntar(true);
+    };
+
+    return (
+        <PopoverPrimitive.Root open={preguntar} onOpenChange={setPreguntar}>
+            <PopoverPrimitive.Anchor asChild>
+                <input
+                    ref={casilla}
+                    type="checkbox"
+                    checked={l.disponible}
+                    disabled={!edita}
+                    onChange={(e) => void cambiar(e.target.checked)}
+                    title={titulo}
+                    aria-label={titulo}
+                    className={cn("mt-0.5 h-4 w-4 accent-green-600", edita ? "cursor-pointer" : "cursor-not-allowed opacity-60")}
+                />
+            </PopoverPrimitive.Anchor>
+            <PopoverContent
+                className="w-[26rem] max-w-[calc(100vw-1.5rem)] p-3"
+                align="center"
+                onCloseAutoFocus={(e) => {
+                    // Que el foco vuelva a la casilla: se sigue marcando con Tab + Espacio.
+                    e.preventDefault();
+                    casilla.current?.focus();
+                }}
+            >
+                {preguntar && (
+                    <>
+                        <p className="mb-2 text-[11px] text-gray-600">
+                            <b className="text-green-700">{l.codigo} disponible.</b> La OT {l.numero_ot} no tiene casillero en la
+                            cañera: ¿en cuál quedó el material cortado?
+                        </p>
+                        <CaneraElegirCelda
+                            canera={canera}
+                            titulo={`Ubicar la OT ${l.numero_ot} en la cañera`}
+                            onElegir={(c) => {
+                                setPreguntar(false);
+                                onUbicar(l, c);
+                            }}
+                        />
+                        <div className="mt-2 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setPreguntar(false)}
+                                className="rounded-md px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100"
+                            >
+                                Ahora no
+                            </button>
+                        </div>
+                    </>
+                )}
+            </PopoverContent>
+        </PopoverPrimitive.Root>
+    );
+}
+
+/**
  * Los casilleros de la cañera de la OT de la fila, y «Ubicar» para darle uno. Lee la
  * cañera de la pantalla (contexto): ubicar desde una fila cambia al instante los chips
  * de todas las filas de esa OT y la grilla de arriba.
@@ -612,19 +752,34 @@ function CasillaReserva({
 function CeldaCanera({
     linea: l,
     edita,
+    coordObs,
     onUbicar,
 }: {
     linea: LineaPendiente;
     edita: boolean;
+    coordObs?: string;
     onUbicar: (linea: LineaPendiente, celda: string) => void;
 }) {
     const ctx = useCaneraDePantalla();
     const [abierto, setAbierto] = useState(false);
     const celdas = ctx?.estado.canera ? (ctx.celdasPorOT.get(l.id_orden_trabajo) ?? []) : (l.celdas ?? []);
     const puedeUbicar = edita && l.numero_ot !== null && l.numero_ot !== undefined;
+    // En el viejo el casillero que de verdad se usa se escribe al principio de las
+    // observaciones («E4 - …») y no siempre está en la cañera: si la cañera no tiene a la
+    // OT, se muestra ése, tenue y aclarado, para que igual se encuentre el material.
+    const deObs = !celdas.length && coordObs ? coordObs : "";
 
     return (
         <div className="flex flex-wrap items-center gap-1">
+            {deObs && (
+                <span
+                    className="inline-flex items-center gap-1 rounded border border-dashed border-slate-300 px-1.5 py-px text-[10px] font-semibold tabular-nums text-slate-500"
+                    title={`La cañera no tiene a la OT ${l.numero_ot ?? ""}, pero sus observaciones dicen ${deObs} (como se anotaba en el sistema viejo).`}
+                >
+                    {deObs}
+                    <span className="text-[9px] font-normal text-slate-400">obs.</span>
+                </span>
+            )}
             {celdas.map((c) => (
                 <span
                     key={c}
@@ -642,7 +797,9 @@ function CeldaCanera({
                             className={cn(
                                 "inline-flex items-center gap-0.5 rounded border border-dashed px-1.5 py-px text-[10px] font-medium transition-colors",
                                 celdas.length
-                                    ? "border-gray-300 text-gray-400 opacity-0 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100"
+                                    ? // Aparece al pasar el mouse por la fila; sin mouse (teléfono,
+                                      // tableta) o en pantalla angosta, siempre.
+                                      "border-gray-300 text-gray-400 opacity-0 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 max-sm:opacity-100 [@media(hover:none)]:opacity-100"
                                     : "border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-700",
                             )}
                             title={celdas.length ? "Ubicar la OT en otro casillero más" : "Ubicar la OT en la cañera"}
@@ -686,11 +843,14 @@ function BotonRecortes({
     idPieza,
     cantidad,
     codigo,
+    largoMaximo,
     onVerInsumo,
 }: {
     idPieza: number;
     cantidad: number;
     codigo: string;
+    /** El corte más largo de la línea (mm): los recortes de al menos eso sirven. Null = sin cortes con largo. */
+    largoMaximo: number | null;
     onVerInsumo: (idPieza: number) => void;
 }) {
     const [abierto, setAbierto] = useState(false);
@@ -715,6 +875,8 @@ function BotonRecortes({
     }, [abierto, lista, idPieza]);
 
     const disponibles = (lista ?? []).filter((r) => r.estado === "disponible");
+    const sirve = (r: Recorte) => largoMaximo !== null && r.largo_mm !== null && r.largo_mm !== undefined && r.largo_mm >= largoMaximo;
+    const cuantosSirven = disponibles.filter(sirve).length;
 
     return (
         <HoverCard open={abierto} onOpenChange={setAbierto} openDelay={200} closeDelay={150}>
@@ -731,6 +893,13 @@ function BotonRecortes({
             </HoverCardTrigger>
             <HoverCardContent className="w-72 p-3" align="end">
                 <p className="text-xs font-semibold text-gray-800">Recortes de {codigo}</p>
+                {largoMaximo !== null && lista && disponibles.length > 0 && (
+                    <p className={cn("mt-0.5 text-[11px]", cuantosSirven ? "text-green-700" : "text-gray-500")}>
+                        {cuantosSirven
+                            ? `${cuantosSirven} ${cuantosSirven === 1 ? "sirve" : "sirven"} para el corte más largo (${fmtMm(largoMaximo)})`
+                            : `Ninguno llega al corte más largo (${fmtMm(largoMaximo)})`}
+                    </p>
+                )}
                 {error ? (
                     <p className="mt-1 text-[11px] text-rose-700">{error}</p>
                 ) : !lista ? (
@@ -742,8 +911,17 @@ function BotonRecortes({
                 ) : (
                     <ul className="mt-1.5 max-h-56 space-y-1 overflow-y-auto">
                         {disponibles.map((r) => (
-                            <li key={r.id} className="flex items-baseline justify-between gap-2 text-[11px]">
+                            <li
+                                key={r.id}
+                                className={cn(
+                                    "flex items-baseline justify-between gap-2 text-[11px]",
+                                    sirve(r) && "-mx-1 rounded bg-green-50 px-1",
+                                )}
+                            >
                                 <span className="min-w-0">
+                                    {sirve(r) && (
+                                        <span className="mr-1 rounded bg-green-600 px-1 text-[9px] font-semibold uppercase text-white">sirve</span>
+                                    )}
                                     <b className="tabular-nums text-gray-800">
                                         {fmtMm(r.largo_mm)}
                                         {r.ancho_mm ? ` × ${fmtMm(r.ancho_mm)}` : ""}

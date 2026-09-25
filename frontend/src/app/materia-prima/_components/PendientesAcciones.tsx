@@ -8,19 +8,25 @@
  * eran seis tildes, seis proveedores y seis fechas.
  *
  *  · «Marcar pedido…»   → pedido, y si se eligen, proveedor y fecha del proveedor.
- *  · «Marcar disponible»→ llegó (a las reservadas les retira el stock).
+ *  · «Marcar disponible»→ llegó, está cortado y en la cañera (a las reservadas les retira el stock).
  *  · «Reservar de stock»→ lo que haya libre de cada pieza, hasta su cantidad.
  *  · «Quitar marcas»    → vuelve a cero pedido, reserva y disponible (pregunta antes).
  *
  * Todo va en UN pedido (`PUT /materia-prima/lineas/lote`): o quedan todas o ninguna,
  * como las guarda el backend. Si queda, la selección se suelta.
+ *
+ * Después de «Marcar disponible», si alguna de esas OT no tiene casillero en la cañera,
+ * aparece en el mismo lugar `AvisoCasilleros`: «¿en qué casillero quedó?», una OT por
+ * botón. No bloquea: se cierra con «Ahora no». Una OT cuyas líneas elegidas ya estaban
+ * todas disponibles antes del lote no se pregunta: a ésa no le llegó nada nuevo.
  */
 
 import { forwardRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
-import { CheckCheck, Loader2, PackageCheck, PackagePlus, Truck, Undo2, X } from "lucide-react";
+import { CheckCheck, Loader2, MapPin, PackageCheck, PackagePlus, Truck, Undo2, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import type { CambiosDeLote, FechaISO, ProveedorElegido } from "@/lib/materiaPrima";
+import type { CambiosDeLote, Canera, FechaISO, ProveedorElegido } from "@/lib/materiaPrima";
+import { CaneraElegirCelda } from "./CaneraElegirCelda";
 import { SelectorProveedor } from "./SelectorProveedor";
 
 export interface BarraDeAccionesProps {
@@ -138,7 +144,7 @@ export function BarraDeAcciones({
                 icono={<PackageCheck className="h-3.5 w-3.5" />}
                 disabled={ocupado || yaDisponibles === cantidad}
                 onClick={() => onAplicar({ disponible: true }, "Marcar disponible")}
-                titulo="Llegó: marcarlas disponibles para producción (a las reservadas les retira el stock)"
+                titulo="Llegó y está cortado en la cañera: marcarlas disponibles, el operario lo puede retirar (a las reservadas les retira el stock)"
             >
                 Marcar disponible
             </Accion>
@@ -173,6 +179,78 @@ export function BarraDeAcciones({
                 aria-label="Soltar la selección"
             >
                 <X className="h-4 w-4" />
+            </button>
+        </div>
+    );
+}
+
+/** Una OT que quedó sin casillero después de «Marcar disponible» en lote. */
+export interface OTSinCasillero {
+    id: number;
+    numero: number;
+    cliente: string | null;
+}
+
+/**
+ * «¿En qué casillero quedó?» después de «Marcar disponible» en lote: un botón por OT sin
+ * casillero, que abre el mismo selector de «Ubicar». Cada OT ubicada se va del aviso; «Ahora
+ * no» lo cierra entero. Va donde estaba la barra (que se fue al soltar la selección).
+ */
+export function AvisoCasilleros({
+    ots,
+    canera,
+    onUbicar,
+    onCerrar,
+}: {
+    ots: OTSinCasillero[];
+    canera: Canera | null;
+    onUbicar: (ot: OTSinCasillero, celda: string) => void;
+    onCerrar: () => void;
+}) {
+    const [abierta, setAbierta] = useState<number | null>(null);
+    return (
+        <div
+            className={cn(
+                "fixed inset-x-3 bottom-20 z-40 mx-auto flex max-w-fit flex-wrap items-center gap-1.5 rounded-2xl border border-green-200 bg-white/95 px-3 py-2 shadow-2xl ring-1 ring-black/5 backdrop-blur",
+                "lg:bottom-6",
+            )}
+            role="status"
+            aria-label="OT sin casillero en la cañera"
+        >
+            <span className="max-w-[22rem] px-0.5 text-xs text-gray-700">
+                <b className="text-green-700">Material disponible.</b>{" "}
+                {ots.length === 1 ? "Esta OT no tiene" : `Estas ${ots.length} OT no tienen`} casillero en la cañera: ¿dónde quedó?
+            </span>
+            {ots.map((o) => (
+                <Popover key={o.id} open={abierta === o.id} onOpenChange={(v) => setAbierta(v ? o.id : null)}>
+                    <PopoverTrigger asChild>
+                        <Accion
+                            icono={<MapPin className="h-3.5 w-3.5" />}
+                            titulo={`Ubicar la OT ${o.numero}${o.cliente ? ` (${o.cliente})` : ""} en la cañera`}
+                        >
+                            OT {o.numero}
+                        </Accion>
+                    </PopoverTrigger>
+                    <PopoverContent side="top" className="w-[26rem] max-w-[calc(100vw-1.5rem)] p-3">
+                        {abierta === o.id && (
+                            <CaneraElegirCelda
+                                canera={canera}
+                                titulo={`Ubicar la OT ${o.numero} en la cañera`}
+                                onElegir={(c) => {
+                                    setAbierta(null);
+                                    onUbicar(o, c);
+                                }}
+                            />
+                        )}
+                    </PopoverContent>
+                </Popover>
+            ))}
+            <button
+                type="button"
+                onClick={onCerrar}
+                className="rounded-md px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+            >
+                Ahora no
             </button>
         </div>
     );

@@ -47,13 +47,32 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "pendientes-como-en-el-integral",
+        fecha: "2026-09-25",
+        tipo: "mejora",
+        seccion: "Materia prima",
+        titulo: "En Pendientes ves los cortes de cada material y la semana sale del plan semanal del Sistema Integral",
+        detalle:
+            "En Materia prima, solapa «Pendientes», cada material tiene la columna «Cortes (mm)» con las piezas que se cortan de él (por ejemplo «34 × 63») y, abajo, los metros que suman contando la sierra; si pasás el mouse o la tocás, se ven todos los cortes con la cuenta. Los metros salen sólo cuando sirven para comprar: si el material va en metros o son cortes de barra. En una chapa que va en Kg no se muestran, y lo mismo en la solapa Materias Primas de cada orden. La semana sale del plan semanal del Sistema Integral, la misma que ve Maxi allá: debajo de la fecha dice de dónde sale, y si esa semana todavía no tiene órdenes en el plan te lo avisa y te muestra todas las abiertas. Al imprimir la lista para pedir agrupada por proveedor, queda afuera lo que ya llegó, así no se vuelve a encargar. Y cuando marcás «Disponible», te pregunta en qué casillero de la cañera quedó el material de esa orden; si la orden ya tiene casillero, o su material ya estaba disponible, no pregunta.",
+        href: "/materia-prima",
+    },
+    {
+        id: "avisos-se-vuelven-a-abrir",
+        fecha: "2026-09-25",
+        tipo: "mejora",
+        seccion: "Todo el sistema",
+        titulo: "El aviso que sale al entrar se vuelve a abrir desde el menú, aunque lo hayas cerrado",
+        detalle:
+            "Abajo en el menú de la izquierda, al lado de tu nombre, hay un megáfono: lo tocás y se abre de nuevo el último aviso, con su botón para ir a Novedades. Mientras tenga un puntito rojo es que hay un aviso que todavía no leíste. El puntito se apaga cuando tocás «Entendido» o «Ver todas las novedades», o cuando lo tuviste abierto un rato; si lo cerrás enseguida, sigue prendido. Con el menú achicado, el megáfono está arriba de tu inicial, y en el teléfono el puntito se ve también en el botón redondo del menú. Antes el aviso salía una sola vez: si lo cerrabas sin leerlo, no había cómo volver a verlo.",
+    },
+    {
         id: "materia-prima-seccion-nueva",
         fecha: "2026-09-24",
         tipo: "nuevo",
         seccion: "Materia prima",
         titulo: "Pantalla nueva «Materia prima»: lo que falta comprar en la semana, cada insumo con su stock y la cañera",
         detalle:
-            "Durante la prueba piloto las materias primas se siguen cargando en el Sistema Integral, como siempre: esta pantalla y la solapa Materias Primas de cada orden las muestran con las marcas de allá (pedido, reservado, disponible, en producción) y se actualizan solas cada 30 minutos. Por ahora son de sólo lectura, así nadie las carga dos veces. En el menú de la izquierda, debajo de Operaciones, está «Materia prima», con tres solapas. En «Pendientes» está lo que falta para las órdenes de la semana (las que el plan pone a trabajar, o todas las abiertas), con el proveedor y la fecha que prometió. En «Insumos» está el catálogo, con los mismos códigos del Sistema Integral: cada insumo con su stock, sus recortes, en qué órdenes se usó y sus precios, y el punto crítico que antes estaba en la solapa Materia Prima de Operaciones. En «Cañera», en qué estante quedó el material cortado de cada orden. Y la columna Material de las listas dice «Falta pedir» donde decía «Sin stock», y «Pedido / reservado» cuando ya está encargado o apartado; la línea «TRABAJO SIN MATERIAL» (TRA011) cuenta como lista aunque nadie la tilde.",
+            "Durante la prueba piloto las materias primas se siguen cargando en el Sistema Integral, como siempre: esta pantalla y la solapa Materias Primas de cada orden las muestran con las marcas de allá (pedido, reservado, disponible, en producción) y se actualizan solas cada 10 minutos. Por ahora son de sólo lectura, así nadie las carga dos veces. En el menú de la izquierda, debajo de Operaciones, está «Materia prima», con tres solapas. En «Pendientes» está lo que falta para las órdenes de la semana (las que el plan pone a trabajar, o todas las abiertas), con el proveedor y la fecha que prometió. En «Insumos» está el catálogo, con los mismos códigos del Sistema Integral: cada insumo con su stock, sus recortes, en qué órdenes se usó y sus precios, y el punto crítico que antes estaba en la solapa Materia Prima de Operaciones. En «Cañera», en qué estante quedó el material cortado de cada orden. Y la columna Material de las listas dice «Falta pedir» donde decía «Sin stock», y «Pedido / reservado» cuando ya está encargado o apartado; la línea «TRABAJO SIN MATERIAL» (TRA011) cuenta como lista aunque nadie la tilde.",
         href: "/materia-prima",
     },
     {
@@ -1606,14 +1625,17 @@ export const TIPO_META: Record<NovedadTipo, { label: string; cls: string; dot: s
  * EL AVISO QUE SALE AL ENTRAR
  *
  * Un cartel que se abre solo la primera vez que alguien entra después de un
- * cambio grande, y no vuelve a salir. Nace de la semana del 11 al 15/09/2026:
+ * cambio grande, y no vuelve a salir solo. Desde el 25/09/2026 se lo puede volver a
+ * abrir con el megáfono de abajo del menú, que lleva un puntito mientras no se leyó
+ * (components/BotonAviso.tsx). Nace de la semana del 11 al 15/09/2026:
  * el taller frenó el uso del sistema porque los procesos se le veían
  * desordenados, y avisar eso por WhatsApp no alcanza — el que abre el sistema
  * un lunes a la mañana no leyó el grupo.
  *
  * Para cambiarlo: se edita el texto de acá y SE CAMBIA EL `id`. El id es lo que
- * decide si a alguien ya se le mostró (se guarda en el navegador), así que
- * cambiar el texto sin cambiar el id no se lo muestra a nadie que ya lo cerró.
+ * decide si a alguien ya se le mostró y si ya lo leyó (se guarda en el navegador),
+ * así que cambiar el texto sin cambiar el id no se lo muestra a nadie que ya lo
+ * cerró ni le prende el puntito del megáfono.
  *
  * Para apagarlo: `export const AVISO_AL_ENTRAR = null;`
  * ──────────────────────────────────────────────────────────────────────────── */
@@ -1648,14 +1670,17 @@ export const AVISO_AL_ENTRAR: AvisoAlEntrar | null = {
     id: "2026-09-24-materia-prima-piloto",
     fecha: "2026-09-24",
     titulo: "Materias primas: se ven acá, se siguen cargando en el Sistema Integral",
+    // Decía «Esto sale una sola vez»: desde el 25/09 también se abre a pedido, desde el
+    // megáfono, y ahí esa frase no se entendía. Cambiar el texto sin cambiar el `id` no
+    // se lo vuelve a mostrar a nadie (ver arriba), que es lo que se quiere.
     bajada:
-        "Esto sale una sola vez. Después queda todo en Novedades, en el menú de la izquierda.",
+        "Si lo cerrás, lo volvés a abrir con el megáfono de abajo del menú de la izquierda. Y todo queda en Novedades.",
     bloques: [
         {
             titulo: "Durante la prueba piloto",
             puntos: [
                 "**Las materias primas se siguen cargando en el Sistema Integral**, como siempre: lo que lleva cada orden y lo que se pide.",
-                "**Acá se ven con sus marcas reales** (pedido, reservado, disponible, en producción) **y se actualizan solas cada 30 minutos.** Son de sólo lectura, para que nada se cargue dos veces.",
+                "**Acá se ven con sus marcas reales** (pedido, reservado, disponible, en producción) **y se actualizan solas cada 10 minutos.** Son de sólo lectura, para que nada se cargue dos veces.",
                 "**Hay una pantalla nueva, «Materia prima»**, en el menú de la izquierda, debajo de Operaciones. Y en cada orden, la solapa Materias Primas muestra lo mismo.",
             ],
         },

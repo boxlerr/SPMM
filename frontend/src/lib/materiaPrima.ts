@@ -159,14 +159,14 @@ export type DuenoMP = "integral" | "spmm";
  * El cartel del modo espejo cuando el backend no manda el suyo (`aviso_dueno`, que es el
  * que vale: lo escribe quien sabe cada cuánto corre el sync).
  *
- * Tiene que decir cada cuánto llega lo del Integral: el sync lo trae cada 30 minutos, y
- * un «se actualizan solas» a secas se lee como «al instante». Carolina carga allá, mira
+ * Tiene que decir cada cuánto llega lo del Integral: el sync lo trae cada 10 minutos
+ * (antes del 25/09 eran 30), y un «se actualizan solas» a secas se lee como «al instante». Carolina carga allá, mira
  * acá, no lo ve y lo carga de nuevo; o Maxi compra algo que ya se había pedido.
  */
 export const AVISO_ESPEJO =
     "Prueba piloto: las materias primas se siguen cargando en el Sistema Integral. " +
-    "SPMM las trae de allá cada 30 minutos, con sus marcas reales: lo que se carga allá " +
-    "puede tardar hasta media hora en verse acá.";
+    "SPMM las trae de allá cada 10 minutos, con sus marcas reales: lo que se carga allá " +
+    "puede tardar hasta 10 minutos en verse acá.";
 
 /** `POST /materia-prima/materiales`. */
 export interface MaterialIn {
@@ -721,10 +721,24 @@ export interface ResumenPendientes {
     lineas_listas: number;
 }
 
+/**
+ * De dónde sale «la semana» de Pendientes:
+ *  · `integral`: del plan semanal del Sistema Integral, el que arma Maxi (mientras el
+ *    dueño de las materias primas es el Integral: la prueba piloto);
+ *  · `spmm`: del planificador de Metlosys (las OT abiertas con algún proceso que arranca
+ *    antes del domingo).
+ */
+export type FuenteSemana = "integral" | "spmm";
+
 /** `GET /materia-prima/pendientes`. */
 export interface Pendientes {
     /** La semana que se miró (lunes a domingo). Null con «Todas las OT abiertas» o con una OT sola. */
     semana: { desde: FechaISO; hasta: FechaISO } | null;
+    /**
+     * De dónde sale la semana (ver `FuenteSemana`). Opcional: un backend de antes no lo
+     * manda, y entonces es la de siempre, el planificador de Metlosys.
+     */
+    fuente_semana?: FuenteSemana | null;
     resumen: ResumenPendientes;
     ots: OTPendiente[];
     lineas: LineaPendiente[];
@@ -1240,18 +1254,81 @@ export const ROTULO_ESTADO_RECORTE: Record<EstadoRecorte, string> = {
     descartado: "Descartado",
 };
 
+// ═══════════════════════════ cortes: los metros que se muestran ═══════════════════════════
+
 /**
- * Dónde está una línea, para pintarla. Es el MISMO corte que las tarjetas de
- * Pendientes (que cuenta el backend): lista = disponible; esperando = pedida o
- * reservada y todavía no disponible; falta pedir = ninguna de las tres. Una línea no
- * utilizada no está en ninguna: no entra en Pendientes ni en el estado del material.
+ * La línea va en metros: la unidad es «Mts», con cualquier mayúscula (también «M», «Mt» o
+ * «Metros», si vinieron así del viejo). Sólo ahí se compara la cantidad con los metros
+ * que piden los cortes.
+ */
+export const enMetros = (l: { unidad?: string | null }): boolean =>
+    /^(MTS?|M|METROS?)\.?$/.test((l.unidad ?? "").trim().toUpperCase());
+
+/**
+ * Los metros que piden los cortes (`sugerido_m`), si tiene sentido mostrarlos; si no,
+ * null. Tienen sentido cuando la línea va en metros, o cuando ningún corte tiene ancho
+ * (barras, tubos: aunque la línea vaya en unidades, saber que hacen falta 3,3 m sirve
+ * para comprar). Un corte con ancho es de chapa: si la línea no va en metros, la suma de
+ * los largos no es nada que se compre (una chapa en Kg cortada en 1.220 × 600 no
+ * «lleva 2,45 m»).
+ *
+ * La MISMA regla en Pendientes (la celda, el papel y la planilla) y en la solapa
+ * Materias primas de la OT (el botón de los cortes y su diálogo).
+ */
+export function metrosQueSeMuestran(l: {
+    unidad?: string | null;
+    sugerido_m?: number | null;
+    cortes?: readonly { ancho_mm?: number | null }[] | null;
+}): number | null {
+    if (l.sugerido_m === null || l.sugerido_m === undefined) return null;
+    if (enMetros(l)) return l.sugerido_m;
+    return (l.cortes ?? []).some((c) => !!c.ancho_mm) ? null : l.sugerido_m;
+}
+
+/**
+ * «Compra corta»: la línea va en metros y pide menos de lo que hace falta para sus
+ * cortes. Pasa cuando alguien cambió los cortes y no la cantidad (o al revés).
+ */
+export function compraCorta(l: { unidad?: string | null; cantidad: number; sugerido_m?: number | null }): boolean {
+    return enMetros(l) && l.sugerido_m !== null && l.sugerido_m !== undefined && l.cantidad + 1e-9 < l.sugerido_m;
+}
+
+/**
+ * Lo que queda por conseguir de una línea: la columna «Falta» de Pendientes. Nada si ya
+ * está disponible o pedida; si no, la cantidad menos lo que cubre su reserva.
+ *
+ * ESPEJO de `falta_de` del backend (MateriaPrimaOTService). Pendientes la recibe hecha
+ * en cada línea, pero el guardado de una línea vuelve sin ella, y la solapa de la OT no
+ * la trae: por eso se calcula también acá, con la misma regla.
+ */
+export function faltaDeLinea(l: Pick<Linea, "disponible" | "pedido" | "reserva" | "cantidad" | "cantidad_reservada">): number {
+    if (l.disponible || l.pedido) return 0;
+    const cubierto = l.reserva ? (l.cantidad_reservada ?? 0) : 0;
+    return Math.max(0, Math.round(((l.cantidad ?? 0) - cubierto) * 1000) / 1000);
+}
+
+/**
+ * Dónde está una línea, para pintarla, contarla en las tarjetas de Pendientes y ordenarla:
+ *  · lista = disponible (cortada y en la cañera);
+ *  · esperando = pedida, o reservada del stock ENTERA, y todavía no disponible: no hay
+ *    nada que comprar;
+ *  · falta pedir = todo lo demás: ni pedida ni reservada, o con una reserva que no
+ *    alcanza (reserva parcial: `faltaDeLinea` > 0; lo que falta hay que encargarlo).
+ * Una línea no utilizada no está en ninguna: no entra en Pendientes ni en el estado del
+ * material.
+ *
+ * Ojo: el `resumen` que manda el backend en Pendientes cuenta una reserva parcial como
+ * «esperando». La pantalla no lo usa (cuenta las tarjetas con esto, sobre las líneas).
  */
 export type EstadoLinea = "lista" | "esperando" | "falta_pedir" | "no_usada";
 
-export function estadoLinea(l: Pick<Linea, "usado" | "disponible" | "pedido" | "reserva">): EstadoLinea {
+export function estadoLinea(
+    l: Pick<Linea, "usado" | "disponible" | "pedido" | "reserva" | "cantidad" | "cantidad_reservada">,
+): EstadoLinea {
     if (!l.usado) return "no_usada";
     if (l.disponible) return "lista";
-    if (l.pedido || l.reserva) return "esperando";
+    if (l.pedido) return "esperando";
+    if (l.reserva) return faltaDeLinea(l) > 0 ? "falta_pedir" : "esperando";
     return "falta_pedir";
 }
 
@@ -1266,19 +1343,19 @@ export const ESTADOS_LINEA: Record<EstadoLinea, {
 }> = {
     lista: {
         rotulo: "Lista",
-        titulo: "El material está disponible para producción.",
+        titulo: "Cortado y en la cañera: el operario lo puede retirar.",
         fila: "bg-green-50/70",
         chip: "bg-green-50 text-green-700 border-green-200",
     },
     esperando: {
         rotulo: "Esperando",
-        titulo: "Está pedido al proveedor o reservado del stock, y todavía no está disponible.",
+        titulo: "Está pedido al proveedor o reservado entero del stock, y todavía no está disponible.",
         fila: "bg-amber-50/70",
         chip: "bg-amber-50 text-amber-700 border-amber-200",
     },
     falta_pedir: {
         rotulo: "Falta pedir",
-        titulo: "No está disponible, ni pedido, ni reservado: hay que encargarlo.",
+        titulo: "No está disponible ni pedido, y lo reservado del stock (si hay) no alcanza: hay que encargarlo.",
         // Borde y no fondo: es la mayoría de las filas de Pendientes, y una grilla
         // entera en rojo no deja ver nada. El borde marca sin gritar.
         fila: "border-l-4 border-l-red-500",

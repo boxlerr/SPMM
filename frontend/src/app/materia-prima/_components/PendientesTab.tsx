@@ -10,11 +10,36 @@
  *
  * LA SEMANA
  *
- * En el viejo salía de un plan semanal cargado a mano. Acá la pone el planificador: una
- * OT «es de la semana» si está abierta y tiene algún proceso planificado que arranca
- * antes del domingo (incluye las que se arrastran). Lo resuelve el backend; la pantalla
- * elige el lunes. Además: «Todas las OT abiertas» (sin mirar el plan) y una OT sola
- * (el N° OT, o tocarla en la cañera de arriba).
+ * Lo resuelve el backend, y dice de dónde la sacó (`fuente_semana`):
+ *  · en la prueba piloto (dueño «integral»), del plan semanal del Sistema Integral, el
+ *    que arma Maxi a mano: la semana se ve como la ve él allá;
+ *  · con SPMM de dueño («spmm», o un backend que no lo manda), del planificador de
+ *    Metlosys: una OT «es de la semana» si está abierta y tiene algún proceso planificado
+ *    que arranca antes del domingo (incluye las que se arrastran).
+ * La pantalla elige el lunes, y al lado de la semana dice de dónde sale. Además: «Todas
+ * las OT abiertas» (sin mirar el plan) y una OT sola (el N° OT, o tocarla en la cañera
+ * de arriba).
+ *
+ * Si la semana con la que abre la pantalla viene VACÍA (Maxi todavía no cargó el plan de
+ * esa semana en el Integral, o no se planificó nada en Metlosys), pasa sola a
+ * «Todas las OT abiertas» con un cartel que lo dice y «Ver sólo la semana». Sólo esa
+ * vez: si la persona eligió una semana (flechas, calendario, «Esta semana») o tocó el
+ * interruptor, se respeta y queda el vacío con su explicación. Mientras cambia no se ve
+ * el vacío ni las tarjetas en cero: se ve «Buscando…» hasta que llegan las abiertas.
+ *
+ * LO QUE SE VE AL ENTRAR
+ *
+ * Todas las líneas de la semana, como en el viejo (Lucas, 23/09: «lo que aparece es
+ * todo, todos los materiales de las que están programadas»; su «Pendientes» también
+ * muestra lo disponible), y los radios y las tarjetas lo recortan.
+ *
+ * EL ORDEN
+ *
+ * Arriba lo que falta pedir, después lo pedido que se espera y al final lo listo; dentro
+ * de cada grupo, por N° de OT y en el orden de carga (ver `RANGO_ESTADO`). «Falta
+ * pedir» es `estadoLinea`: también una línea reservada A MEDIAS (el stock no alcanza y
+ * hay que comprar el resto), que el backend ordena y cuenta como pedida. El orden se
+ * arma con la lista que se ve (ver abajo): tildar no mueve las filas.
  *
  * QUÉ SE VE Y CUÁNDO CAMBIA
  *
@@ -77,16 +102,20 @@ import {
     type CambiosDeLote,
     type EstadoLinea,
     type FiltroPendientes,
+    type FuenteSemana,
     type LineaPendiente,
     type OTPendiente,
 } from "@/lib/materiaPrima";
+import { DialogoCortes } from "@/components/materiales/MateriasPrimasOTDialogos";
+import { filaDeLinea, sugerenciaMetros } from "@/components/materiales/MateriasPrimasOTDatos";
 import { CaneraContexto, celdasPorOT, useCanera, type ContextoCanera } from "./CaneraDatos";
 import { GrillaCanera } from "./GrillaCanera";
 import { useConfirmarForzar } from "./PendientesForzar";
-import { usePendientes } from "./PendientesDatos";
+import { usePendientes, type CambiosVista } from "./PendientesDatos";
+import { useCatalogosMP } from "./InsumoCatalogos";
 import { useRefrescoEspejo } from "./ModoEspejo";
-import { FilaPendiente, Th, type AccionesFila } from "./PendientesFila";
-import { BarraDeAcciones } from "./PendientesAcciones";
+import { casilleroPreguntado, FilaPendiente, Th, type AccionesFila } from "./PendientesFila";
+import { AvisoCasilleros, BarraDeAcciones, type OTSinCasillero } from "./PendientesAcciones";
 import { COLUMNAS_EXPORT, imprimirGrilla, imprimirPorProveedor, type FilaSalida } from "./PendientesImprimir";
 
 export interface PendientesTabProps {
@@ -112,6 +141,29 @@ const claveProveedor = (s: string | null | undefined) => (s ?? "").trim().replac
 const normalBusqueda = (s: string | null | undefined) =>
     (s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ");
 
+/**
+ * El casillero escrito al principio de una observación, como se anotaba en el viejo:
+ * «E4 - soporte…», «K3», «i3», «k1-». Una letra de la A a la O pegada a un dígito del 1 al
+ * 9, y nada de letra o número después (así «B12» o «A1B» no cuentan).
+ */
+const COORD_EN_OBS = /^\s*([A-Oa-o])([1-9])(?![0-9A-Za-z])/;
+
+/** El radio con el que arranca: todo, como el viejo (lo pendiente queda arriba por el orden). */
+const FILTRO_INICIAL: FiltroPendientes = "todas";
+
+/** El orden de los grupos: lo que falta pedir, lo que se espera, lo listo (ver arriba, EL ORDEN). */
+const RANGO_ESTADO: Record<EstadoLinea, number> = { falta_pedir: 0, esperando: 1, lista: 2, no_usada: 3 };
+
+/** Dentro de un grupo: N° de OT (sin número, al final), orden de carga e id, como el backend. */
+function compararLineas(a: LineaPendiente, b: LineaPendiente): number {
+    return (
+        RANGO_ESTADO[estadoLinea(a)] - RANGO_ESTADO[estadoLinea(b)] ||
+        (a.numero_ot ?? Number.POSITIVE_INFINITY) - (b.numero_ot ?? Number.POSITIVE_INFINITY) ||
+        (a.orden ?? 0) - (b.orden ?? 0) ||
+        a.id - b.id
+    );
+}
+
 /** Una fila de la lista que se ve: la línea (por id) y cómo se agrupa con sus vecinas. */
 interface Visible {
     id: number;
@@ -127,10 +179,16 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
     // ─────────────── filtros ───────────────
     const [semana, setSemana] = useState(() => lunesDe(hoyISO()));
     const [todasAbiertas, setTodasAbiertas] = useState(false);
+    /**
+     * La persona eligió la semana o tocó el interruptor: la pantalla ya no cambia sola a
+     * «Todas las OT abiertas» cuando la semana viene vacía (ver arriba).
+     */
+    const [semanaElegida, setSemanaElegida] = useState(false);
+    /** El lunes de la semana que vino vacía y por eso se pasó sola a «Todas las OT abiertas». */
+    const [semanaVacia, setSemanaVacia] = useState<string | null>(null);
     const [otTexto, setOtTexto] = useState(otInicial ? String(otInicial) : "");
     const [ot, setOt] = useState<number | null>(otInicial ?? null);
-    // Con una OT sola, lo normal es querer verla entera (lo que llegó también).
-    const [filtro, setFiltro] = useState<FiltroPendientes>(otInicial ? "todas" : "pendientes");
+    const [filtro, setFiltro] = useState<FiltroPendientes>(FILTRO_INICIAL);
     const [estadoRapido, setEstadoRapido] = useState<EstadoLinea | null>(null);
     const [busqueda, setBusqueda] = useState("");
     const busquedaDiferida = useDeferredValue(busqueda);
@@ -146,11 +204,50 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
     }, [otTexto, ot]);
 
     const p = usePendientes({ semana, todasAbiertas, ot }, confirmar);
+    /**
+     * De dónde sale la semana (ver arriba, LA SEMANA). Se recuerda la última que llegó: la
+     * respuesta de «Todas las OT abiertas» no mira la semana y puede no traerla, y el cartel
+     * de la semana vacía la sigue necesitando. Sin dato (un backend de antes): Metlosys.
+     */
+    const fuenteLlegada = p.datos?.fuente_semana ?? null;
+    const [fuenteRecordada, setFuenteRecordada] = useState<FuenteSemana | null>(null);
+    useEffect(() => {
+        if (fuenteLlegada) setFuenteRecordada(fuenteLlegada);
+    }, [fuenteLlegada]);
+    const fuenteSemana = fuenteLlegada ?? fuenteRecordada;
+    const semanaDelIntegral = fuenteSemana === "integral";
+    /** La aclaración chica debajo de la semana. Hasta que llega la primera respuesta, nada. */
+    const origenSemana = p.datos || fuenteSemana ? (semanaDelIntegral ? "Plan semanal del Integral" : "Planificador de Metlosys") : null;
     // Modo espejo: lo que marcan en el Integral aparece solo (lo mismo que «Actualizar»).
     useRefrescoEspejo(espejo && activo, () => {
         void p.recargar();
         void canera.recargar();
     });
+
+    /**
+     * La semana con la que abrió vino vacía: se pasa sola a «Todas las OT abiertas».
+     * `p.alDia`, `!p.cargando` y `!p.error`: lo que hay en `p.datos` es la respuesta de
+     * ESTA semana (no la de antes, ni un error). Una vez que pasó, `todasAbiertas` queda
+     * prendido, así que el refresco del modo espejo no lo vuelve a disparar.
+     */
+    const pasarATodas =
+        !semanaElegida && !todasAbiertas && ot === null && !!p.datos && p.alDia && !p.cargando && !p.error && p.datos.ots.length === 0;
+    useEffect(() => {
+        if (!pasarATodas) return;
+        setSemanaVacia(semana);
+        setTodasAbiertas(true);
+        setEstadoRapido(null);
+    }, [pasarATodas, semana]);
+    /** Tocó la semana: desde ahí manda la persona. Si se había pasado sola a todas las abiertas, vuelve a la semana. */
+    const elegirSemana = (nueva: string) => {
+        setSemanaElegida(true);
+        if (semanaVacia) {
+            setSemanaVacia(null);
+            setTodasAbiertas(false);
+        }
+        setSemana(nueva);
+        setEstadoRapido(null);
+    };
 
     // ─────────────── cañera de arriba ───────────────
     const [caneraAbierta, setCaneraAbierta] = useState(true);
@@ -180,6 +277,18 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
     // ─────────────── lo que se ve ───────────────
     const lineas = p.lineas;
     const porId = useMemo(() => new Map(lineas.map((l) => [l.id, l])), [lineas]);
+    /** Por OT, los casilleros que dicen sus observaciones («E4 G4»): se muestran si la cañera no la tiene. */
+    const coordObsPorOT = useMemo(() => {
+        const porOT = new Map<number, Set<string>>();
+        for (const l of lineas) {
+            const m = COORD_EN_OBS.exec(l.observaciones ?? "");
+            if (!m) continue;
+            const s = porOT.get(l.id_orden_trabajo) ?? new Set<string>();
+            s.add(`${m[1].toUpperCase()}${m[2]}`);
+            porOT.set(l.id_orden_trabajo, s);
+        }
+        return new Map([...porOT].map(([id, s]) => [id, [...s].sort().join(" ")]));
+    }, [lineas]);
     const otsPorId = useMemo(() => new Map((p.datos?.ots ?? []).map((o) => [o.id, o])), [p.datos?.ots]);
 
     /**
@@ -203,7 +312,7 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
         const salida: Visible[] = [];
         let otAnterior: number | null = null;
         let tramo = -1;
-        for (const l of lineas) {
+        for (const l of [...lineas].sort(compararLineas)) {
             if (filtro === "pendientes" && l.disponible) continue;
             if (filtro === "parciales") {
                 const e = parcial.get(l.id_orden_trabajo);
@@ -311,11 +420,33 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
 
     // ─────────────── acciones ───────────────
     const otsPorIdRef = useRef(otsPorId);
+    const lineasRef = useRef(lineas);
+    const contextoCaneraRef = useRef(contextoCanera);
     useEffect(() => {
         otsPorIdRef.current = otsPorId;
-    }, [otsPorId]);
+        lineasRef.current = lineas;
+        contextoCaneraRef.current = contextoCanera;
+    }, [otsPorId, lineas, contextoCanera]);
     const { guardar, guardarLote } = p;
     const asignarCelda = canera.asignar;
+    /** Ubicar una OT en un casillero (desde la fila o desde el aviso de «Marcar disponible» en lote). */
+    const ubicarOT = useCallback(
+        (idOT: number, numero: number, celda: string) => {
+            const o = otsPorIdRef.current.get(idOT);
+            const suyas = lineasRef.current.filter((x) => x.id_orden_trabajo === idOT);
+            void asignarCelda(celda, numero, {
+                id_orden_trabajo: idOT,
+                cliente: o?.cliente ?? null,
+                articulo: o?.articulo ?? null,
+                // Lo que se sabe ya: si todas sus líneas están listas, verde; si no, ámbar.
+                // El backend manda el de verdad en la respuesta.
+                estado_material: suyas.length > 0 && suyas.every((x) => x.disponible) ? "ok" : "pedido",
+            });
+        },
+        [asignarCelda],
+    );
+    /** La línea cuyos cortes se editan (el diálogo de la OT, reusado). */
+    const [idCortes, setIdCortes] = useState<number | null>(null);
     const acciones = useMemo<AccionesFila>(
         () => ({
             guardar,
@@ -324,27 +455,71 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
             verInsumo: (idPieza) => router.push(`/materia-prima?tab=insumos&pieza=${idPieza}`),
             ubicar: (l, celda) => {
                 if (l.numero_ot === null || l.numero_ot === undefined) return;
-                const o = otsPorIdRef.current.get(l.id_orden_trabajo);
-                void asignarCelda(celda, l.numero_ot, {
-                    id_orden_trabajo: l.id_orden_trabajo,
-                    cliente: o?.cliente ?? null,
-                    articulo: o?.articulo ?? null,
-                    // Lo que se sabe ya: si todas sus líneas están listas, verde; si no, ámbar.
-                    // El backend manda el de verdad en la respuesta.
-                    estado_material: o && o.lineas_total > 0 && o.lineas_listas >= o.lineas_total ? "ok" : "pedido",
-                });
+                ubicarOT(l.id_orden_trabajo, l.numero_ot, celda);
             },
+            editarCortes: (id) => setIdCortes(id),
         }),
-        [guardar, seleccionar, router, asignarCelda],
+        [guardar, seleccionar, router, ubicarOT],
     );
+    const { catalogos } = useCatalogosMP();
+    const espesorSierra = catalogos?.espesor_sierra_mm ?? 3;
+    const lineaCortes = idCortes !== null ? (porId.get(idCortes) ?? null) : null;
+    // Sólo cuando cambia la línea: el diálogo se reinicia con la `clave` de la fila.
+    const filaCortes = useMemo(() => (lineaCortes ? filaDeLinea(lineaCortes) : null), [lineaCortes]);
+    const guardarCortes = (cortes: CambiosVista["cortes"] | null, cantidad: { cantidad: number; unidad: string } | null) => {
+        if (idCortes === null) return;
+        const cambios: CambiosVista = {};
+        if (cortes) {
+            cambios.cortes = cortes;
+            cambios.sugerido_m = sugerenciaMetros(cortes, espesorSierra);
+        }
+        if (cantidad) {
+            cambios.cantidad = cantidad.cantidad;
+            cambios.unidad = cantidad.unidad;
+        }
+        if (Object.keys(cambios).length) void guardar(idCortes, cambios);
+    };
     const [lotePendiente, setLotePendiente] = useState(false);
+    /**
+     * Las OT que quedaron sin casillero después de «Marcar disponible» en lote: el aviso de
+     * abajo pregunta dónde quedó el material de cada una, como la casilla de una fila (ver
+     * CasillaDisponible en PendientesFila). Se pregunta una vez por OT.
+     */
+    const [sinCasillero, setSinCasillero] = useState<OTSinCasillero[]>([]);
+    const ofrecerCasilleros = (ids: number[]) => {
+        const ctx = contextoCaneraRef.current;
+        if (!ctx.estado.canera) return;
+        const porLinea = new Map(lineasRef.current.map((l) => [l.id, l]));
+        const vistas = new Set<number>();
+        const nuevas: OTSinCasillero[] = [];
+        for (const id of ids) {
+            const l = porLinea.get(id);
+            if (!l || l.numero_ot === null || l.numero_ot === undefined || vistas.has(l.id_orden_trabajo)) continue;
+            vistas.add(l.id_orden_trabajo);
+            if (casilleroPreguntado.has(l.id_orden_trabajo)) continue;
+            if ((ctx.celdasPorOT.get(l.id_orden_trabajo) ?? []).length) continue;
+            casilleroPreguntado.add(l.id_orden_trabajo);
+            const o = otsPorIdRef.current.get(l.id_orden_trabajo);
+            nuevas.push({ id: l.id_orden_trabajo, numero: l.numero_ot, cliente: o?.cliente ?? null });
+        }
+        if (nuevas.length) setSinCasillero((antes) => [...antes.filter((a) => !nuevas.some((n) => n.id === a.id)), ...nuevas]);
+    };
     const aplicarLote = async (cambios: CambiosDeLote, que: string) => {
         const ids = [...seleccion];
+        // Las que ya estaban disponibles ANTES del lote: su material ya se guardó (y su
+        // casillero ya se preguntó, o se anotó en el viejo). Una OT cuyas líneas elegidas
+        // ya estaban todas disponibles no se pregunta.
+        const yaDisponibles = new Set(ids.filter((id) => porId.get(id)?.disponible));
         setLotePendiente(true);
         const ok = await guardarLote(ids, cambios, que);
         setLotePendiente(false);
-        if (ok) setSeleccion(new Set());
+        if (!ok) return;
+        setSeleccion(new Set());
+        // Sólo si quedó: si falló, las líneas volvieron atrás y no hay nada que ubicar.
+        if (cambios.disponible === true) ofrecerCasilleros(ids.filter((id) => !yaDisponibles.has(id)));
     };
+    // Las que ya tienen casillero (se ubicaron desde una fila, o llegó la cañera) no se preguntan.
+    const sinCasilleroVisibles = sinCasillero.filter((o) => !(contextoCanera.celdasPorOT.get(o.id) ?? []).length);
     const quitarMarcas = async () => {
         const ids = [...seleccion];
         const reservadasDisponibles = ids.filter((id) => {
@@ -369,8 +544,12 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
         return visibles
             .map((v) => porId.get(v.id))
             .filter((l): l is LineaPendiente => !!l)
-            .map((l) => ({ linea: l, celdas: mapa ? (mapa.get(l.id_orden_trabajo) ?? []) : (l.celdas ?? []) }));
-    }, [visibles, porId, contextoCanera]);
+            .map((l) => ({
+                linea: l,
+                celdas: mapa ? (mapa.get(l.id_orden_trabajo) ?? []) : (l.celdas ?? []),
+                coordObs: coordObsPorOT.get(l.id_orden_trabajo),
+            }));
+    }, [visibles, porId, contextoCanera, coordObsPorOT]);
 
     const rotuloUniverso = ot
         ? `OT ${ot}`
@@ -419,22 +598,21 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                     seleccionada={seleccion.has(v.id)}
                     primera={v.primera}
                     zebra={v.zebra}
+                    coordObs={coordObsPorOT.get(l.id_orden_trabajo)}
                     acciones={acciones}
                 />
             );
         },
-        [porId, otsPorId, edita, seleccion, acciones],
+        [porId, otsPorId, edita, seleccion, acciones, coordObsPorOT],
     );
 
-    const irASemana = (dias: number) => {
-        setSemana((s) => lunesDe(sumarDias(s, dias)));
-        setEstadoRapido(null);
-    };
+    const irASemana = (dias: number) => elegirSemana(lunesDe(sumarDias(semana, dias)));
     const estaSemana = lunesDe(hoyISO());
-    const semanaInactiva = todasAbiertas || ot !== null;
-    const hayFiltrosLocales = filtro !== "pendientes" || !!estadoRapido || !!proveedor || !!busqueda.trim();
+    // Pasada sola a todas las abiertas: la semana sigue a mano (tocarla vuelve a la semana).
+    const semanaInactiva = (todasAbiertas && !semanaVacia) || ot !== null;
+    const hayFiltrosLocales = filtro !== FILTRO_INICIAL || !!estadoRapido || !!proveedor || !!busqueda.trim();
     const limpiarFiltrosLocales = () => {
-        setFiltro("pendientes");
+        setFiltro(FILTRO_INICIAL);
         setEstadoRapido(null);
         setProveedor("");
         setBusqueda("");
@@ -461,8 +639,19 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
     };
 
     const elegidas = [...seleccion].map((id) => porId.get(id)).filter((l): l is LineaPendiente => !!l);
-    const universoVacio = !!p.datos && p.datos.ots.length === 0;
+    // Vacío «de verdad»: no mientras se pasa sola a las abiertas, ni mientras llega otro
+    // universo (se veía el vacío de antes, o el de la semana, un instante). Con `!p.alDia` y
+    // NO con `p.cargando`: el refresco del espejo (cada 90 s y al volver a la ventana) pide
+    // otra vez la MISMA consulta, y con `p.cargando` un vacío elegido (la semana, que en el
+    // piloto viene siempre vacía) se tapaba con «Buscando…» y las tarjetas en cada vuelta.
+    const esperandoUniverso = pasarATodas || (!p.alDia && !p.error && (!p.datos || p.datos.ots.length === 0));
+    // Falló el pedido de OTRO universo y lo de antes estaba vacío: ese vacío no es la
+    // respuesta (semana vacía + las abiertas caídas decía «No hay OT abiertas con materias
+    // primas»). El cartel rojo con «Reintentar» ya dice lo que pasa.
+    const vacioDeOtraConsulta = !p.alDia && !!p.error && !!p.datos && p.datos.ots.length === 0;
+    const universoVacio = !!p.datos && p.datos.ots.length === 0 && !esperandoUniverso && !vacioDeOtraConsulta;
     const sinLineas = !!p.datos && p.datos.ots.length > 0 && lineas.length === 0;
+    const tarjetasCargando = esperandoUniverso;
 
     return (
         <CaneraContexto.Provider value={contextoCanera}>
@@ -485,9 +674,23 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                         >
                             <ChevronLeft className="h-4 w-4" />
                         </button>
-                        <label className="relative flex cursor-pointer items-center gap-1.5 px-1 text-sm font-medium text-gray-800">
-                            <CalendarDays className="h-4 w-4 text-gray-400" />
-                            <span className="whitespace-nowrap">{rotuloSemana(semana)}</span>
+                        <label
+                            className="relative flex cursor-pointer items-center gap-1.5 px-1 text-sm font-medium text-gray-800"
+                            title={
+                                semanaInactiva
+                                    ? undefined
+                                    : semanaDelIntegral
+                                        ? "La semana sale del plan semanal del Sistema Integral: entran las OT que están cargadas en el plan de esa semana."
+                                        : "La semana sale del planificador de Metlosys: entran las OT abiertas con algún proceso que arranca antes del domingo."
+                            }
+                        >
+                            <CalendarDays className="h-4 w-4 shrink-0 text-gray-400" />
+                            <span className="flex flex-col leading-tight">
+                                <span className="whitespace-nowrap">{rotuloSemana(semana)}</span>
+                                {origenSemana && (
+                                    <span className="whitespace-nowrap text-[10px] font-normal text-gray-500">{origenSemana}</span>
+                                )}
+                            </span>
                             {/* El selector de fecha va encima del rótulo, invisible: se toca la
                                 semana y se abre el calendario. Cualquier día elige su semana. */}
                             <input
@@ -495,10 +698,7 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                 value={semana}
                                 disabled={semanaInactiva}
                                 onChange={(e) => {
-                                    if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) {
-                                        setSemana(lunesDe(e.target.value));
-                                        setEstadoRapido(null);
-                                    }
+                                    if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) elegirSemana(lunesDe(e.target.value));
                                 }}
                                 onClick={(e) => {
                                     // Invisible encima del rótulo: el calendario no se abriría solo
@@ -526,7 +726,7 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                     {semana !== estaSemana && !semanaInactiva && (
                         <button
                             type="button"
-                            onClick={() => setSemana(estaSemana)}
+                            onClick={() => elegirSemana(estaSemana)}
                             className="rounded-full px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
                         >
                             Esta semana
@@ -539,6 +739,8 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                         aria-checked={todasAbiertas}
                         disabled={ot !== null}
                         onClick={() => {
+                            setSemanaElegida(true);
+                            setSemanaVacia(null);
                             setTodasAbiertas((t) => !t);
                             setEstadoRapido(null);
                         }}
@@ -639,7 +841,24 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                     <Printer className="mr-2 h-4 w-4" />
                                     <span>
                                         Agrupada por proveedor
-                                        <span className="block text-[11px] text-gray-500">La lista para pedir, con cantidades sumadas</span>
+                                        <span className="block text-[11px] text-gray-500">
+                                            La lista para pedir: lo que falta y lo pedido sin llegar, sumado, con los cortes (sin lo disponible)
+                                        </span>
+                                    </span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    onSelect={() =>
+                                        imprimirPorProveedor(filasSalida(), "Lista para pedir: lo que falta", rotuloUniverso, filtrosTexto(), {
+                                            soloFalta: true,
+                                        })
+                                    }
+                                >
+                                    <CircleAlert className="mr-2 h-4 w-4 text-red-600" />
+                                    <span>
+                                        Sólo lo que falta pedir
+                                        <span className="block text-[11px] text-gray-500">
+                                            Por proveedor, sin lo pedido, lo disponible ni lo cubierto con stock
+                                        </span>
                                     </span>
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
@@ -655,6 +874,33 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                         />
                     </div>
                 </div>
+
+                {semanaVacia && todasAbiertas && ot === null && (
+                    <div
+                        className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-900"
+                        role="status"
+                    >
+                        <CalendarDays className="h-3.5 w-3.5 shrink-0 text-blue-500" />
+                        <span className="min-w-0 flex-1">
+                            {semanaDelIntegral
+                                ? `No hay OT en el plan semanal del Sistema Integral para la ${rotuloSemana(semanaVacia).toLowerCase()}`
+                                : `Todavía no hay nada planificado en Metlosys para la ${rotuloSemana(semanaVacia).toLowerCase()}`}
+                            : se muestran todas las OT abiertas.
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSemanaElegida(true);
+                                setSemanaVacia(null);
+                                setTodasAbiertas(false);
+                                setEstadoRapido(null);
+                            }}
+                            className="font-semibold underline"
+                        >
+                            Ver sólo la semana
+                        </button>
+                    </div>
+                )}
 
                 {ot !== null && (
                     <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-900">
@@ -693,7 +939,7 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                 activa={!estadoRapido && filtro === "todas"}
                                 onClick={() => tarjeta(null)}
                                 ayuda="Ver todas sus líneas"
-                                cargando={p.cargando && !p.datos}
+                                cargando={tarjetasCargando}
                             />
                             <Tarjeta
                                 titulo="A pedir"
@@ -702,8 +948,8 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                 tono={resumen.aPedir ? "text-red-600" : "text-gray-400"}
                                 activa={estadoRapido === "falta_pedir"}
                                 onClick={() => tarjeta("falta_pedir")}
-                                ayuda="Ni pedidas, ni reservadas, ni disponibles"
-                                cargando={p.cargando && !p.datos}
+                                ayuda="Ni pedidas ni disponibles, y sin reserva de stock que alcance (de una reserva parcial falta el resto)"
+                                cargando={tarjetasCargando}
                             />
                             <Tarjeta
                                 titulo="Esperando"
@@ -712,8 +958,8 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                 tono={resumen.esperando ? "text-amber-600" : "text-gray-400"}
                                 activa={estadoRapido === "esperando"}
                                 onClick={() => tarjeta("esperando")}
-                                ayuda="Pedidas o reservadas, todavía no llegaron"
-                                cargando={p.cargando && !p.datos}
+                                ayuda="Pedidas, o reservadas enteras del stock: todavía no están disponibles"
+                                cargando={tarjetasCargando}
                             />
                             <Tarjeta
                                 titulo="Listas"
@@ -722,8 +968,8 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                 tono={resumen.listas ? "text-green-600" : "text-gray-400"}
                                 activa={estadoRapido === "lista"}
                                 onClick={() => tarjeta("lista")}
-                                ayuda="Disponibles para producción"
-                                cargando={p.cargando && !p.datos}
+                                ayuda="Disponibles: cortadas y en la cañera, el operario las puede retirar"
+                                cargando={tarjetasCargando}
                             />
                         </div>
 
@@ -838,8 +1084,8 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                         </div>
 
                         {/* ── La grilla ── */}
-                        {!p.datos ? (
-                            p.cargando ? (
+                        {!p.datos || esperandoUniverso || vacioDeOtraConsulta ? (
+                            p.cargando || esperandoUniverso ? (
                                 <div className="flex items-center justify-center gap-2 rounded-xl border border-gray-200 py-16 text-sm text-gray-400">
                                     <Loader2 className="h-5 w-5 animate-spin" /> Buscando las materias primas…
                                 </div>
@@ -851,11 +1097,17 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                         ? `La OT ${ot} no está abierta o no tiene materias primas para comprar.`
                                         : todasAbiertas
                                             ? "No hay OT abiertas con materias primas."
-                                            : `No hay OT planificadas en la ${rotuloSemana(semana).toLowerCase()}.`
+                                            : semanaDelIntegral
+                                                ? `No hay OT en el plan semanal del Sistema Integral para la ${rotuloSemana(semana).toLowerCase()}.`
+                                                : `No hay OT planificadas en la ${rotuloSemana(semana).toLowerCase()}.`
                                 }
                                 detalle={
                                     ot === null && !todasAbiertas
-                                        ? "La semana la arma el planificador: entran las OT abiertas con algún proceso que arranca antes del domingo. Si todavía no se planificó, no hay nada acá."
+                                        ? semanaDelIntegral
+                                            ? "Durante la prueba piloto la semana sale del plan semanal del Sistema Integral: entran las OT que están cargadas en el plan de esa semana. Si todavía no se armó, acá no hay nada."
+                                            : espejo
+                                                ? "La semana la arma el planificador de Metlosys: entran las OT abiertas con algún proceso que arranca antes del domingo. El plan semanal del Sistema Integral no se trae, así que si en Metlosys no se planificó, acá no hay nada."
+                                                : "La semana la arma el planificador: entran las OT abiertas con algún proceso que arranca antes del domingo. Si todavía no se planificó, no hay nada acá."
                                         : undefined
                                 }
                             >
@@ -863,7 +1115,10 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                     <Button
                                         size="sm"
                                         className="bg-red-700 text-white hover:bg-red-800"
-                                        onClick={() => setTodasAbiertas(true)}
+                                        onClick={() => {
+                                            setSemanaElegida(true);
+                                            setTodasAbiertas(true);
+                                        }}
                                     >
                                         Ver todas las OT abiertas
                                     </Button>
@@ -877,7 +1132,11 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                         ) : sinLineas ? (
                             <Vacio
                                 titulo={`${p.datos.ots.length === 1 ? "La OT no tiene" : `Las ${p.datos.ots.length} OT no tienen`} materias primas cargadas.`}
-                                detalle="Se cargan en la solapa Materias primas de cada OT (o se marca que no lleva)."
+                                detalle={
+                                    espejo
+                                        ? "En la prueba piloto se cargan en el Sistema Integral (solapa Materias Primas de la OT) y aparecen acá solas."
+                                        : "Se cargan en la solapa Materias primas de cada OT (o se marca que no lleva)."
+                                }
                             />
                         ) : visibles.length === 0 ? (
                             <Vacio
@@ -913,7 +1172,7 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                         p.cargando && "opacity-60",
                                     )}
                                 >
-                                    <table className="w-full min-w-[1780px] border-separate border-spacing-0">
+                                    <table className="w-full min-w-[1900px] border-separate border-spacing-0">
                                         <thead>
                                             <tr>
                                                 {/* Los anchos, los mismos que la celda fija de cada fila (PendientesFila). */}
@@ -939,11 +1198,12 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                                 <Th>Descripción</Th>
                                                 <Th className="text-right">Cant</Th>
                                                 <Th>Un</Th>
+                                                <Th title="Piezas × largo a cortar (mm); abajo, los metros que hacen falta con la sierra">Cortes (mm)</Th>
                                                 <Th>Proveedor</Th>
                                                 <Th>Observaciones</Th>
                                                 <Th className="text-center" title="Pedido al proveedor">Pedido</Th>
                                                 <Th className="text-center" title="Reservado del stock">Reserva</Th>
-                                                <Th className="text-center" title="Disponible para producción">Disp</Th>
+                                                <Th className="text-center" title="Disponible: cortado y en la cañera, el operario lo puede retirar">Disp</Th>
                                                 <Th className="text-center" title="En producción (PRODUC)">Prod</Th>
                                                 <Th title="La fecha que prometió el proveedor">Fecha prov</Th>
                                                 <Th title="Cuándo llegó / quedó disponible">F. entrega</Th>
@@ -960,13 +1220,32 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                     </table>
                                     <PieDeTandas {...tandas} />
                                 </div>
-                                <p className="text-[11px] text-gray-400">
-                                    Cada cambio se guarda solo. Las filas que dejan de entrar en el filtro (por ejemplo, las que marcás
-                                    disponibles) se quedan a la vista hasta que cambies el filtro o toques «Actualizar».
-                                </p>
+                                {edita ? (
+                                    <p className="text-[11px] text-gray-400">
+                                        Cada cambio se guarda solo. Las filas que dejan de entrar en el filtro (por ejemplo, las que marcás
+                                        disponibles) se quedan a la vista hasta que cambies el filtro o toques «Actualizar».
+                                    </p>
+                                ) : espejo ? (
+                                    <p className="text-[11px] text-gray-400">
+                                        Sólo lectura: en la prueba piloto las marcas, los proveedores y los cortes se cargan en el Sistema
+                                        Integral y aparecen acá solos.
+                                    </p>
+                                ) : null}
                             </>
                         )}
                     </>
+                )}
+
+                {edita && !algunaElegida && sinCasilleroVisibles.length > 0 && (
+                    <AvisoCasilleros
+                        ots={sinCasilleroVisibles}
+                        canera={canera.canera}
+                        onUbicar={(o, celda) => {
+                            ubicarOT(o.id, o.numero, celda);
+                            setSinCasillero((antes) => antes.filter((a) => a.id !== o.id));
+                        }}
+                        onCerrar={() => setSinCasillero([])}
+                    />
                 )}
 
                 {edita && algunaElegida && (
@@ -978,6 +1257,16 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                         onAplicar={(c, que) => void aplicarLote(c, que)}
                         onQuitarMarcas={() => void quitarMarcas()}
                         onSoltar={() => setSeleccion(new Set())}
+                    />
+                )}
+
+                {edita && (
+                    <DialogoCortes
+                        fila={filaCortes}
+                        edita
+                        espesorSierraMm={espesorSierra}
+                        onCerrar={() => setIdCortes(null)}
+                        onGuardar={guardarCortes}
                     />
                 )}
 

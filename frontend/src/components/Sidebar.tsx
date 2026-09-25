@@ -25,6 +25,8 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "../contexts/AuthContext";
 import { capitalizeName } from "@/lib/utils";
 import { MENU, puedeVerItem, type Permisos } from "@/lib/permisos";
+import BotonAviso from "./BotonAviso";
+import { useAvisoAlEntrar } from "@/hooks/useAvisoAlEntrar";
 
 interface SidebarItem {
   name: string;
@@ -127,6 +129,10 @@ export default function Sidebar() {
   const router = useRouter();
   const { logout, user, permisos } = useAuth();
   const visibles = itemsVisibles(permisos);
+  // El aviso que sale al entrar: el megáfono va pegado al nombre (BotonAviso) y no es un
+  // ítem de `sidebarItems` a propósito, porque no lleva a ninguna pantalla (y esa lista
+  // tiene que ser la de MENU, ver itemsVisibles).
+  const { sinLeer: avisoSinLeer } = useAvisoAlEntrar();
 
   const toggleSidebar = () => {
     if (isMobile) {
@@ -314,16 +320,20 @@ export default function Sidebar() {
           <div className={`border-t border-gray-200 ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
             }`}>
             {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) ? (
-              <div className="px-4 py-3 bg-gray-50 rounded-xl border border-gray-200">
-                <p className="text-sm font-semibold text-gray-900 truncate">
-                  {capitalizeName(user.nombre)} {capitalizeName(user.apellido)}
-                </p>
-                <p className="text-xs text-gray-500 truncate mt-0.5">
-                  {user.username}
-                </p>
+              <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 rounded-xl border border-gray-200">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-gray-900 truncate">
+                    {capitalizeName(user.nombre)} {capitalizeName(user.apellido)}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate mt-0.5">
+                    {user.username}
+                  </p>
+                </div>
+                <BotonAviso alAbrir={closeMobileSidebar} />
               </div>
             ) : (
-              <div className="flex items-center justify-center p-2">
+              <div className="flex flex-col items-center justify-center gap-2 p-2">
+                <BotonAviso compacto alAbrir={closeMobileSidebar} />
                 <div className="w-8 h-8 rounded-full bg-[#DC143C] text-white font-semibold flex items-center justify-center text-sm">
                   {/* Con `?.`: un usuario guardado sin nombre o sin apellido tumbaba la
                       app entera acá (el Sidebar está en todas las pantallas). */}
@@ -370,7 +380,7 @@ export default function Sidebar() {
         <button
           onClick={toggleSidebar}
           className="fixed bottom-4 left-4 z-40 flex items-center justify-center w-14 h-14 bg-white border-2 border-[#DC143C] rounded-full shadow-lg hover:shadow-xl hover:border-[#B8112E] transition-all duration-200"
-          title="Abrir menú"
+          title={avisoSinLeer ? "Abrir menú (hay un aviso sin leer)" : "Abrir menú"}
         >
           <Image
             src="/logo.png"
@@ -379,6 +389,14 @@ export default function Sidebar() {
             height={32}
             className="object-contain"
           />
+          {/* En el teléfono el megáfono queda adentro del menú cerrado: el puntito se
+              asoma acá para que se sepa que adentro hay algo sin leer. */}
+          {avisoSinLeer && (
+            <span
+              aria-hidden
+              className="absolute top-0.5 right-0.5 h-3.5 w-3.5 rounded-full bg-[#DC143C] ring-2 ring-white"
+            />
+          )}
         </button>
       )}
     </>

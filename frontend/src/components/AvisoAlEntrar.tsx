@@ -9,7 +9,10 @@
  * lo necesita (el que carga órdenes todo el día) es el que menos mira el teléfono.
  *
  * Reglas del cartel, para que no se vuelva un estorbo:
- *  · Sale UNA vez por persona y por aviso. Se cierra y no vuelve.
+ *  · Sale SOLO una vez por persona y por aviso. Se cierra y no vuelve a saltar; el que
+ *    lo quiere ver de nuevo lo abre con el megáfono del menú (BotonAviso), que tiene un
+ *    puntito mientras no se haya leído. Qué cuenta como leído y dónde se guarda:
+ *    hooks/useAvisoAlEntrar.ts, que es el estado que comparten los dos.
  *  · Lo que decide si ya se vio es el `id` del aviso, no la fecha: cambiar el texto
  *    sin cambiar el id no se lo muestra a nadie que ya lo haya cerrado.
  *  · No sale en el login, ni antes de que la sesión esté cargada.
@@ -22,14 +25,13 @@
  * lugares donde contar lo mismo.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import Link from "next/link";
 import { Sparkles, ArrowRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { AVISO_AL_ENTRAR, formatFechaNovedad } from "@/lib/novedades";
-
-const CLAVE = "spmm_aviso_visto";
+import { abrirAviso, cerrarAviso, tocaAbrirseSolo, useAvisoAlEntrar } from "@/hooks/useAvisoAlEntrar";
 
 /** **negrita** -> <strong>. Lo único que se acepta: el texto lo escribe el equipo. */
 function conNegritas(texto: string) {
@@ -41,26 +43,21 @@ function conNegritas(texto: string) {
 }
 
 export default function AvisoAlEntrar() {
-    const [abierto, setAbierto] = useState(false);
+    const { abierto } = useAvisoAlEntrar();
     const aviso = AVISO_AL_ENTRAR;
 
     useEffect(() => {
-        if (!aviso) return;
-        // Si el navegador no deja leer, no se muestra: ver la cabecera.
-        try {
-            if (localStorage.getItem(CLAVE) === aviso.id) return;
-        } catch {
-            return;
-        }
+        // Si el navegador no deja leer, no se abre solo: ver la cabecera.
+        if (!tocaAbrirseSolo()) return;
         // Un respiro antes de abrirlo: el sidebar tarda en montar y corre la página,
         // y un cartel que aparece encima de algo que se está acomodando se cierra
         // sin leer.
-        const t = setTimeout(() => setAbierto(true), 600);
+        const t = setTimeout(abrirAviso, 600);
         return () => clearTimeout(t);
-    }, [aviso]);
+    }, []);
 
-    /**
-     * Se marca como visto al CERRARLO, no al mostrarlo.
+    /*
+     * Se marca como visto al CERRARLO, no al mostrarlo (lo hace `cerrarAviso`).
      *
      * Al revés parece más simple y está mal: si se anota antes, cualquier cosa que
      * desmonte el componente entre el "anotado" y el "mostrado" se come el aviso para
@@ -68,16 +65,16 @@ export default function AvisoAlEntrar() {
      * y el cartel no salía nunca. Y aun sin eso, si alguien cierra la pestaña mientras
      * carga, el aviso se perdía sin haberse visto. Anotarlo al cerrar hace que el peor
      * caso sea verlo dos veces, que no le arruina el día a nadie.
+     *
+     * Cómo se cierra importa para el puntito del megáfono: los dos botones de abajo
+     * cuentan como leído; la cruz, Escape o el click afuera, sólo si estuvo abierto un
+     * rato (ver hooks/useAvisoAlEntrar.ts).
      */
-    const cerrar = () => {
-        setAbierto(false);
-        try { localStorage.setItem(CLAVE, aviso!.id); } catch { /* sin memoria, vuelve a salir */ }
-    };
 
     if (!aviso) return null;
 
     return (
-        <Dialog open={abierto} onOpenChange={(v) => { if (!v) cerrar(); }}>
+        <Dialog open={abierto} onOpenChange={(v) => { if (!v) cerrarAviso("afuera"); }}>
             <DialogContent className="max-w-[min(680px,94vw)] max-h-[88vh] flex flex-col gap-0 p-0 overflow-hidden">
                 <DialogHeader className="px-6 pt-5 pb-4 border-b border-gray-100">
                     <DialogTitle className="flex items-center gap-3 text-xl font-bold text-gray-900">
@@ -120,13 +117,13 @@ export default function AvisoAlEntrar() {
                 <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50/60">
                     <Link
                         href="/novedades"
-                        onClick={cerrar}
+                        onClick={() => cerrarAviso("novedades")}
                         className="text-sm font-medium text-blue-600 hover:text-blue-700 inline-flex items-center gap-1.5"
                     >
                         Ver todas las novedades
                         <ArrowRight className="w-3.5 h-3.5" />
                     </Link>
-                    <Button onClick={cerrar} className="bg-red-600 hover:bg-red-700">
+                    <Button onClick={() => cerrarAviso("entendido")} className="bg-red-600 hover:bg-red-700">
                         {aviso.cerrar}
                     </Button>
                 </div>
