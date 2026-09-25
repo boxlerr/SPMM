@@ -159,13 +159,13 @@ export default function Sidebar() {
       // en el teléfono y se sentaba encima del borde izquierdo del contenido hasta que
       // corría el efecto. Abajo de `lg` la barra real arranca escondida (se abre con el
       // botón flotante), así que el esqueleto tampoco tiene nada que mostrar ahí.
-      <div className="hidden lg:block relative top-0 left-0 h-full bg-white border-r border-gray-200 w-16 overflow-hidden">
+      <div className="hidden lg:flex lg:flex-col relative top-0 left-0 h-full bg-white border-r border-gray-200 w-16 overflow-hidden">
         <div className="flex items-center border-b border-gray-200 justify-center p-4">
           <div className="flex items-center justify-center w-8 h-8 bg-gray-100 rounded-lg">
             <div className="w-3 h-3 bg-gray-400 rounded-sm"></div>
           </div>
         </div>
-        <nav className="flex-1 space-y-2 p-2">
+        <nav className="flex-1 min-h-0 overflow-hidden space-y-1 p-2">
           {visibles.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
@@ -175,7 +175,7 @@ export default function Sidebar() {
                 key={item.name}
                 href={item.href}
                 className={`
-                  flex items-center justify-center p-3 rounded-xl transition-all duration-200
+                  flex items-center justify-center p-2.5 rounded-xl transition-all duration-200
                   ${isActive
                     ? 'bg-blue-50 text-blue-600 shadow-sm'
                     : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
@@ -192,7 +192,7 @@ export default function Sidebar() {
         </nav>
 
         {/* Logout Button - Estado inicial */}
-        <div className="border-t border-gray-200 p-2">
+        <div className="shrink-0 border-t border-gray-200 p-2">
           <button
             onClick={() => router.push('/login')}
             className="w-full flex items-center justify-center p-3 rounded-xl transition-all duration-200 text-gray-700 hover:bg-red-50 hover:text-red-600"
@@ -217,7 +217,7 @@ export default function Sidebar() {
       {/* Sidebar */}
       <div
         className={`
-          fixed lg:relative top-0 left-0 h-full bg-white border-r border-gray-200 
+          fixed lg:relative top-0 left-0 h-full flex flex-col bg-white border-r border-gray-200 
           transition-all duration-300 ease-in-out z-50 lg:z-auto
           ${isMobile ? (
             isMobileOpen ? 'translate-x-0 w-64' : '-translate-x-full w-0'
@@ -229,9 +229,9 @@ export default function Sidebar() {
       >
         {/* Header */}
         <div className={`flex items-center border-b border-gray-200 transition-all duration-300 ${isMobile ? (
-          isMobileOpen ? 'justify-between p-6' : 'justify-center p-4'
+          isMobileOpen ? 'justify-between px-5 py-4' : 'justify-center p-3'
         ) : (
-          isCollapsed ? 'justify-center p-4' : 'justify-between p-6'
+          isCollapsed ? 'justify-center p-3' : 'justify-between px-5 py-4'
         )
           }`}>
           {(!isMobile && !isCollapsed) || (isMobile && isMobileOpen) ? (
@@ -278,7 +278,7 @@ export default function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className={`flex-1 space-y-2 ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
+        <nav className={`flex-1 min-h-0 overflow-y-auto space-y-1 ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'px-3 py-3'
           }`}>
           {visibles.map((item) => {
             const Icon = item.icon;
@@ -295,7 +295,7 @@ export default function Sidebar() {
                     ? 'bg-blue-50 text-blue-600 shadow-sm'
                     : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
                   }
-                  ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'justify-center p-3' : 'px-4 py-3'}
+                  ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'justify-center p-2.5' : 'px-3 py-2'}
                 `}
                 title={(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? item.name : undefined}
               >
@@ -315,59 +315,66 @@ export default function Sidebar() {
           })}
         </nav>
 
-        {/* User Info */}
-        {user && (
-          <div className={`border-t border-gray-200 ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
-            }`}>
-            {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) ? (
-              <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 rounded-xl border border-gray-200">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-gray-900 truncate">
-                    {capitalizeName(user.nombre)} {capitalizeName(user.apellido)}
-                  </p>
-                  <p className="text-xs text-gray-500 truncate mt-0.5">
-                    {user.username}
-                  </p>
-                </div>
-                <BotonAviso alAbrir={closeMobileSidebar} />
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center gap-2 p-2">
-                <BotonAviso compacto alAbrir={closeMobileSidebar} />
-                <div className="w-8 h-8 rounded-full bg-[#DC143C] text-white font-semibold flex items-center justify-center text-sm">
-                  {/* Con `?.`: un usuario guardado sin nombre o sin apellido tumbaba la
-                      app entera acá (el Sidebar está en todas las pantallas). */}
-                  {(user.nombre?.charAt(0) ?? "").toUpperCase()}{(user.apellido?.charAt(0) ?? "").toUpperCase()}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        {/* Pie: quién está adentro y la salida, siempre a la vista.
 
-        {/* Logout Button */}
-        <div className={`border-t border-gray-200 ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
+            Julián, 25/09: «el cerrar sesión no se nota, no se aprecia, se queda
+            bugeado». No era un bug del botón: el contenedor no era una columna
+            (`flex flex-col`), así que el `flex-1` del menú no hacía nada; con Materia
+            prima sumada, el menú ya no entraba en una pantalla de notebook y el pie
+            —la tarjeta del usuario y «Cerrar sesión»— quedaba afuera, cortado por el
+            `overflow: hidden`. Ahora el menú se achica (y se desplaza si hace falta) y
+            este pie no se encoge nunca. La tarjeta y el botón van juntos, en un solo
+            bloque, para que la salida quede pegada a quien sale. */}
+        <div className={`shrink-0 border-t border-gray-200 ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2 space-y-1' : 'p-3'
           }`}>
-          <button
-            onClick={handleLogout}
-            className={`
-              w-full flex items-center rounded-xl transition-all duration-200 group
-              text-gray-700 hover:bg-red-50 hover:text-red-600
-              ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'justify-center p-3' : 'px-4 py-3'}
-            `}
-            title={(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? "Cerrar Sesión" : undefined}
-          >
-            <LogOut className={`
-              h-5 w-5 transition-colors flex-shrink-0
-              text-gray-500 group-hover:text-red-600
-              ${(!isMobile && !isCollapsed) || (isMobile && isMobileOpen) ? 'mr-3' : ''}
-            `} />
-
-            {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) && (
-              <span className="font-medium text-sm whitespace-nowrap transition-opacity duration-200">
-                Cerrar Sesión
-              </span>
-            )}
-          </button>
+          {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) ? (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-2">
+              {user && (
+                <div className="flex items-center gap-2.5 px-1.5 pb-2">
+                  <div className="h-8 w-8 shrink-0 rounded-full bg-[#DC143C] text-white text-xs font-semibold flex items-center justify-center">
+                    {(user.nombre?.charAt(0) ?? "").toUpperCase()}{(user.apellido?.charAt(0) ?? "").toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-gray-900 truncate">
+                      {capitalizeName(user.nombre)} {capitalizeName(user.apellido)}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">{user.username}</p>
+                  </div>
+                  <BotonAviso alAbrir={closeMobileSidebar} />
+                </div>
+              )}
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 hover:border-red-300"
+              >
+                <LogOut className="h-4 w-4 shrink-0" />
+                Cerrar sesión
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-center">
+                <BotonAviso compacto alAbrir={closeMobileSidebar} />
+              </div>
+              {user && (
+                <div className="flex items-center justify-center p-1" title={`${capitalizeName(user.nombre)} ${capitalizeName(user.apellido)}`}>
+                  <div className="w-8 h-8 rounded-full bg-[#DC143C] text-white font-semibold flex items-center justify-center text-sm">
+                    {/* Con `?.`: un usuario guardado sin nombre o sin apellido tumbaba la
+                        app entera acá (el Sidebar está en todas las pantallas). */}
+                    {(user.nombre?.charAt(0) ?? "").toUpperCase()}{(user.apellido?.charAt(0) ?? "").toUpperCase()}
+                  </div>
+                </div>
+              )}
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center justify-center p-2.5 rounded-xl text-red-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                title="Cerrar sesión"
+                aria-label="Cerrar sesión"
+              >
+                <LogOut className="h-5 w-5" />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
