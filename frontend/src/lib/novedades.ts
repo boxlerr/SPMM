@@ -76,6 +76,16 @@ export const NOVEDADES: Novedad[] = [
         href: "/operaciones",
     },
     {
+        id: "carga-por-semana",
+        fecha: "2026-09-25",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "En la vista previa, la carga de cada persona se mira por semana y dice de dónde salen sus horas",
+        detalle:
+            "El panel «Carga de recurso humano» arranca en la primera semana del plan y cada tarjeta muestra la cuenta: «40,5 h de 41,25 h que puede = 5 días × 8,25 h». Tocando el número ves la cuenta completa, y tocando un día, qué procesos tiene. Con los botones de arriba pasás de semana o a «Todo el plan», que es lo que se veía antes (por ejemplo 109,8 h de 173,25 h). También dice qué trabajo quedó sin nadie y por qué el plan llega hasta su último día. Antes se comparaba siempre contra todo el plan y la explicación estaba escondida en un cartelito que en la tablet no aparecía.",
+        href: "/operaciones",
+    },
+    {
         id: "vista-previa-numeros-de-ot-y-periodo",
         fecha: "2026-09-25",
         tipo: "arreglo",
