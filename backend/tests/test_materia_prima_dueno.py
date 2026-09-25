@@ -99,12 +99,12 @@ def test_lo_que_no_es_spmm_es_integral(monkeypatch, valor, esperado):
 
 
 def test_el_aviso_dice_cada_cuanto_llega_lo_del_integral():
-    """El Scheduler del sync corre cada 30 minutos (*/30): el aviso no puede prometer que
-    se ve «al instante» ni «solo». La frecuencia vive en una constante (si el Scheduler
-    cambia, se cambia ahí) y el texto la usa."""
-    assert D.FRECUENCIA_ESPEJO_MIN == 30
+    """El Scheduler del sync corre cada 10 minutos (*/10 desde el 25/09; antes */30): el
+    aviso no puede prometer que se ve «al instante» ni «solo». La frecuencia vive en una
+    constante (si el Scheduler cambia, se cambia ahí) y el texto la usa."""
+    assert D.FRECUENCIA_ESPEJO_MIN == 10
     assert D.AVISO_PILOTO == ("Durante la prueba piloto las materias primas se cargan en el "
-                              "Sistema Integral; Metlosys las trae de ahí cada 30 minutos.")
+                              "Sistema Integral; Metlosys las trae de ahí cada 10 minutos.")
     for promesa in ("al instante", "solas", "a los pocos minutos"):
         assert promesa not in D.AVISO_PILOTO
 

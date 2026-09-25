@@ -310,6 +310,17 @@ def _viejo():
             {"ubicacion": "161", "ot": 15692},    # columna 16: no está en la grilla
             {"ubicacion": "81", "ot": None},
         ],
+        # El plan semanal (HOY es jueves 24/09: la ventana va del lunes 27/07 al 16/11).
+        "plansemanal": [
+            {"fecha": datetime(2026, 9, 21), "ot": 15692, "PRIORIDAD": "Normal"},
+            {"fecha": datetime(2026, 9, 21), "ot": 15692, "PRIORIDAD": "Normal"},    # repetida
+            {"fecha": datetime(2026, 9, 21), "ot": 15917, "PRIORIDAD": "Urgente"},   # otra OT en SPMM
+            {"fecha": datetime(2026, 9, 21), "ot": 99999, "PRIORIDAD": "Normal"},    # no está en SPMM
+            {"fecha": datetime(2026, 9, 11), "ot": 14534, "PRIORIDAD": "Urgente 1"}, # un viernes
+            {"fecha": datetime(2026, 9, 28), "ot": 14534, "PRIORIDAD": " Normal "},  # se arrastra
+            {"fecha": datetime(2000, 1, 1), "ot": 15692, "PRIORIDAD": "Normal"},     # basura
+            {"fecha": datetime(2026, 9, 28), "ot": None, "PRIORIDAD": "Normal"},     # sin OT
+        ],
     }
 
 
@@ -480,6 +491,25 @@ async def test_corrida_en_seco_de_punta_a_punta(session):
     assert c["canera"]["ubicaciones que no se entienden"] == 1
     assert c["canera"]["casilleros sin número de OT (se saltean)"] == 1
 
+    # Plan semanal: cada fecha a su lunes (el viernes 11/09 es la semana del 07/09), sin la
+    # basura ni la repetida; la OT se enlaza sólo si es la del Integral (15917 en SPMM es
+    # otra, 99999 no está): quedan con el número y sin OT.
+    plan = {(r["semana"], r["numero_ot"]): (r["fecha_original"], r["prioridad"], r["id_orden_trabajo"])
+            for r in est.plan_semanal}
+    assert plan == {
+        (date(2026, 9, 21), 15692): (date(2026, 9, 21), "Normal", 10),
+        (date(2026, 9, 21), 15917): (date(2026, 9, 21), "Urgente", None),
+        (date(2026, 9, 21), 99999): (date(2026, 9, 21), "Normal", None),
+        (date(2026, 9, 7), 14534): (date(2026, 9, 11), "Urgente 1", 12),
+        (date(2026, 9, 28), 14534): (date(2026, 9, 28), "Normal", 12),
+    }
+    assert c["plan_semanal"]["OT de una semana que se agregan (INSERT)"] == 5
+    assert c["plan_semanal"]["descartadas: repetidas (misma semana y OT: queda una)"] == 1
+    assert c["plan_semanal"]["descartadas: fuera de la ventana o fecha imposible (2000-01-01, sin fecha)"] == 1
+    assert c["plan_semanal"]["descartadas: sin número de OT"] == 1
+    assert c["plan_semanal"]["OT de SPMM que no son la del Integral (quedan sin enlazar)"] == 1
+    assert c["plan_semanal"]["OT que no están en SPMM (quedan sin enlazar)"] == 1
+
 
 @pytest.mark.asyncio
 async def test_la_segunda_corrida_no_cambia_nada(session):
@@ -577,6 +607,7 @@ def test_filtrar_ots_deja_el_catalogo_entero():
     assert [l["Idot"] for l in viejo["lineas"]] == [14534]
     assert [o["idot"] for o in viejo["otrabajo"]] == [14534]
     assert [c["ot"] for c in viejo["canera"]] == [14534]
+    assert [f["ot"] for f in viejo["plansemanal"]] == [14534, 14534]
     assert viejo["cortes"] == []
     for nombre in ("pieza", "historial", "movstock", "recortes", "material", "proveedor"):
         assert viejo[nombre] == _viejo()[nombre], nombre
@@ -1038,7 +1069,7 @@ async def _importar_de_mentira(monkeypatch, hay=(), candado=True):
     async def _sin_faltantes(conn):
         return []
 
-    async def _viejo_vacio(pasos, silencioso=False):
+    async def _viejo_vacio(pasos, silencioso=False, ventana=None):
         return {}
 
     monkeypatch.setattr(asyncpg, "connect", _conectar)

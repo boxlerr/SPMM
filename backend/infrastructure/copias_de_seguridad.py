@@ -324,6 +324,7 @@ NOMBRE_LLANO = {
     "formato": "Formatos de la materia prima (barra, tubo, placa…)",
     "proveedor": "Proveedores",
     "canera_ocupacion": "Cañera (qué OT ocupa cada casillero)",
+    "plan_semanal": "Plan semanal del Sistema Integral (qué OT se programaron cada semana)",
     "plano":"Planos (los datos; el archivo no viaja)",
     "prioridad": "Prioridades",
     "sector": "Sectores",

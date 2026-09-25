@@ -34,8 +34,8 @@ from __future__ import annotations
 
 import math
 import re
-from collections import defaultdict, deque
-from datetime import date, datetime
+from collections import Counter, defaultdict, deque
+from datetime import date, datetime, timedelta
 
 from backend.application.materia_prima import catalogo_texto
 from backend.application.materia_prima.reglas import (
@@ -53,7 +53,8 @@ __all__ = [
     "medidas_desde_legacy", "ocupacion_desde_ubicacion", "recorte_desde_texto",
     "corte_desde_texto", "norm_proveedor", "indice_proveedores", "proveedor_por_texto",
     "CatalogoLegado", "una_fila_por_codigo", "pieza_desde_legacy", "linea_desde_legacy",
-    "emparejar_lineas", "RAZON_ESPESOR_TUBO",
+    "emparejar_lineas", "RAZON_ESPESOR_TUBO", "lunes_de", "ventana_plan_semanal",
+    "plan_semanal_desde_legacy", "SEMANAS_ATRAS", "SEMANAS_ADELANTE",
 ]
 
 
@@ -754,3 +755,95 @@ def emparejar_lineas(lineas_spmm, lineas_viejo, codigo_spmm="codigo", codigo_vie
     usadas = {id(s) for s, _ in pares}
     sobrantes = [s for s in lineas_spmm if id(s) not in usadas]
     return pares, nuevas, sobrantes
+
+
+# ─────────────────────────── el plan semanal (dbo.plansemanal) ───────────────────────────
+#
+# El plan semanal del Integral: una fila por (fecha, OT), cargado a mano por el taller. Es
+# lo que filtra «Semana del …» en su pantalla de Pendientes. Medido el 25/09/2026 (sólo
+# SELECT): 19.859 filas de 2019 a 2026-10-26; `fecha` es el lunes en 371 de 389 semanas y
+# en las otras 18 un viernes, martes, miércoles o sábado (la 11/09/2026, viernes, con 5 OT);
+# 73 filas con fecha 2000-01-01 (basura); 71 pares (fecha, ot) repetidos, siempre con la
+# misma prioridad; y una OT se arrastra de semana en semana mientras no se termina.
+
+# La ventana que refleja el espejo: desde el lunes de hace SEMANAS_ATRAS semanas hasta el
+# lunes dentro de SEMANAS_ADELANTE semanas. Hacia atrás, 8 alcanzan para mirar el mes
+# pasado en Pendientes (Maxi compra para esta semana y la que viene; el taller carga el
+# plan como mucho 5 semanas adelante: el 25/09 la última era la del 26/10) y dejan quietas
+# las semanas viejas: una corrección del Integral en una semana de hace medio año no
+# cambia nada acá. Hacia adelante, 8 cubren con margen lo que el taller carga.
+SEMANAS_ATRAS = 8
+SEMANAS_ADELANTE = 8
+
+
+def lunes_de(dia: date) -> date:
+    """El lunes de la semana de ese día (la semana va de lunes a domingo)."""
+    if isinstance(dia, datetime):
+        dia = dia.date()
+    return dia - timedelta(days=dia.weekday())
+
+
+def ventana_plan_semanal(hoy: date | None = None) -> tuple[date, date]:
+    """(primer lunes, último lunes) de la ventana del plan semanal alrededor de hoy."""
+    lunes = lunes_de(_hoy(hoy))
+    return lunes - timedelta(weeks=SEMANAS_ATRAS), lunes + timedelta(weeks=SEMANAS_ADELANTE)
+
+
+def _dia_de(v) -> date | None:
+    """La fecha sin la hora, venga como datetime, date o texto ISO."""
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    try:
+        return date.fromisoformat(str(v).strip()[:10])
+    except ValueError:
+        return None
+
+
+def _numero_de_ot(v) -> int | None:
+    try:
+        numero = int(v)
+    except (TypeError, ValueError):
+        return None
+    return numero if numero > 0 else None
+
+
+def plan_semanal_desde_legacy(filas, ventana: tuple[date, date]) -> tuple[dict, Counter]:
+    """Las filas de dbo.plansemanal (fecha, ot, PRIORIDAD) → lo que tiene que haber en
+    plan_semanal dentro de la ventana: ({(lunes, número de OT): {fecha_original,
+    prioridad}}, descartes {motivo: filas}).
+
+      · la fecha se lleva al LUNES de su semana (18 semanas del Integral dicen otro día);
+      · fuera de la ventana no entra (ahí también cae la basura: 2000-01-01, fechas sin
+        leer, años imposibles);
+      · sin número de OT (o 0) no entra;
+      · un (lunes, OT) repetido queda una vez: la fila que decía el lunes mismo y, si no,
+        la del día más temprano (con la prioridad como desempate, para que dos lecturas
+        del mismo Integral den siempre lo mismo aunque cambie el orden físico).
+    """
+    desde, hasta = ventana
+    candidatas: dict[tuple[date, int], list[tuple]] = defaultdict(list)
+    descartes: Counter = Counter()
+    for fila in filas:
+        dia = _dia_de(fila.get("fecha"))
+        if dia is None or not (desde <= lunes_de(dia) <= hasta):
+            descartes["fuera de la ventana o fecha imposible (2000-01-01, sin fecha)"] += 1
+            continue
+        numero = _numero_de_ot(fila.get("ot"))
+        if numero is None:
+            descartes["sin número de OT"] += 1
+            continue
+        semana = lunes_de(dia)
+        prioridad = texto_limpio(fila.get("PRIORIDAD"))
+        candidatas[(semana, numero)].append(
+            (dia != semana, dia, prioridad or "", {"fecha_original": dia,
+                                                    "prioridad": prioridad[:30] if prioridad else None}))
+    deseadas = {}
+    for clave, opciones in candidatas.items():
+        if len(opciones) > 1:
+            descartes["repetidas (misma semana y OT: queda una)"] += len(opciones) - 1
+        deseadas[clave] = min(opciones, key=lambda o: o[:3])[3]
+    return deseadas, descartes

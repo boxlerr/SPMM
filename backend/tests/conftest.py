@@ -97,6 +97,9 @@ from backend.domain.PiezaPrecio import PiezaPrecio
 from backend.domain.PiezaRecorte import PiezaRecorte
 from backend.domain.OrdenTrabajoPiezaCorte import OrdenTrabajoPiezaCorte
 from backend.domain.CaneraOcupacion import CaneraOcupacion
+# El plan semanal del Integral (25/09/2026): cuelga de la OT con ON DELETE SET NULL, así que
+# borrar una OT que estuvo en el plan sólo se prueba con la tabla creada.
+from backend.domain.PlanSemanal import PlanSemanal
 
 # Solo las tablas que tocan las skills nativas y la composición del rango
 # (evita tipos MSSQL de otros modelos).
@@ -142,6 +145,7 @@ TEST_TABLES = [
     PiezaRecorte.__table__,
     OrdenTrabajoPiezaCorte.__table__,
     CaneraOcupacion.__table__,
+    PlanSemanal.__table__,
 ]
 
 

@@ -5,7 +5,7 @@ la lectura del plan, que va por una tabla liviana (`table()` de SQLAlchemy Core,
 portable): el modelo Planificacion no declara `inicio_base`, la columna que la migración
 2026-09-11 agregó y que el repositorio del planificador escribe a mano. Ver `plan_de_ots`.
 """
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import Column, DateTime, Integer, MetaData, Table, func, select
 
@@ -16,6 +16,7 @@ from backend.domain.Articulo import Articulo
 from backend.domain.CaneraOcupacion import CaneraOcupacion
 from backend.domain.Cliente import Cliente
 from backend.domain.OrdenTrabajo import OrdenTrabajo
+from backend.domain.PlanSemanal import PlanSemanal
 from backend.domain.Prioridad import Prioridad
 
 # La tabla del plan, sólo con lo que hace falta para saber CUÁNDO arranca cada proceso.
@@ -99,6 +100,29 @@ class MateriaPrimaPendientesRepository:
         return (await self.db.execute(
             select(OrdenTrabajo).where(OrdenTrabajo.id_otvieja == numero).order_by(OrdenTrabajo.id)
         )).scalars().first()
+
+    # ─────────────────────────── el plan semanal del Integral ───────────────────────────
+
+    async def ots_del_plan_semanal(self, lunes: date) -> set[int] | None:
+        """{id de OT de SPMM} programadas la semana de ese lunes en el plan semanal del
+        Integral (plan_semanal, lo trae el espejo). Sólo las enlazadas a una OT de SPMM:
+        las que SPMM no tiene (o no son la del Integral con ese número) no tienen líneas
+        que mostrar.
+
+        None si la tabla no se puede leer (la migración 2026-09-25_plan_semanal no se
+        aplicó): la pantalla sale vacía en vez de dar 500. En un savepoint, para que la
+        transacción siga viva (Postgres la aborta)."""
+        try:
+            async with self.db.begin_nested():
+                filas = (await self.db.execute(
+                    select(PlanSemanal.id_orden_trabajo).where(
+                        PlanSemanal.semana == lunes, PlanSemanal.id_orden_trabajo.isnot(None))
+                )).scalars().all()
+        except Exception as e:
+            logger.warning(f"Repository - no se pudo leer plan_semanal ({type(e).__name__}: {e}); "
+                           f"la semana del Integral sale vacía.")
+            return None
+        return set(filas)
 
     # ─────────────────────────── el plan ───────────────────────────
 

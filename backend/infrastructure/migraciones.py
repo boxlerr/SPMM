@@ -1367,6 +1367,79 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "(columna, fila) WHERE hasta IS NULL",
         ],
     ),
+    (
+        # Una tabla nueva de una fila y nada más. Si no llegara a aplicarse, el sync corre
+        # entero en cada pasada, como antes: leer o guardar las huellas falla, se loguea y
+        # se sigue (backend/scripts/sync_huella.py). Nunca saltea por falta de la tabla.
+        "2026-09-25_sync_estado",
+        [
+            "CREATE TABLE IF NOT EXISTS sync_estado ("
+            "clave TEXT PRIMARY KEY, "
+            "huella_integral TEXT, "
+            "huella_spmm TEXT, "
+            "ultima_completa TIMESTAMP, "
+            "actualizado_en TIMESTAMP)",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON TABLE sync_estado IS "
+            "'Las huellas de la última pasada completa del sync (backend/scripts/sync_huella.py). "
+            "Si al empezar una pasada las dos son iguales a éstas, el sync no hace nada más. La "
+            "escribe sólo el sync; borrarla hace que la pasada siguiente corra entera.'",
+            "COMMENT ON COLUMN sync_estado.huella_integral IS "
+            "'JSON tabla del Integral → filas, CHECKSUM_AGG y suma de un MD5 por fila de las "
+            "columnas que lee el sync, leída al EMPEZAR la última pasada completa que salió bien.'",
+            "COMMENT ON COLUMN sync_estado.huella_spmm IS "
+            "'JSON tabla de SPMM → filas y suma de un hash de cada fila (las columnas que escriben "
+            "el sync y el espejo), leída al TERMINAR esa pasada: lo que quedó escrito. De OT, "
+            "clientes y artículos que cambiaron mientras corría, la de al empezar, para que la "
+            "siguiente corra entera.'",
+            "COMMENT ON COLUMN sync_estado.ultima_completa IS "
+            "'Cuándo empezó la última pasada completa que salió bien, hora local del taller sin "
+            "zona. Pasadas RED_DE_SEGURIDAD (3 h) desde acá, se corre entera aunque nada cambie.'",
+            "COMMENT ON COLUMN sync_estado.actualizado_en IS "
+            "'La última vez que el sync miró, haya corrido entero o no (hora local sin zona). Si "
+            "se queda quieta, el Cloud Scheduler dejó de llamar.'",
+        ],
+    ),
+    (
+        # Una tabla nueva y su índice, nada más. Si no llegara a aplicarse, el paso
+        # plan_semanal del espejo falla solo (los pasos anteriores quedan escritos y el sync
+        # lo avisa), la huella de SPMM no se puede leer (cada pasada corre entera, como
+        # antes de las huellas) y Pendientes muestra la semana del Integral vacía: no se
+        # cae nada más.
+        "2026-09-25_plan_semanal",
+        [
+            "CREATE TABLE IF NOT EXISTS plan_semanal ("
+            "id SERIAL PRIMARY KEY, "
+            "semana DATE NOT NULL, "
+            "fecha_original DATE, "
+            "numero_ot INTEGER NOT NULL, "
+            "id_orden_trabajo INTEGER REFERENCES orden_trabajo (id) ON DELETE SET NULL, "
+            "prioridad VARCHAR(30), "
+            "origen VARCHAR(10) NOT NULL DEFAULT 'legacy', "
+            "creado_en TIMESTAMP, "
+            "CONSTRAINT ux_plan_semanal_semana_ot UNIQUE (semana, numero_ot), "
+            "CONSTRAINT ck_plan_semanal_lunes CHECK (EXTRACT(ISODOW FROM semana) = 1), "
+            "CONSTRAINT ck_plan_semanal_origen CHECK (origen IN ('legacy', 'spmm')))",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON TABLE plan_semanal IS "
+            "'Qué OT están programadas cada semana según el plan semanal del Sistema Integral "
+            "(dbo.plansemanal). La escribe el espejo del sync en una ventana de semanas alrededor "
+            "de hoy; es lo que muestra «Semana del …» en Pendientes mientras el Integral es el dueño "
+            "de la materia prima.'",
+            "COMMENT ON COLUMN plan_semanal.semana IS "
+            "'El lunes de la semana. El Integral a veces guarda otro día de la semana: se normaliza "
+            "al lunes y el día original queda en fecha_original.'",
+            "COMMENT ON COLUMN plan_semanal.numero_ot IS "
+            "'El número de OT que ve la gente (el idot del Integral), esté o no en SPMM.'",
+            "COMMENT ON COLUMN plan_semanal.id_orden_trabajo IS "
+            "'La OT de SPMM, sólo si es la del Integral con ese número (mismo artículo, cliente y "
+            "fecha). NULL si no coincide, si SPMM no la tiene o si se borró (ON DELETE SET NULL).'",
+            "COMMENT ON COLUMN plan_semanal.origen IS "
+            "'legacy = la trajo el espejo del Integral (la reescribe en cada pasada); spmm = cargada "
+            "en SPMM (el espejo no la toca).'",
+            "CREATE INDEX IF NOT EXISTS ix_plan_semanal_ot ON plan_semanal (id_orden_trabajo)",
+        ],
+    ),
 ]
 
 

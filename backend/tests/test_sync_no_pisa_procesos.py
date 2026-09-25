@@ -481,7 +481,9 @@ async def test_con_el_integral_corre_el_espejo_y_no_el_7b(monkeypatch, importar_
     assert llamada["respaldar"] == I.SI_NO_HAY_COPIA
     assert llamada["frenar_en_tope"] is True, "una lectura rota del Integral no puede vaciar SPMM"
     assert llamada["db_url"] == "postgresql://u:p@db.ejemplo:6543/postgres"
-    assert "INSERT INTO pieza (" not in sql and "pieza_precio" not in sql, "el 7b no corre"
+    # «INSERT INTO pieza_precio» y no «pieza_precio» a secas: la huella de SPMM del principio
+    # de la pasada (scripts/sync_huella.py) nombra la tabla en su SELECT.
+    assert "INSERT INTO pieza (" not in sql and "INSERT INTO pieza_precio" not in sql, "el 7b no corre"
     # Y el resto del sync sigue.
     assert "INSERT INTO cliente (" in sql
 

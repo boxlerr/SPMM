@@ -478,3 +478,90 @@ async def test_un_numero_de_ot_imposible_no_rompe(session):
         assert r.status_code == 422
         r = await c.post("/materia-prima/canera", json={"celda": "A1", "numero_ot": 99999999999999})
         assert r.status_code == 409 and "No existe la OT 99999999999999 en SPMM" in mensaje(r)
+
+
+# ─────────────────── la semana con el Integral como dueño: su plan semanal ───────────────────
+#
+# Durante la prueba piloto el planificador de SPMM no tiene plan (el 25/09 la tabla estaba
+# vacía en producción) y «Semana del …» salía en 0. Con el Integral como dueño la semana es
+# la de su plan semanal (plan_semanal, lo trae el espejo del sync de dbo.plansemanal), como
+# en su pantalla; con SPMM como dueño, el planificador, como hasta ahora. La respuesta dice
+# de dónde salió (`fuente_semana`) para que la pantalla lo cuente.
+
+
+async def plan_del_integral(session):
+    from backend.domain.PlanSemanal import PlanSemanal
+
+    lunes, siguiente = date(2026, 9, 21), date(2026, 9, 28)
+
+    def fila(semana, numero, id_ot, **extra):
+        return PlanSemanal(semana=semana, fecha_original=semana, numero_ot=numero,
+                           id_orden_trabajo=id_ot, prioridad="Normal", origen="legacy", **extra)
+    session.add_all([
+        fila(lunes, 15012, OT_C),           # sin plan en SPMM: entra igual
+        fila(lunes, 15020, OT_D),
+        fila(lunes, 15021, OT_E),           # terminada
+        fila(lunes, 15022, OT_F),           # suspendida
+        fila(lunes, 15023, OT_G),           # no lleva materia prima
+        fila(lunes, 99999, None),           # no está en SPMM (o no es la del Integral)
+        fila(siguiente, 15011, OT_B),
+        fila(siguiente, 15020, OT_D),       # se arrastra: el taller la vuelve a cargar
+    ])
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_con_el_integral_como_dueno_la_semana_es_su_plan_semanal(session, monkeypatch):
+    await taller(session)
+    await plan_del_integral(session)
+    monkeypatch.setenv("MATERIA_PRIMA_DUENO", "integral")
+    async with cliente(session) as c:
+        r = await c.get("/materia-prima/pendientes", params={"semana": "2026-09-23", "filtro": "todas"})
+        assert r.status_code == 200, r.text
+        d = r.json()["data"]
+        assert d["fuente_semana"] == "integral"
+        assert d["semana"] == {"desde": "2026-09-21", "hasta": "2026-09-27"}
+        # C y D. No A ni H aunque el planificador de SPMM las tenga esta semana; ni la
+        # terminada, la suspendida o la que no lleva; ni la que SPMM no tiene.
+        assert [o["numero_ot"] for o in d["ots"]] == [15012, 15020]
+        assert ids(d) == [9, 5]                  # por número de OT (ninguna pedida)
+        assert d["resumen"]["ot_count"] == 2
+        # El resto de la fila de la OT, como siempre (la fecha requerida sigue saliendo del
+        # planificador de SPMM: la D tiene plan, la C no).
+        assert [o["fecha_requerida"] for o in d["ots"]] == [None, "2026-09-15"]
+
+        d = (await c.get("/materia-prima/pendientes",
+                         params={"semana": "2026-09-28", "filtro": "todas"})).json()["data"]
+        assert [o["numero_ot"] for o in d["ots"]] == [15011, 15020]
+        d = (await c.get("/materia-prima/pendientes", params={"semana": "2026-10-05"})).json()["data"]
+        assert d["ots"] == [] and d["fuente_semana"] == "integral"
+
+        # Por número o todas las abiertas: no hay semana, y no importa el dueño.
+        d = (await c.get("/materia-prima/pendientes", params={"ot": "15010"})).json()["data"]
+        assert d["fuente_semana"] is None and [o["numero_ot"] for o in d["ots"]] == [15010]
+        d = (await c.get("/materia-prima/pendientes", params={"todas_abiertas": "true"})).json()["data"]
+        assert d["fuente_semana"] is None and len(d["ots"]) == 5
+
+
+@pytest.mark.asyncio
+async def test_con_spmm_como_dueno_la_semana_sigue_siendo_la_del_planificador(session):
+    await taller(session)
+    await plan_del_integral(session)
+    d = await MateriaPrimaPendientesService(session).pendientes(semana=date(2026, 9, 21), filtro="todas")
+    assert d["fuente_semana"] == "spmm"
+    assert [o["numero_ot"] for o in d["ots"]] == [15010, 15020, 15024]
+
+
+@pytest.mark.asyncio
+async def test_sin_plan_semanal_legible_la_semana_del_integral_sale_vacia(session, monkeypatch):
+    """Si la migración del plan semanal no se aplicó, la pantalla sale vacía en vez de dar 500
+    (y la sesión sigue viva para lo que venga después)."""
+    await taller(session)
+    await session.execute(text("DROP TABLE plan_semanal"))
+    await session.commit()
+    monkeypatch.setenv("MATERIA_PRIMA_DUENO", "integral")
+    servicio = MateriaPrimaPendientesService(session)
+    d = await servicio.pendientes(semana=date(2026, 9, 21))
+    assert d["ots"] == [] and d["fuente_semana"] == "integral"
+    d = await servicio.pendientes(todas_abiertas=True)
+    assert len(d["ots"]) == 5

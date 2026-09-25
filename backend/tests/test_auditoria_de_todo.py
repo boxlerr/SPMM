@@ -354,9 +354,10 @@ def test_toda_entidad_del_diccionario_se_lee_como_la_nombra_el_taller():
 
 
 def test_el_cron_del_sync_no_ensucia_el_registro():
-    """48 renglones por día de «alguien creó internal › sync» taparían lo que se busca.
+    """144 renglones por día de «alguien creó internal › sync» taparían lo que se busca.
 
-    Cloud Scheduler le pega a `POST /internal/sync` cada 30 minutos. No lo llama una
+    Cloud Scheduler le pega a `POST /internal/sync` cada 10 minutos (desde el 25/09;
+    antes cada 30). No lo llama una
     persona, así que el renglón sale sin nombre y no contesta «quién tocó esto»; y el
     sync ya se loguea solo en Cloud Run con sus propios números. A las tres horas de
     estar en producción, 7 de las 9 filas del registro eran el cron.

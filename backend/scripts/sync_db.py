@@ -24,6 +24,7 @@ import asyncio
 import math
 import os
 import re
+import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -38,7 +39,7 @@ from backend.application.materia_prima.legado import (
     pieza_desde_legacy,
     una_fila_por_codigo,
 )
-from backend.application.materia_prima.dueno import spmm_es_dueno
+from backend.application.materia_prima.dueno import dueno, spmm_es_dueno
 from backend.commons.loggers.logger import logger
 from backend.domain.Formato import Formato
 from backend.domain.Material import Material
@@ -47,6 +48,7 @@ from backend.domain.Pieza import Pieza
 from backend.domain.PiezaPrecio import PiezaPrecio
 from backend.domain.Proveedor import Proveedor
 from backend.infrastructure.db import SessionLocal
+from backend.scripts import sync_huella as huella
 
 # ---------------------------------------------------------------------------
 # Conexión al legacy. Sigue siendo el SQL Server on-prem: por defecto el mismo
@@ -352,9 +354,44 @@ COLS_OT = ["observaciones", "id_prioridad", "id_sector", "id_articulo", "id_clie
            "tercerizado_total", "tercerizado_parcial", "fc", "ttt1"]
 
 
-async def run_sync():
-    logger.info("Iniciando sincronización de base de datos completa...")
+async def run_sync(forzar: bool = False) -> str:
+    """Una pasada del sync. Devuelve 'sin_cambios', 'completa' o 'con_errores' (lo que
+    contesta POST /internal/sync).
+
+    PRIMERO LAS HUELLAS (scripts/sync_huella.py; pedido de Julián del 25/09: el Scheduler
+    pasa a */10 y el sync tiene que trabajar sólo si cambió algo). Una consulta al Integral
+    y otra a SPMM; si las dos son iguales a las de la última pasada completa que salió bien
+    (y fue hace menos de huella.RED_DE_SEGURIDAD), no se hace NADA más: ni semillas, ni
+    clientes, ni artículos, ni espejo, ni desfasaje. Un renglón de log y listo.
+
+    Si cambió el Integral, pasada completa. Si cambió SÓLO SPMM en las tablas del espejo,
+    pasada completa y un WARNING: alguien escribió ahí por afuera (el backend viejo de
+    Render, si se despierta) y el espejo lo restituye. Si una huella no se puede leer, o
+    `forzar`, pasada completa: saltear por error es lo único que no puede pasar.
+
+    Las huellas se guardan sólo si la pasada completa salió bien de punta a punta (ver
+    `ok` abajo): si algo falló, la próxima pasada corre entera otra vez."""
+    arranque = time.perf_counter()
+    empezo = _ahora_ar()
+    modo = dueno()
     async with SessionLocal() as session:
+        guardado, huella_integral, huella_spmm = await _leer_huellas(session, modo)
+        decision = huella.decidir(guardado, huella_integral, huella_spmm, empezo, forzar)
+        if not decision.completa:
+            await _marcar_visto(session, empezo)
+            desde = f"{guardado.ultima_completa:%H:%M}" if guardado and guardado.ultima_completa else "?"
+            logger.info(f"sync: sin cambios en el Integral ni en SPMM desde {desde} — no se hace "
+                        f"nada ({(time.perf_counter() - arranque) * 1000:.0f} ms)")
+            return "sin_cambios"
+        if decision.alerta:
+            logger.warning(f"sync: {decision.motivo}")
+        else:
+            logger.info(f"sync: pasada completa — {decision.motivo}")
+
+        # Si la pasada deja SPMM igual al Integral de punta a punta. Cualquier paso que
+        # falle (o un espejo que no reflejó todo) la baja, y entonces no se guardan huellas.
+        ok = True
+        logger.info("Iniciando sincronización de base de datos completa...")
         try:
             # 1. Semillas
             logger.info("Asegurando datos semilla (Articulo, Sector, Prioridad)...")
@@ -449,12 +486,17 @@ async def run_sync():
                     n, u = await _altas_y_precios_del_viejo(session)
                     logger.info(f"  -> catálogo del viejo: {n} códigos nuevos, {u} precios nuevos")
                 except Exception as e:
+                    ok = False
                     await session.rollback()
                     logger.warning(f"  -> no se pudieron traer las altas y precios del viejo: {e}")
             else:
                 try:
-                    await _espejo_del_integral(session)
+                    incompleto = _espejo_incompleto(await _espejo_del_integral(session))
+                    if incompleto:
+                        ok = False
+                        logger.info(f"  -> espejo del Integral: {incompleto}; no se guardan las huellas")
                 except Exception as e:
+                    ok = False
                     await session.rollback()
                     logger.warning(f"  -> espejo del Integral (materia prima): no se pudo correr: "
                                    f"{type(e).__name__}: {e}")
@@ -475,12 +517,134 @@ async def run_sync():
                            else "se cargan en SPMM (2026-09-23)."))
 
             # 9. Avisar del desfasaje con el sistema viejo. NO lo arregla: lo cuenta.
-            await _avisar_desfasaje(session)
+            if not await _avisar_desfasaje(session):
+                ok = False
 
-            logger.info("Sincronización completada exitosamente.")
+            logger.info("Sincronización completada exitosamente." if ok else
+                        "Sincronización completada con errores (ver arriba).")
         except Exception as e:
+            ok = False
             await session.rollback()
             logger.error(f"Error durante la sincronización: {e}")
+
+        if not ok:
+            logger.warning("sync: la pasada completa no terminó bien — no se guardan las huellas "
+                           "(la próxima corre entera)")
+            return "con_errores"
+        await _guardar_huellas(session, modo, guardado, huella_integral, huella_spmm, decision,
+                               empezo)
+        return "completa"
+
+
+# ---------------------------------------------------------------------------
+# Las huellas (scripts/sync_huella.py): leerlas, guardarlas y qué cuenta como una pasada
+# que dejó SPMM igual al Integral.
+# ---------------------------------------------------------------------------
+async def _leer_huellas(session, modo):
+    """(guardado, huella del Integral, huella de SPMM), las dos huellas a la vez (la del
+    Integral va en un thread). Lo que no se pudo leer vuelve None, con un WARNING: para
+    decidir() un None es «pasada completa», nunca «no cambió»."""
+
+    async def _integral():
+        try:
+            return await huella.leer_huella_integral(_leer, modo)
+        except Exception as e:
+            logger.warning(f"sync: no se pudo leer la huella del Integral ({type(e).__name__}: {e})")
+            return None
+
+    async def _spmm():
+        guardado = actual = None
+        try:
+            guardado = await huella.leer_estado(session)
+        except Exception as e:
+            await session.rollback()
+            logger.warning(f"sync: no se pudo leer sync_estado ({type(e).__name__}: {e})")
+        try:
+            actual = await huella.leer_huella_spmm(session, modo)
+        except Exception as e:
+            logger.warning(f"sync: no se pudo leer la huella de SPMM ({type(e).__name__}: {e})")
+        # Que la sesión no quede con una transacción de lectura abierta mientras corre el
+        # resto (y una consulta que falló en Postgres deja la transacción abortada).
+        await session.rollback()
+        return guardado, actual
+
+    huella_integral, (guardado, huella_spmm) = await asyncio.gather(_integral(), _spmm())
+    return guardado, huella_integral, huella_spmm
+
+
+async def _marcar_visto(session, ahora):
+    """La hora en que el sync miró y no hizo nada. Si falla, da igual: no es un dato."""
+    try:
+        await huella.marcar_visto(session, ahora)
+    except Exception as e:
+        await session.rollback()
+        logger.debug(f"sync: no se pudo anotar la hora en sync_estado: {e}")
+
+
+async def _guardar_huellas(session, modo, guardado, huella_integral, huella_spmm_inicio,
+                           decision, empezo):
+    """Después de una pasada completa que salió bien: la huella de SPMM de lo que quedó
+    escrito y la del Integral leída al empezar. Sin la del Integral (no se pudo leer) no se
+    guarda nada: la próxima pasada corre entera. De OT, clientes y artículos que cambiaron
+    MIENTRAS corría, lo de al empezar (huella.a_guardar: una OT que entró a mitad de la
+    pasada no recibió su materia prima). Nunca levanta."""
+    if huella_integral is None:
+        return
+    try:
+        despues = await huella.leer_huella_spmm(session, modo)
+        guardar, a_mitad = huella.a_guardar(huella_spmm_inicio, despues)
+        await huella.guardar_estado(session, huella_integral, guardar, empezo, _ahora_ar())
+    except Exception as e:
+        await session.rollback()
+        logger.warning(f"sync: no se pudieron guardar las huellas ({type(e).__name__}: {e}); "
+                       f"la próxima pasada corre entera")
+        return
+    if a_mitad:
+        logger.info(f"sync: {', '.join(a_mitad)} cambiaron mientras corría la pasada; la próxima "
+                    f"corre entera para mirarlas")
+    if decision.alerta:
+        # ¿Quedó como estaba? Es lo que cuenta si el espejo de verdad restituyó.
+        distintas = huella.restituidas(guardado, decision.tablas_espejo, despues)
+        if distintas:
+            logger.warning(f"sync: después de restituir, siguen distintas de la pasada completa "
+                           f"anterior: {', '.join(distintas)} (¿cambió el Integral mientras "
+                           f"corría, o lo que escribieron no es de lo que trae el espejo?)")
+        else:
+            logger.info(f"sync: restituido — {', '.join(decision.tablas_espejo)} quedaron como en "
+                        f"la pasada completa anterior")
+
+
+# Las lecturas del Integral que, vacías, el espejo toma como una lectura que falló (no
+# borra, no apaga, no libera: importar_materia_prima_legacy, «lectura vacía»). Esa pasada
+# no dejó SPMM igual al Integral. El plan semanal también: la ventana abarca 17 semanas y
+# el taller carga de 55 a 93 OT en cada una; vacía es una lectura rota, no un plan vacío.
+_LECTURAS_QUE_NO_PUEDEN_VENIR_VACIAS = ("pieza", "lineas", "cortes", "canera", "otrabajo",
+                                        "plansemanal")
+
+
+def _espejo_incompleto(resultado) -> str | None:
+    """None si el espejo dejó SPMM igual al Integral; si no, por qué no. No hay espejo
+    (la app no está sobre Postgres): None, no hay nada que reflejar."""
+    if resultado is None:
+        return None
+    if resultado.faltan:
+        return "falta la migración de materia prima"
+    if resultado.ocupado:
+        return "otra corrida de la importación tenía el candado"
+    if resultado.fallo:
+        return f"falló el paso {resultado.fallo[0]}"
+    if resultado.ctx is None:
+        return "no corrió ningún paso"
+    vacias = [n for n in _LECTURAS_QUE_NO_PUEDEN_VENIR_VACIAS
+              if n in resultado.ctx.viejo and not resultado.ctx.viejo[n]]
+    if vacias:
+        return f"el Integral devolvió vacío {', '.join(vacias)}"
+    # El tope de borrado (frenar_en_tope): se iba a borrar más de lo que una pasada puede,
+    # y no se borró nada. SPMM quedó con líneas que el Integral ya no tiene.
+    for paso in resultado.pasos:
+        if any("por el tope" in clave and n for clave, n in paso.conteos.items()):
+            return "el tope de borrado frenó líneas que el Integral ya no tiene"
+    return None
 
 
 # El "sin fecha" del legacy. Mismo criterio que cerrar_ot_entregadas_en_legacy.
@@ -705,6 +869,8 @@ async def _avisar_desfasaje(session):
     que ya existe. Lo único que hace es que el desfasaje deje de ser invisible.
 
     Nunca levanta: si el sistema viejo no contesta, el sync no se cae por un aviso.
+    Devuelve si pudo revisar (False = falló y quedó en el log): con False, run_sync no
+    guarda las huellas y la pasada siguiente lo vuelve a intentar.
     """
     try:
         res = await session.execute(text(
@@ -713,14 +879,14 @@ async def _avisar_desfasaje(session):
             "   AND fecha_entrega IS NULL"))
         abiertas = [r[0] for r in res]
         if not abiertas:
-            return
+            return True
 
         filas = await _leer(_Q_YA_ENTREGADAS.format(
             sin_fecha=_SIN_FECHA_LEGACY, ids=",".join(str(i) for i in abiertas)))
         cuantas = len(filas)
         if not cuantas:
             logger.info("  -> desfasaje con el viejo: ninguna OT entregada allá sigue abierta acá")
-            return
+            return True
 
         ots = ", ".join(f"#{f['idot']}" for f in sorted(filas, key=lambda x: x["idot"])[:8])
         if cuantas > 8:
@@ -751,9 +917,11 @@ async def _avisar_desfasaje(session):
                 {"m": mensaje, "mo": motivo, "f": _ahora_ar()})
         await session.commit()
         logger.info(f"  -> desfasaje con el viejo: {cuantas} OT entregadas allá siguen abiertas acá")
+        return True
     except Exception as e:
         # Un aviso que falla no puede tumbar la sincronización.
         logger.warning(f"  -> no se pudo revisar el desfasaje con el sistema viejo: {e}")
+        return False
 
 
 async def main():

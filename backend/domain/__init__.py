@@ -19,6 +19,8 @@ from backend.domain.PiezaPrecio import PiezaPrecio
 from backend.domain.PiezaRecorte import PiezaRecorte
 from backend.domain.OrdenTrabajoPiezaCorte import OrdenTrabajoPiezaCorte
 from backend.domain.CaneraOcupacion import CaneraOcupacion
+# El plan semanal del Sistema Integral (25/09/2026): qué OT se programaron cada semana.
+from backend.domain.PlanSemanal import PlanSemanal
 from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
 from backend.domain.Articulo import Articulo
 from backend.domain.Maquinaria import Maquinaria

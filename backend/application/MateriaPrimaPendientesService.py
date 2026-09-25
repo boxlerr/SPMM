@@ -5,18 +5,28 @@ QUÉ OT ENTRAN (EL UNIVERSO)
   · `ot=N`: esa OT (N es el número que ve la gente, id_otvieja), esté como esté y sin
     mirar la semana: pedirla por número es querer verla.
   · `todas_abiertas`: todas las OT abiertas (ni finalizadas ni suspendidas).
-  · si no, una SEMANA (la de hoy si no se pide otra): las abiertas que tienen algún
-    proceso planificado que arranca antes de que termine el domingo. Incluye las que se
-    arrastran de semanas anteriores: una OT planificada para el lunes pasado que sigue
-    abierta sigue necesitando su material.
+  · si no, una SEMANA (la de hoy si no se pide otra). De dónde sale depende de quién es el
+    dueño de la materia prima (application/materia_prima/dueno.py), y la respuesta lo
+    dice en `fuente_semana`:
+      - 'integral' (la prueba piloto): las OT abiertas del PLAN SEMANAL DEL INTEGRAL de ese
+        lunes (tabla plan_semanal, la trae el espejo del sync de dbo.plansemanal). Es lo
+        que hace «Semana del …» en el Integral, y lo pidió la reunión con Lucas: Maxi elige
+        la semana y ve las OT que el taller programó. El planificador de SPMM no sirve
+        para esto durante la prueba: su plan está vacío (el 25/09, 0 filas en producción)
+        y la semana salía siempre en 0. Una OT que sigue de una semana a otra el taller la
+        vuelve a cargar en la semana siguiente, así que acá no se arrastra nada;
+      - 'spmm': las abiertas que tienen algún proceso planificado en el planificador de
+        SPMM que arranca antes de que termine el domingo. Incluye las que se arrastran de
+        semanas anteriores: una OT planificada para el lunes pasado que sigue abierta sigue
+        necesitando su material.
 
 En los tres casos quedan afuera las OT marcadas «No lleva materias primas»: no hay nada
 que comprarles.
 
-LA SEMANA SALE DEL PLANIFICADOR
+LA SEMANA DEL PLANIFICADOR (con SPMM como dueño)
 
-En el viejo salía de un plan semanal cargado a mano (plansemanal). Acá la reemplaza el
-plan: «cuándo arranca un proceso» es el «Inicio estimado» que muestra el Gantt, calculado
+En el viejo salía de un plan semanal cargado a mano (plansemanal). Con SPMM como dueño la
+reemplaza el plan: «cuándo arranca un proceso» es el «Inicio estimado» que muestra el Gantt, calculado
 con LA MISMA conversión que GET /planificacion (PlanificacionAPI.obtener_planificacion):
 cada fila del plan se lee con su propio arranque (`inicio_base`, o el deducido de su
 `creado_en` para los planes anteriores al 11/09) y sus minutos de trabajo se pasan a
@@ -52,6 +62,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.application.MateriaPrimaOTService import Resultado, a_json, lineas_a_dict
 from backend.application.materia_prima.canera import canera_vigente, celda_texto, celdas_de_ots, parse_celda
+from backend.application.materia_prima.dueno import INTEGRAL, dueno
 from backend.application.materia_prima.estado import ots_en_curso
 from backend.application.materia_prima.usuario import nombre_solo
 from backend.commons.exceptions.BusinessException import BusinessException
@@ -171,7 +182,7 @@ class MateriaPrimaPendientesService:
             raise BusinessException(f"Filtro «{filtro}» desconocido: va {', '.join(FILTROS)}.")
         numero = _numero_ot(ot)
 
-        rango = None
+        rango = fuente = None
         if numero is not None:
             cabeceras = await self.repo.ots_por_numero(numero) if numero <= MAXIMO_NUMERO_OT else []
         else:
@@ -179,9 +190,15 @@ class MateriaPrimaPendientesService:
             if not todas_abiertas:
                 lunes = lunes_de(semana or ahora_ar().date())
                 rango = (lunes, lunes + timedelta(days=6))
+                fuente = "integral" if dueno() == INTEGRAL else "spmm"
+                if fuente == "integral":
+                    # Las del plan semanal del Integral ese lunes, de las abiertas (y que
+                    # llevan materia prima: ots_abiertas ya las filtró).
+                    del_plan_semanal = await self.repo.ots_del_plan_semanal(lunes) or set()
+                    cabeceras = [c for c in cabeceras if c[0].id in del_plan_semanal]
 
         inicios = await self.inicios_estimados([c[0].id for c in cabeceras])
-        if rango is not None:
+        if fuente == "spmm":
             # «Antes de que termine el domingo»: < el lunes siguiente a las 00:00.
             corte = datetime.combine(rango[0] + timedelta(days=7), time(0, 0))
             cabeceras = [c for c in cabeceras if c[0].id in inicios and inicios[c[0].id] < corte]
@@ -282,6 +299,9 @@ class MateriaPrimaPendientesService:
 
         return a_json({
             "semana": {"desde": rango[0], "hasta": rango[1]} if rango else None,
+            # De dónde salió la semana: 'integral' (su plan semanal) o 'spmm' (el
+            # planificador); None si no se pidió una semana (ot=N o todas_abiertas).
+            "fuente_semana": fuente,
             "resumen": resumen,
             "ots": lista_ots,
             "lineas": lineas,

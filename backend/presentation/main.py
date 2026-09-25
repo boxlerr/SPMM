@@ -390,13 +390,18 @@ def health_check(response: Response):
     }
 
 @app.post("/internal/sync")
-async def internal_sync(request: Request):
+async def internal_sync(request: Request, forzar: bool = False):
     """
     Corre UNA pasada del sync y devuelve el resultado.
 
     Existe para hosts serverless (Cloud Run), donde el contenedor se apaga si no
     hay tráfico y el loop de fondo no sobrevive: ahí el sync lo dispara un cron
     externo (Cloud Scheduler) pegándole a este endpoint.
+
+    Desde el 25/09 la pasada mira primero si cambió algo (scripts/sync_huella.py) y, si
+    no, no hace nada: `pasada` dice 'sin_cambios', 'completa' o 'con_errores'.
+    `?forzar=true` la corre entera igual (a mano, por ejemplo después de tocar algo en
+    la base que el sync tiene que volver a mirar).
 
     Protegido con SYNC_TOKEN. Si la variable no está seteada, el endpoint queda
     deshabilitado (para que nadie pueda dispararlo en un entorno mal configurado).
@@ -408,9 +413,10 @@ async def internal_sync(request: Request):
         raise HTTPException(status_code=401, detail="No autorizado")
 
     inicio = datetime.now()
-    await run_sync_once()
+    pasada = await run_sync_once(forzar=forzar)
     return {
         "status": "ok",
+        "pasada": pasada,
         "duracion_seg": round((datetime.now() - inicio).total_seconds(), 1),
         "timestamp": inicio.isoformat(),
     }

@@ -309,9 +309,9 @@ def describir(metodo: str, ruta: str, estado: int, usuario: str | None,
 # contar nada. (Entrar y salir SÍ, desde el 23/09: ver «INGRESOS Y SALIDAS».)
 #
 # Y lo que se pega el servidor a sí mismo tampoco. Cloud Scheduler llama a
-# `POST /internal/sync` cada 30 minutos: son 48 renglones por día que dicen «alguien
-# creó internal › sync» —sin persona, porque no hay ninguna— y en una semana serían
-# más de 300, tapando lo que este registro viene a contestar. El sync ya se loguea
+# `POST /internal/sync` cada 10 minutos (desde el 25/09; antes cada 30): son 144 renglones
+# por día que dicen «alguien creó internal › sync» —sin persona, porque no hay ninguna— y
+# en una semana serían más de mil, tapando lo que este registro viene a contestar. El sync ya se loguea
 # solo, con sus números, en Cloud Run. Descubierto el mismo día que salió esto: a las
 # tres horas de vida, 7 de las 9 filas eran el cron.
 SIN_AUDITAR = (
@@ -319,7 +319,7 @@ SIN_AUDITAR = (
     ("POST", "/auth/token"),
     ("PUT", "/notificaciones/leer-todas"),
     ("PUT", "/notificaciones/"),   # /notificaciones/{id}/leida
-    ("POST", "/internal/"),        # el cron del sync, cada 30 minutos
+    ("POST", "/internal/"),        # el cron del sync, cada 10 minutos
     # La vista previa del alta de un insumo (descripción armada, código sugerido,
     # duplicados): es un POST porque manda el formulario entero, pero no escribe nada. El
     # front la pide mientras se tipea (a los 300 ms de soltar el teclado), así que cada

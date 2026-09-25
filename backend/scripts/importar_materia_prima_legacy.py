@@ -49,6 +49,12 @@ PASOS (en este orden; --pasos elige cuáles)
                espejo del sync no borra ninguna (a mano, avisa y sigue).
   cortes       otcortesmp → cortes de la primera línea de ese (OT, código).
   canera       caniera → canera_ocupacion (origen 'legacy').
+  plan_semanal dbo.plansemanal → plan_semanal (origen 'legacy'): qué OT están programadas
+               cada semana, lo que filtra «Semana del …» en Pendientes. Sólo la ventana
+               de semanas alrededor de hoy (legado.ventana_plan_semanal) y, adentro,
+               igual al Integral: se inserta, se corrige y se borra lo que cambió; fuera de
+               la ventana no se toca nada. La fecha va al lunes de su semana, sin basura
+               ni repetidos, y la OT se enlaza sólo si es la del Integral (ots_del_viejo).
 
 Cada paso imprime cuánto tardó (el día del corte el viejo está congelado mientras corre).
 
@@ -67,8 +73,8 @@ CÓMO SE CORRE (desde la raíz del repo)
         --db-url postgresql://postgres@127.0.0.1:55432/spmm_import --aplicar       # base local
 
 --ots (pedido de Lucas, para re-correr sobre las OT del plan de la prueba) limita los
-pasos lineas, cortes y canera a esas OT, por su número visible (el del viejo). Los demás
-pasos corren igual, sobre todo el catálogo.
+pasos lineas, cortes, canera y plan_semanal a esas OT, por su número visible (el del
+viejo). Los demás pasos corren igual, sobre todo el catálogo.
 
 EN SECO (por defecto) sólo LEE el viejo y SPMM e imprime qué haría, con conteos y
 ejemplos. No abre transacciones de escritura ni consume secuencias: los pasos que dependen
@@ -108,7 +114,7 @@ import re
 import sys
 import time
 from collections import Counter, defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from backend.application.materia_prima.legado import (
@@ -122,14 +128,16 @@ from backend.application.materia_prima.legado import (
     norm_codigo,
     ocupacion_desde_ubicacion,
     pieza_desde_legacy,
+    plan_semanal_desde_legacy,
     recorte_desde_texto,
     texto_limpio,
     una_fila_por_codigo,
+    ventana_plan_semanal,
 )
 from backend.infrastructure.auditoria_movimientos import ahora_ar
 
 PASOS = ("catalogos", "proveedores", "insumos", "precios", "stock", "recortes", "lineas",
-         "cortes", "canera")
+         "cortes", "canera", "plan_semanal")
 
 # Los pasos del ESPEJO que corre el sync en cada pasada mientras el Integral es el dueño
 # (application/materia_prima/dueno.py). Todos menos recortes: ese paso sólo AGREGA (un
@@ -158,6 +166,9 @@ CAMBIOS = {
     "cortes": ("líneas cuyos cortes cambian (se reemplazan)",),
     "canera": ("ocupaciones nuevas (origen legacy)",
                "ocupaciones del viejo que se cierran (hasta = ahora)"),
+    "plan_semanal": ("OT de una semana que se agregan (INSERT)",
+                     "OT de una semana que cambian (UPDATE)",
+                     "OT de una semana que ya no están en el Integral (DELETE)"),
 }
 
 # El candado de la corrida (pg_try_advisory_xact_lock): el sync corre el espejo cada
@@ -240,6 +251,15 @@ Q_OTRABAJO = ("SELECT idot, LTRIM(RTRIM(idarticulo)) AS idarticulo, idcliente, f
               "FROM dbo.otrabajo")
 Q_CORTES = "SELECT idot, idpieza, cant, largo FROM dbo.otcortesmp"
 Q_CANERA = "SELECT ubicacion, ot FROM dbo.caniera"
+# El plan semanal, sólo la ventana (leer_viejo pone las fechas: el primer lunes y el lunes
+# siguiente al último, en 'yyyymmdd', el único formato que este SQL Server lee sin
+# confundir día y mes). Un día que no es lunes cae en la semana de su lunes, así que se
+# pide hasta el domingo de la última semana.
+Q_PLAN_SEMANAL = """
+SELECT fecha, ot, PRIORIDAD
+FROM dbo.plansemanal
+WHERE fecha >= '{desde}' AND fecha < '{hasta}'
+"""
 
 
 def _q_piezas():
@@ -258,19 +278,38 @@ LECTURAS = {
     "lineas": (Q_LINEAS, ("lineas", "cortes")),
     # stock y canera también: el número de OT que nombran se cuelga de la OT de SPMM sólo
     # si ES la del viejo (ots_del_viejo).
-    "otrabajo": (Q_OTRABAJO, ("stock", "lineas", "cortes", "canera")),
+    "otrabajo": (Q_OTRABAJO, ("stock", "lineas", "cortes", "canera", "plan_semanal")),
     "cortes": (Q_CORTES, ("cortes",)),
     "canera": (Q_CANERA, ("canera",)),
+    "plansemanal": (Q_PLAN_SEMANAL, ("plan_semanal",)),
 }
 
 
-async def leer_viejo(pasos, silencioso: bool = False) -> dict[str, list[dict]]:
+def limites_plan_semanal(ventana) -> tuple[str, str]:
+    """('yyyymmdd' del primer lunes, 'yyyymmdd' del lunes siguiente al último) de la
+    ventana: el rango [desde, hasta) de fechas del Integral que la forman. Lo usan la
+    lectura de acá y la huella del sync (scripts/sync_huella.py), que mira lo mismo."""
+    desde, hasta = ventana
+    return f"{desde:%Y%m%d}", f"{hasta + timedelta(days=7):%Y%m%d}"
+
+
+def q_plan_semanal(ventana) -> str:
+    """Q_PLAN_SEMANAL con las fechas de la ventana (primer lunes, último lunes)."""
+    desde, hasta = limites_plan_semanal(ventana)
+    return Q_PLAN_SEMANAL.format(desde=desde, hasta=hasta)
+
+
+async def leer_viejo(pasos, silencioso: bool = False, ventana=None) -> dict[str, list[dict]]:
+    """Lo que leen esos pasos del viejo. `ventana` es la del plan semanal (la misma que
+    usa después el paso: importar() la calcula una vez); None = la de hoy."""
     from backend.scripts.sync_db import _leer
 
     viejo = {}
     for nombre, (consulta, usan) in LECTURAS.items():
         if not set(usan) & set(pasos):
             continue
+        if nombre == "plansemanal":
+            consulta = q_plan_semanal(ventana or ventana_plan_semanal())
         viejo[nombre] = await _leer(consulta or _q_piezas())
         if not silencioso:
             print(f"  viejo: {nombre:<10} {len(viejo[nombre]):>6} filas", flush=True)
@@ -278,14 +317,15 @@ async def leer_viejo(pasos, silencioso: bool = False) -> dict[str, list[dict]]:
 
 
 # Por qué columna dice cada lectura del viejo de qué OT es (su número visible).
-_COLUMNA_OT = {"lineas": "Idot", "cortes": "idot", "otrabajo": "idot", "canera": "ot"}
+_COLUMNA_OT = {"lineas": "Idot", "cortes": "idot", "otrabajo": "idot", "canera": "ot",
+               "plansemanal": "ot"}
 
 
 def filtrar_ots(viejo: dict[str, list[dict]], ots) -> dict[str, list[dict]]:
-    """Lo leído del viejo con las lecturas de OT (líneas, cortes, cabecera y cañera)
-    limitadas a esas OT (--ots). El catálogo, los precios, el stock y los recortes no son
-    de ninguna OT: quedan enteros. La cabecera entera queda además en «otrabajo_todas»:
-    el stock cuelga cada movimiento de su OT, y eso no depende de --ots."""
+    """Lo leído del viejo con las lecturas de OT (líneas, cortes, cabecera, cañera y plan
+    semanal) limitadas a esas OT (--ots). El catálogo, los precios, el stock y los
+    recortes no son de ninguna OT: quedan enteros. La cabecera entera queda además en
+    «otrabajo_todas»: el stock cuelga cada movimiento de su OT, y eso no depende de --ots."""
     if not ots:
         return viejo
     ots = set(ots)
@@ -539,7 +579,7 @@ async def releer_lineas_del_viejo(numeros) -> list[dict]:
 
 class Contexto:
     def __init__(self, conn, viejo, aplicar, ejemplos, respaldar=True, ots=None, releer=None,
-                 tope_borrado=TOPE_BORRADO_LINEAS, frenar_en_tope=False):
+                 tope_borrado=TOPE_BORRADO_LINEAS, frenar_en_tope=False, ventana=None):
         self.conn = conn
         self.viejo = viejo
         self.aplicar = aplicar
@@ -562,6 +602,9 @@ class Contexto:
         self.frenar_en_tope = frenar_en_tope
         self.ahora = ahora_ar()
         self.hoy = self.ahora.date()
+        # La ventana del plan semanal (primer lunes, último lunes): la MISMA con que se leyó
+        # dbo.plansemanal (importar() la pasa). None = la de `hoy`, al correr el paso.
+        self.ventana = ventana
         self.estado: Estado | None = None
         self.pasos: list[Paso] = []
         self._falso = 0
@@ -689,10 +732,13 @@ class _Transaccion:
     (importar() la abre, con el candado), así el paso que falla no deja nada escrito y
     los anteriores quedan. En seco no abre nada."""
 
-    def __init__(self, ctx):
+    def __init__(self, ctx, recargar: bool = True):
         self.ctx = ctx
         self.tx = None
         self.antes = None
+        # False en un paso cuyas escrituras no cambian nada de lo que tiene el Estado (el
+        # plan semanal): releer las 17 mil piezas para nada.
+        self.recargar = recargar
 
     async def __aenter__(self):
         if self.ctx.aplicar:
@@ -709,7 +755,7 @@ class _Transaccion:
             await self.tx.commit()
             # Con --aplicar los pasos no tocan el estado en memoria: lo vuelven a leer de
             # la base (ids nuevos incluidos). Si el paso no escribió nada, no cambió.
-            if self.antes is None or self.ctx.conn.escrituras != self.antes:
+            if self.recargar and (self.antes is None or self.ctx.conn.escrituras != self.antes):
                 await self.ctx.estado.cargar(self.ctx.conn)
         else:
             await self.tx.rollback()
@@ -1721,10 +1767,121 @@ async def paso_canera(ctx: Contexto):
             est.canera += [{"id": ctx.id_falso(), "origen": "legacy", **c} for c in crear]
 
 
+_Q_PLAN_SEMANAL_SPMM = ("SELECT id, semana, fecha_original, numero_ot, id_orden_trabajo, prioridad, "
+                        "origen FROM plan_semanal")
+
+
+async def paso_plan_semanal(ctx: Contexto):
+    """dbo.plansemanal → plan_semanal, en la ventana (ver legado.plan_semanal_desde_legacy
+    y el modelo PlanSemanal). Dentro de la ventana, SPMM queda igual al Integral: lo que
+    falta se inserta, lo que cambió (el día original, la prioridad, a qué OT de SPMM se
+    enlaza) se corrige y lo que el Integral ya no tiene se borra. Fuera de la ventana y lo
+    que tiene origen 'spmm' no se toca.
+
+    La OT se enlaza con la identidad del resto del espejo (ots_del_viejo): número,
+    artículo, cliente y fecha. Si no coincide, o SPMM no la tiene, la fila queda con el
+    número y sin OT: cuando la OT llegue a SPMM (o se corrija), la pasada siguiente la
+    enlaza.
+
+    Una lectura VACÍA de toda la ventana es una lectura que falló (el taller carga de 55 a
+    93 OT por semana): no se borra nada. Con --ots sí puede venir vacía.
+
+    Lo que hay en SPMM se lee DENTRO del savepoint del paso: si falta la tabla (la
+    migración 2026-09-25_plan_semanal no se aplicó), falla sólo este paso y los anteriores
+    quedan escritos."""
+    paso = ctx.paso("plan_semanal")
+    est = ctx.estado
+    desde, hasta = ctx.ventana or ventana_plan_semanal(ctx.hoy)
+    filas = ctx.viejo["plansemanal"]
+    deseadas, descartes = plan_semanal_desde_legacy(filas, (desde, hasta))
+    iguales, distintas = ots_del_viejo(ctx)
+
+    paso.contar("filas del Integral en la ventana", len(filas))
+    for motivo, n in descartes.items():
+        paso.contar(f"descartadas: {motivo}", n)
+    sin_ot = Counter()
+    for (_, numero), d in deseadas.items():
+        if numero in iguales:
+            d["id_orden_trabajo"] = est.ots[numero]["id"]
+            continue
+        d["id_orden_trabajo"] = None
+        sin_ot["OT de SPMM que no son la del Integral (quedan sin enlazar)" if numero in distintas
+               else "OT sin cabecera en el Integral (quedan sin enlazar)" if numero in est.ots
+               else "OT que no están en SPMM (quedan sin enlazar)"] += 1
+    for motivo, n in sin_ot.items():
+        paso.contar(motivo, n)
+
+    lectura_vacia = not filas and ctx.ots is None
+    if lectura_vacia:
+        paso.alertar(f"el Integral no devolvió ninguna fila del plan semanal entre el {desde:%d/%m} "
+                     f"y la semana del {hasta:%d/%m/%Y}: no se borra nada en esta corrida")
+
+    async with _Transaccion(ctx, recargar=False):
+        if getattr(est, "plan_semanal", None) is None:
+            est.plan_semanal = [dict(r) for r in await ctx.conn.fetch(_Q_PLAN_SEMANAL_SPMM)]
+        actuales, de_spmm = {}, set()
+        for r in est.plan_semanal:
+            semana = _dia(r["semana"])
+            if semana is None or not (desde <= semana <= hasta):
+                continue
+            clave = (semana, r["numero_ot"])
+            if r.get("origen") != "legacy":
+                de_spmm.add(clave)
+            elif ctx.ots is None or r["numero_ot"] in ctx.ots:
+                actuales[clave] = r
+
+        crear, cambiar = [], []
+        for clave, d in sorted(deseadas.items()):
+            actual = actuales.get(clave)
+            if actual is None:
+                if clave in de_spmm:
+                    paso.advertir(f"plan semanal {clave[0]:%d/%m}: la OT {clave[1]} ya la cargaron en "
+                                  f"SPMM; no se pisa")
+                    continue
+                crear.append({"semana": clave[0], "numero_ot": clave[1], **d})
+            elif (_dia(actual["fecha_original"]), actual["prioridad"], actual["id_orden_trabajo"]) != (
+                    d["fecha_original"], d["prioridad"], d["id_orden_trabajo"]):
+                cambiar.append({"id": actual["id"], **d})
+        borrar = [] if lectura_vacia else [r for clave, r in actuales.items() if clave not in deseadas]
+
+        paso.contar("OT-semana en la ventana del Integral", len(deseadas))
+        paso.contar("OT de una semana que se agregan (INSERT)", len(crear))
+        paso.contar("OT de una semana que cambian (UPDATE)", len(cambiar))
+        paso.contar("OT de una semana que ya no están en el Integral (DELETE)", len(borrar))
+        for c in crear[:ctx.ejemplos]:
+            paso.ejemplo(f"semana del {c['semana']:%d/%m}: OT {c['numero_ot']}"
+                         + ("" if c["id_orden_trabajo"] else " (sin OT en SPMM)"))
+
+        if ctx.aplicar:
+            if borrar:
+                await ctx.conn.execute("DELETE FROM plan_semanal WHERE id = ANY($1::int[])",
+                                       [r["id"] for r in borrar])
+            if cambiar:
+                await _actualizar(ctx.conn, "plan_semanal", cambiar,
+                                  {"fecha_original": "date", "prioridad": "text", "id_orden_trabajo": "int4"})
+            if crear:
+                for c in crear:
+                    c.update(origen="legacy", creado_en=ctx.ahora)
+                await _insertar(ctx.conn, "plan_semanal", crear,
+                                {"semana": "date", "fecha_original": "date", "numero_ot": "int4",
+                                 "id_orden_trabajo": "int4", "prioridad": "text", "origen": "text",
+                                 "creado_en": "timestamp"})
+            if borrar or cambiar or crear:
+                est.plan_semanal = None  # la próxima corrida sobre este Estado la relee
+        else:
+            quitar = {id(r) for r in borrar}
+            por_id = {r["id"]: r for r in est.plan_semanal}
+            for c in cambiar:
+                por_id[c["id"]].update(c)
+            est.plan_semanal = [r for r in est.plan_semanal if id(r) not in quitar]
+            est.plan_semanal += [{"id": ctx.id_falso(), "origen": "legacy", **c} for c in crear]
+
+
 FUNCIONES = {
     "catalogos": paso_catalogos, "proveedores": paso_proveedores, "insumos": paso_insumos,
     "precios": paso_precios, "stock": paso_stock, "recortes": paso_recortes,
     "lineas": paso_lineas, "cortes": paso_cortes, "canera": paso_canera,
+    "plan_semanal": paso_plan_semanal,
 }
 
 
@@ -1801,8 +1958,8 @@ def _args(argv=None):
     p.add_argument("--pasos", default=",".join(PASOS),
                    help="pasos separados por coma (en este orden: " + ",".join(PASOS) + ")")
     p.add_argument("--ots", type=_lista_de_ots, default=None, metavar="15692,14534,...",
-                   help="limita los pasos lineas, cortes y canera a estas OT (su número "
-                        "visible); los demás pasos corren igual")
+                   help="limita los pasos lineas, cortes, canera y plan_semanal a estas OT (su "
+                        "número visible); los demás pasos corren igual")
     p.add_argument("--db-url", default=None, help="Postgres destino (por defecto SUPABASE_DB_URL por 6543)")
     p.add_argument("--ejemplos", type=int, default=10, help="ejemplos por paso")
     a = p.parse_args(argv)
@@ -1894,7 +2051,8 @@ async def importar(pasos=PASOS, aplicar: bool = False, db_url: str | None = None
                 El sync pasa la de la app ya pasada al 6543 (por_el_pooler).
     respaldar   copia a backup_* lo que reescribe o borra: True a todas, False a ninguna,
                 SI_NO_HAY_COPIA (el sync) sólo a las que todavía no existen, tabla por tabla.
-    ots         números de OT a los que se limitan lineas, cortes y canera; None = todas.
+    ots         números de OT a los que se limitan lineas, cortes, canera y plan_semanal;
+                None = todas.
     silencioso  no imprime nada (el sync loguea el renglón del Resultado).
     frenar_en_tope  por encima de TOPE_BORRADO_LINEAS no borra ninguna línea (el espejo
                 del sync); sin esto avisa y sigue (a mano, con alguien mirando).
@@ -1919,7 +2077,8 @@ async def importar(pasos=PASOS, aplicar: bool = False, db_url: str | None = None
     decir(f"Importación de materia prima — {'APLICAR' if aplicar else 'EN SECO'} — destino "
           + re.sub(r"//[^@]*@", "//…@", url))
     decir(f"Pasos: {', '.join(pasos)}"
-          + (f" (lineas, cortes y canera sólo de las OT {', '.join(map(str, sorted(set(ots))))})" if ots else ""))
+          + (f" (lineas, cortes, canera y plan_semanal sólo de las OT {', '.join(map(str, sorted(set(ots))))})"
+             if ots else ""))
 
     # Primero la base destino, sólo para verificar la migración (y cerrar): no tiene
     # sentido leer 100 mil filas del viejo para frenar después.
@@ -1938,7 +2097,10 @@ async def importar(pasos=PASOS, aplicar: bool = False, db_url: str | None = None
 
     decir("Leyendo el sistema viejo (sólo SELECT)…")
     inicio = time.perf_counter()
-    viejo = filtrar_ots(await leer_viejo(pasos, silencioso), ots)
+    # La ventana del plan semanal, una vez: la lectura y el paso usan la misma aunque la
+    # corrida cruce la medianoche del domingo.
+    ventana = ventana_plan_semanal(ahora_ar().date())
+    viejo = filtrar_ots(await leer_viejo(pasos, silencioso, ventana), ots)
     decir(f"  ({time.perf_counter() - inicio:.1f} s)")
 
     conn = _Escrituras(await asyncpg.connect(url, statement_cache_size=0))
@@ -1962,7 +2124,7 @@ async def importar(pasos=PASOS, aplicar: bool = False, db_url: str | None = None
         # Qué copias se hacen, con el candado ya tomado (SI_NO_HAY_COPIA mira la base).
         copias = await copias_a_hacer(conn, respaldar)
         ctx = res.ctx = Contexto(conn, viejo, aplicar, ejemplos, respaldar=copias, ots=ots,
-                                 frenar_en_tope=frenar_en_tope)
+                                 frenar_en_tope=frenar_en_tope, ventana=ventana)
         ctx.estado = await Estado().cargar(conn)
         for nombre in pasos:
             inicio = time.perf_counter()

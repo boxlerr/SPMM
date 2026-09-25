@@ -50,10 +50,13 @@ INTEGRAL = "integral"
 SPMM = "spmm"
 
 # Cada cuántos minutos corre el sync, y con él el espejo: el Cloud Scheduler `spmm-sync`
-# está en */30 (verificado el 24/09 con gcloud). Lo único que lo usa es el texto del aviso,
-# pero el aviso le promete a Carolina y a Maxi cuánto tarda en verse acá lo que cargan en el
-# Integral, así que tiene que decir la verdad: si el Scheduler pasa a */10, se cambia acá.
-FRECUENCIA_ESPEJO_MIN = 30
+# pasa a */10 con el deploy del 25/09 (pedido de Julián: «hacelo cada 10 min al sync»; antes
+# */30, verificado el 24/09 con gcloud). Se puede cada 10 porque la pasada que no encuentra
+# cambios en el Integral ni en SPMM ya no hace nada (scripts/sync_huella.py). Lo único que
+# usa esta constante es el texto del aviso, pero el aviso le promete a Carolina y a Maxi
+# cuánto tarda en verse acá lo que cargan en el Integral, así que tiene que decir la verdad:
+# si el Scheduler cambia, se cambia acá.
+FRECUENCIA_ESPEJO_MIN = 10
 
 # El cartel de la pantalla y el 422 de las escrituras dicen lo mismo: quien intenta
 # cargar algo tiene que saber DÓNDE se carga, que no hace falta hacer nada más y cuánto
