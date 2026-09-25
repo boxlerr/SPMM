@@ -66,6 +66,16 @@ export const NOVEDADES: Novedad[] = [
             "Abajo en el menú de la izquierda, al lado de tu nombre, hay un megáfono: lo tocás y se abre de nuevo el último aviso, con su botón para ir a Novedades. Mientras tenga un puntito rojo es que hay un aviso que todavía no leíste. El puntito se apaga cuando tocás «Entendido» o «Ver todas las novedades», o cuando lo tuviste abierto un rato; si lo cerrás enseguida, sigue prendido. Con el menú achicado, el megáfono está arriba de tu inicial, y en el teléfono el puntito se ve también en el botón redondo del menú. Antes el aviso salía una sola vez: si lo cerrabas sin leerlo, no había cómo volver a verlo.",
     },
     {
+        id: "vista-previa-orden-y-atraso",
+        fecha: "2026-09-25",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "En la vista previa del plan, las OT van en el orden en que se arrancan y terminar el día prometido ya no figura como atraso",
+        detalle:
+            "La lista de OT sale de la primera que se empieza a trabajar a la última que se termina (si dos arrancan juntas, primero la que termina antes), y el Exportar sale en ese mismo orden. Antes salían en un orden que no tenía que ver con el plan. Y una OT que termina el mismo día prometido, a la hora que sea, ya no marca «+1 días»: por ejemplo la 14570, que termina el 2/10 a las 12:35 y se prometió para el 2/10. El atraso se cuenta en días de calendario, y lo mismo vale para el filtro «Solo las que llegan tarde» y la columna «Termina tarde» del exportado.",
+        href: "/operaciones",
+    },
+    {
         id: "trabas-se-recalcula-una-vez",
         fecha: "2026-09-25",
         tipo: "mejora",

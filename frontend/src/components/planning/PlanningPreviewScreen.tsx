@@ -278,6 +278,53 @@ const claveBase = (item: { orden_id: number; proceso_id: number; secuencia?: num
 const claveVieja = (item: { orden_id: number; proceso_id: number }) =>
     `${item.orden_id}-${item.proceso_id}`;
 
+/** Misma forma que acepta `partesDeFecha` en lib/exportar: «2026-10-02», con hora o sin
+ *  ella, y con zona (grupo 7) sólo si la trae. */
+const RE_FECHA_BACKEND = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?$/i;
+
+/**
+ * El día de calendario de una fecha del backend, como número de días corridos (para
+ * restar dos y saber cuántos días hay entre ellas).
+ *
+ * Las fechas del sistema son hora local de Argentina sin zona ([[fechas-todas-sin-zona]]):
+ * «2026-10-02T12:35:00» es el 2/10 y «2026-10-02» también. Por eso se leen los dígitos
+ * tal cual y no con `new Date()`, que a un «2026-10-02» pelado lo toma como medianoche
+ * UTC, y acá eso ya es el 1/10 a las 21. Sólo lo que trae zona explícita se pasa a la
+ * hora de esta computadora. No descarta la marca 1950: de eso se ocupa quien la usa.
+ */
+const diaDeCalendario = (valor: string | null | undefined): number | null => {
+    if (!valor) return null;
+    const texto = valor.trim();
+    const m = RE_FECHA_BACKEND.exec(texto);
+    if (m && !m[7]) return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86_400_000;
+    const d = new Date(texto);
+    if (isNaN(d.getTime())) return null;
+    return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86_400_000;
+};
+
+/**
+ * Cuántos días llega tarde un proceso a la fecha prometida; 0 si llega a tiempo o si
+ * falta alguna de las dos fechas. Es la ÚNICA cuenta de atraso de esta pantalla: la
+ * usan el filtro «Solo las que llegan tarde», la columna «Termina tarde» del exportado
+ * y la alerta roja de la fila, así que no pueden decir cosas distintas.
+ *
+ * Lo que se promete es un DÍA, no una hora. La prometida viene como medianoche y antes
+ * se comparaba el fin contra esa medianoche y se redondeaba para arriba: la 14570
+ * termina el 2/10 a las 12:35, se prometió para el 2/10 y salía «+1 días». Terminar
+ * el día prometido es cumplir; el atraso es la resta de días de calendario (terminar
+ * el 3/10 a las 8 es +1, no +0,3 redondeado).
+ *
+ * La prometida 1950-01-01 (la marca del sistema viejo para «sin fecha») sigue dando
+ * atraso como hasta ahora, a propósito: así la OT aparece en el filtro y la alerta de
+ * la fila explica que la promesa está sin definir y que hay que cargarla.
+ */
+const diasDeAtraso = (fin: string | null | undefined, prometida: string | null | undefined): number => {
+    const diaFin = diaDeCalendario(fin);
+    const diaPrometido = diaDeCalendario(prometida);
+    if (diaFin === null || diaPrometido === null) return 0;
+    return Math.max(0, diaFin - diaPrometido);
+};
+
 export function PlanningPreviewScreen({
     isOpen,
     onClose,
@@ -2189,9 +2236,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                 if (!heno.includes(term)) continue;
             }
             if (filtros.forzadas && !forzarOrdenIds.has(oid)) continue;
-            if (filtros.atrasadas && !efectivos.some(i =>
-                i.fecha_fin_estimada && i.fecha_prometida &&
-                new Date(i.fecha_fin_estimada) > new Date(i.fecha_prometida))) continue;
+            if (filtros.atrasadas && !efectivos.some(i => diasDeAtraso(i.fecha_fin_estimada, i.fecha_prometida) > 0)) continue;
             // Un tercerizado sin operario no es un hueco: lo hace un tercero.
             if (filtros.sinOperario && !efectivos.some(i => !i.id_operario && !i.tercerizado)) continue;
             // Idem un proceso manual sin máquina: no la necesita.
@@ -2201,6 +2246,48 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         }
         return salida;
     }, [groupedResults, filtroTexto, filtros, filtrosActivos, forzarOrdenIds, editedResults]);
+
+    /**
+     * Las OT de la tabla (y del exportado) en el orden en que se trabajan: primero la
+     * que arranca antes; si dos arrancan a la misma hora, la que termina antes; y si
+     * también empatan, por número de OT. Julián, 25/09/2026: «la vista de las OT las
+     * quiero en orden desde la primera que se arranca hasta la última que se termina».
+     *
+     * Antes salían en el orden del id interno de la OT, sin que nadie lo eligiera:
+     * `Object.entries` de un mapa con claves numéricas las devuelve ordenadas así.
+     * `groupedResults` sigue siendo un mapa (lo usan otros para buscar por OT); el
+     * orden se arma acá, aparte. Cuentan las fechas efectivas, con los retoques a mano,
+     * que son las que se ven en la fila. Una OT sin fechas va al final.
+     */
+    const otsEnOrden = React.useMemo(() => {
+        const aMs = (valor?: string) => {
+            const t = valor ? new Date(valor).getTime() : NaN;
+            return isNaN(t) ? null : t;
+        };
+        const filas = Object.entries(gruposFiltrados).map(([oidStr, items]) => {
+            const ordenId = Number(oidStr);
+            let inicio = Infinity;
+            let fin = -Infinity;
+            for (const item of items) {
+                const efectivo = getEffectiveItem(item);
+                const a = aMs(efectivo.fecha_inicio_estimada);
+                const b = aMs(efectivo.fecha_fin_estimada);
+                if (a !== null && a < inicio) inicio = a;
+                if (b !== null && b > fin) fin = b;
+            }
+            return {
+                ordenId,
+                items,
+                inicio,
+                fin: fin === -Infinity ? Infinity : fin,
+                numero: items[0]?.id_otvieja ?? ordenId,
+            };
+        });
+        // Infinity − Infinity da NaN, que es falsy: dos OT sin fechas pasan al desempate
+        // siguiente en vez de quedar en cualquier orden.
+        filas.sort((x, y) => (x.inicio - y.inicio) || (x.fin - y.fin) || (x.numero - y.numero));
+        return filas;
+    }, [gruposFiltrados, editedResults, clavesPorFila]);
 
     const otsFiltradas = Object.keys(gruposFiltrados).length;
     const procesosFiltrados = Object.values(gruposFiltrados).reduce((a, xs) => a + xs.length, 0);
@@ -2881,11 +2968,12 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     {
                                         titulo: "Termina tarde",
                                         tipo: "booleano",
-                                        valor: (i) => !!(i.fecha_fin_estimada && i.fecha_prometida
-                                            && new Date(i.fecha_fin_estimada) > new Date(i.fecha_prometida)),
+                                        // La misma cuenta que la alerta de la fila: terminar el día prometido no es tarde.
+                                        valor: (i) => diasDeAtraso(i.fecha_fin_estimada, i.fecha_prometida) > 0,
                                     },
                                 ];
-                                const filas = Object.values(gruposFiltrados).flatMap(items => items.map(i => getEffectiveItem(i)));
+                                // En el mismo orden que la tabla: se exporta lo que se está mirando.
+                                const filas = otsEnOrden.flatMap(({ items }) => items.map(i => getEffectiveItem(i)));
                                 return (
                                     <ExportarMenu
                                         titulo="Vista previa del plan (sin confirmar)"
@@ -3807,8 +3895,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-gray-200">
-                                        {Object.entries(gruposFiltrados).map(([ordenIdStr, items]) => {
-                                            const ordenId = parseInt(ordenIdStr);
+                                        {otsEnOrden.map(({ ordenId, items }) => {
                                             const firstItem = items[0];
                                             const isExpanded = expandedOrderIds.includes(ordenId);
                                             // Entró a mano en esta vista previa (OT entera o procesos sueltos).
@@ -3823,29 +3910,23 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
 
                                             // Calculate alerts (Lateness)
                                             const effectiveItems = items.map(i => getEffectiveItem(i));
-                                            const lateItems = effectiveItems.filter(i => {
-                                                if (!i.fecha_fin_estimada || !i.fecha_prometida) return false;
-                                                return new Date(i.fecha_fin_estimada) > new Date(i.fecha_prometida);
-                                            });
-                                            const isOrderLate = lateItems.length > 0;
-
-                                            // Calculate max delay + cache the worst-case item so el tooltip
-                                            // pueda mostrar fechas reales (fin estimado vs prometida).
+                                            // Atraso por días de calendario (`diasDeAtraso`): terminar el día
+                                            // prometido, a la hora que sea, no es llegar tarde.
                                             let maxDelayDays = 0;
+                                            // El proceso que más se pasa, para que el globito muestre sus
+                                            // fechas reales (fin estimado vs prometida). A igualdad de días,
+                                            // el que termina más tarde: es el que decide cuándo sale la OT.
                                             let worstLateItem: PlanificacionResult | null = null;
-                                            if (isOrderLate) {
-                                                let maxDiff = -Infinity;
-                                                for (const i of lateItems) {
-                                                    const fin = new Date(i.fecha_fin_estimada!);
-                                                    const prom = new Date(i.fecha_prometida!);
-                                                    const diff = fin.getTime() - prom.getTime();
-                                                    if (diff > maxDiff) {
-                                                        maxDiff = diff;
-                                                        worstLateItem = i;
-                                                    }
+                                            for (const i of effectiveItems) {
+                                                const dias = diasDeAtraso(i.fecha_fin_estimada, i.fecha_prometida);
+                                                if (dias <= 0) continue;
+                                                if (dias > maxDelayDays || (dias === maxDelayDays && worstLateItem
+                                                    && (i.fecha_fin_estimada ?? "") > (worstLateItem.fecha_fin_estimada ?? ""))) {
+                                                    maxDelayDays = dias;
+                                                    worstLateItem = i;
                                                 }
-                                                maxDelayDays = Math.ceil(maxDiff / (1000 * 60 * 60 * 24));
                                             }
+                                            const isOrderLate = maxDelayDays > 0;
                                             // Detecta placeholder 1950 (significa "sin fecha prometida real"):
                                             const promesaEsPlaceholder = worstLateItem?.fecha_prometida
                                                 ? new Date(worstLateItem.fecha_prometida).getFullYear() <= 1950
@@ -4008,7 +4089,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                 className="flex items-center justify-center gap-1 text-red-700 bg-red-100 px-2 py-1 rounded border border-red-200 text-xs font-bold whitespace-nowrap hover:bg-red-200 transition-colors cursor-help"
                                                                             >
                                                                                 <AlertTriangle className="w-3 h-3" />
-                                                                                <span>+{maxDelayDays.toLocaleString("es-AR")} días</span>
+                                                                                <span>+{maxDelayDays.toLocaleString("es-AR")} {maxDelayDays === 1 ? "día" : "días"}</span>
                                                                             </button>
                                                                         </TooltipTrigger>
                                                                         <TooltipContent side="left" className="max-w-[320px] p-0 bg-white border border-red-200 shadow-xl text-gray-800">
@@ -4031,7 +4112,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                         {worstLateItem?.nombre_proceso ? capitalize(worstLateItem.nombre_proceso) : "—"}
                                                                                     </span>
                                                                                     <span className="text-gray-500">Diferencia</span>
-                                                                                    <span className="font-bold text-red-700 tabular-nums">+{maxDelayDays.toLocaleString("es-AR")} días</span>
+                                                                                    <span className="font-bold text-red-700 tabular-nums">+{maxDelayDays.toLocaleString("es-AR")} {maxDelayDays === 1 ? "día" : "días"}</span>
                                                                                 </div>
                                                                                 {promesaEsPlaceholder ? (
                                                                                     <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-800 leading-snug">
