@@ -9,7 +9,8 @@
  *
  * Se usa en tres lugares con el mismo diálogo, para que elegir fechas se aprenda
  * una sola vez:
- *   • «planificar»: al tocar Planificar en el Paso 1 sin fechas elegidas. Confirmar
+ *   • «planificar»: SIEMPRE al tocar Planificar en el Paso 1, con lo último elegido
+ *     ya marcado. Confirmar
  *     elige las fechas Y arranca el cálculo, así que el botón lo dice con las fechas
  *     escritas («Planificar del lun 28/9 al vie 9/10»).
  *   • «elegir»: desde el chip del período, arriba del Paso 1. Sólo elige.

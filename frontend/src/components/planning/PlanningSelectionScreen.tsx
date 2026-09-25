@@ -468,9 +468,11 @@ export function PlanningSelectionScreen({
 
     /**
      * Tocar «Planificar». Primero lo que frena de verdad (OT sin procesos); después,
-     * si no hay fechas elegidas, el selector de fechas ANTES de calcular: el cálculo
-     * tarda minutos y hacerlo sin tope por olvido era tirarlos (Julián, 25/9). Con
-     * fechas ya elegidas —o «sin tope» elegido a propósito— va directo.
+     * SIEMPRE el selector de fechas ANTES de calcular, con lo último elegido ya
+     * marcado: el cálculo tarda minutos y hacerlo sin tope por olvido era tirarlos.
+     * Julián, 25/9: «tiene que estar al momento que termino de seleccionar las OT y
+     * creo la planificación, así calcula en base a esas fechas». Si ya estaban bien,
+     * es un solo clic en «Planificar del … al …».
      */
     const alTocarPlanificar = () => {
         const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id))
@@ -483,11 +485,7 @@ export function PlanningSelectionScreen({
             })
             return
         }
-        if (!fechasElegidas) {
-            abrirSelectorFechas("planificar")
-            return
-        }
-        planificarCon(fechasElegidas)
+        abrirSelectorFechas("planificar")
     }
 
     /** Calcula lo tildado para esas fechas. Las fechas llegan por parámetro y no del
