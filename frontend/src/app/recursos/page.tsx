@@ -36,7 +36,7 @@ import { usePermisos } from "@/hooks/usePermisos";
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 import type { SeccionCodigo } from "@/lib/permisos";
 import {
-  comoSeHace, esParamDelAviso, leerCambioDelLink, leerFocoDelLink, leerRangosDelLink,
+  comoSeHace, esParamDelAviso, leerCambioDelLink, leerFocoDelLink, leerHechoDelLink, leerRangosDelLink,
   siguientePendiente, sinAlternativa, type CambioDelAviso,
 } from "@/lib/avisoEnRecursos";
 
@@ -84,6 +84,8 @@ interface LlegadaDesdeAviso {
   hacer: string | null;
   /** Qué clase de cambio se vino a hacer: decide qué explica el cartel y qué permiso mira. */
   cambio: CambioDelAviso | null;
+  /** Se vino a MIRAR lo que ya se guardó desde el plan («Ver cómo quedó»), no a hacerlo. */
+  hecho: boolean;
 }
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
@@ -295,7 +297,9 @@ export default function RecursosPage() {
       // pasa a la que falte (ver `alGuardarDelAviso`).
       if (solapa === "procesos" || solapa === "maquinas") setAbrirAlLlegar(true);
       if (solapa === "operarios" && ids.length === 1) setOperarioAFocalizar(ids[0]);
-      setRangosSugeridos(leerRangosDelLink(params, ids));
+      // Lo ya guardado no se vuelve a proponer: tildar de nuevo lo que ya tiene
+      // haría parecer que falta guardarlo.
+      if (!leerHechoDelLink(params)) setRangosSugeridos(leerRangosDelLink(params, ids));
     }
 
     const titulo = params.get("aviso");
@@ -303,7 +307,7 @@ export default function RecursosPage() {
     // antes de este cambio todavía lo trae.
     const hacer = params.get("hacer") ? sinAlternativa(params.get("hacer")) : null;
     if (titulo || hacer || ids.length > 0) {
-      setDesdeAviso({ tab: solapa, titulo, hacer, cambio: leerCambioDelLink(params) });
+      setDesdeAviso({ tab: solapa, titulo, hacer, cambio: leerCambioDelLink(params), hecho: leerHechoDelLink(params) });
     }
 
     // El query param se limpia para que un F5 no vuelva a arrastrar el foco de un
@@ -946,6 +950,7 @@ export default function RecursosPage() {
         <DesdeAviso
           titulo={desdeAviso.titulo}
           hacer={desdeAviso.hacer}
+          hecho={desdeAviso.hecho}
           como={comoDelAviso}
           mostrando={desdeAviso.tab === tabActiva ? nombresDelFoco : []}
           total={totalDeLaSolapa}

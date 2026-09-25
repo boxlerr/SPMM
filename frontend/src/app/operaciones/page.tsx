@@ -38,7 +38,10 @@ import { ProgresoPlanificacion } from "@/components/planning/ProgresoPlanificaci
 import { BorradoresPlan } from "@/components/planning/BorradoresPlan"
 import { useBorradorPlan } from "@/hooks/useBorradorPlan"
 import type { BorradorPlan, TandaManual } from "@/lib/borradorPlan"
-import { payloadDeAjustes, type AjusteDelPlan, type AjustesDelPlanPayload } from "@/lib/ajustesPlan"
+import {
+  payloadDeAjustes, ajustesDelPlanMostrado, ajustesComoCalculados,
+  type AjusteDelPlan, type AjustesDelPlanPayload,
+} from "@/lib/ajustesPlan"
 import { huellaRecursos } from "@/lib/huellaRecursos"
 import { FILTRO_RECURSOS_VACIO, type FiltroRecursos } from "@/lib/filtroRecursos"
 import {
@@ -1523,6 +1526,13 @@ export default function OperacionesPage() {
     setCalculando({ activo: true, ots: ids.length, listo: false });
     setSelectedOrderIds(ids);
     setPlanningRange(range);
+    // Los ajustes tal como salen en ESTE pedido. Desde el 25/09/2026 se marcan de a
+    // varios sin recalcular, con estado «por agregar» / «por quitar», y la vista
+    // previa los pasa a calculados recién cuando vuelve el plan. El guardado del
+    // borrador de abajo corre antes de eso: con la lista del momento quedaban
+    // «pendientes» en la base y, si se cerraba la pestaña en esos segundos, al
+    // retomar pedían un recálculo que ya se había hecho.
+    const ajustesDeEstePedido = ajustesBorrador.current;
 
     try {
       // Igual que en el primer cálculo: la foto de Recursos se pide en paralelo, y
@@ -1625,7 +1635,7 @@ export default function OperacionesPage() {
         ...baseBorrador.current,
         ...retoquesBorrador.current,
         tandasManuales: tandasBorrador.current,
-        ajustesDelPlan: ajustesBorrador.current,
+        ajustesDelPlan: ajustesComoCalculados(ajustesDeEstePedido),
         guardadoEn: new Date().toISOString(),
       });
 
@@ -1835,7 +1845,10 @@ export default function OperacionesPage() {
       // armado justo para esto, y sin mandarlos no se imprimía nunca: un plan se
       // guardaba con una prensa que, según Recursos, esa persona no puede usar, y
       // no había una sola línea en ningún lado que lo dijera.
-      const ajustesDelPlanGuardado = payloadDeAjustes(ajustesBorrador.current);
+      //
+      // Sólo los que el plan en pantalla YA tiene: si se guarda sin recalcular, los
+      // recién marcados no están en este plan y los que se estaban sacando sí.
+      const ajustesDelPlanGuardado = payloadDeAjustes(ajustesDelPlanMostrado(ajustesBorrador.current));
 
       // Distinguir entre el caso "manual plan" (array) y el nuevo "decisiones de excedentes" ({forzarOrdenIds})
       let manualPlan: any[] | undefined = undefined;

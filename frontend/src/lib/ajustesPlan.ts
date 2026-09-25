@@ -88,6 +88,65 @@ export type AjusteDelPlan = {
     /** Qué hace, en una línea y en criollo. Ej: "A FRESADORA 1 y FRESADORA 2 se les suma OFICIAL CNC". */
     descripcion: string;
     accion: AccionDeSolucion;
+    /**
+     * Si el plan que está en pantalla ya salió con este ajuste.
+     *
+     * Hasta el 25/09/2026 marcar un ajuste recalculaba en el mismo click, así que todo
+     * ajuste de la lista estaba, por definición, adentro del plan. Julián: *"cada vez
+     * que hago un cambio de alguna traba se replanifica todo, cuando tendría que
+     * dejarme terminar de verlas y ahí se replanifique"* —con 48 OT cada vuelta son
+     * unos 4 minutos—. Ahora se marcan de a varios y se recalcula una vez, y entre
+     * medio hay que saber cuáles ya están en el plan y cuáles no:
+     *
+     *  - `calculado`: el plan de la pantalla salió con él.
+     *  - `por-agregar`: marcado, entra en el próximo recálculo.
+     *  - `por-quitar`: está en el plan de la pantalla, se va en el próximo recálculo.
+     *
+     * Sin estado vale `calculado`: los borradores de antes no lo traen y todo lo que
+     * tenían se había calculado.
+     */
+    estado?: EstadoDeAjuste;
+};
+
+export type EstadoDeAjuste = "calculado" | "por-agregar" | "por-quitar";
+
+/** El estado de un ajuste, con el valor de los borradores viejos. */
+export const estadoDeAjuste = (a: AjusteDelPlan): EstadoDeAjuste => a.estado ?? "calculado";
+
+/** Los que van en el PRÓXIMO recálculo: todos menos los que se están sacando. */
+export const ajustesParaElProximo = (l: AjusteDelPlan[]): AjusteDelPlan[] =>
+    (l ?? []).filter((a) => estadoDeAjuste(a) !== "por-quitar");
+
+/**
+ * Con los que salió el plan que está EN PANTALLA: todos menos los recién marcados.
+ *
+ * Es lo que se cuenta al guardar el plan sin recalcular: el rastro tiene que decir con
+ * qué se calculó de verdad lo que se guarda, no lo que alguien marcó después.
+ */
+export const ajustesDelPlanMostrado = (l: AjusteDelPlan[]): AjusteDelPlan[] =>
+    (l ?? []).filter((a) => estadoDeAjuste(a) !== "por-agregar");
+
+/** Los marcados que el plan de la pantalla todavía no tiene (para agregar o para sacar). */
+export const ajustesPendientes = (l: AjusteDelPlan[]): AjusteDelPlan[] =>
+    (l ?? []).filter((a) => estadoDeAjuste(a) !== "calculado");
+
+/**
+ * La lista como queda después de un recálculo que mandó `ajustesParaElProximo(l)`:
+ * los que se sacaban ya no están y el resto quedó calculado.
+ */
+export const ajustesComoCalculados = (l: AjusteDelPlan[]): AjusteDelPlan[] =>
+    ajustesParaElProximo(l).map((a) => (a.estado && a.estado !== "calculado" ? { ...a, estado: "calculado" as const } : a));
+
+/**
+ * Un cambio que se guardó en Recursos desde el panel de avisos y que el plan de la
+ * pantalla todavía no tiene, porque desde el 25/09/2026 guardar no recalcula.
+ * No va al borrador: al retomarlo, la huella de Recursos lo detecta sola.
+ */
+export type GuardadoSinRecalcular = {
+    id: number;
+    titulo: string;
+    descripcion: string;
+    accion: AccionDeSolucion;
 };
 
 /** El cuerpo que entiende el backend (`AjustesDelPlanDTO`). */
@@ -126,6 +185,16 @@ export function objetivosDeAjuste(accion: AccionDeSolucion): string[] {
             ? `skill_nativa:${o.id}:${accion.id}`
             : `${accion.tipo}:${o.id}`,
     );
+}
+
+/**
+ * Lo mismo que `objetivosDeAjuste`, con el nombre de cada cosa al lado: para poder
+ * escribir «Ya guardaste un cambio en PRENSA 1» sin ir a buscarlo a otro lado.
+ */
+export function objetivosConNombre(accion: AccionDeSolucion): { clave: string; nombre: string }[] {
+    if (!accion) return [];
+    const claves = objetivosDeAjuste(accion);
+    return objetivosDe(accion).map((o, i) => ({ clave: claves[i], nombre: o.nombre }));
 }
 
 /**

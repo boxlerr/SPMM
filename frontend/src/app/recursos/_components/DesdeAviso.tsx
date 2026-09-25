@@ -22,6 +22,12 @@ interface Props {
     titulo?: string | null;
     /** La solución que se vino a aplicar. */
     hacer?: string | null;
+    /**
+     * Que la solución ya se guardó desde el plan y se vino a mirar cómo quedó
+     * («Ver cómo quedó ↗»). Sin esto el cartel decía «Qué hacer: …» sobre algo
+     * ya hecho, y el botón del plan parecía no haber hecho nada.
+     */
+    hecho?: boolean;
     /** Dónde se toca eso en esta solapa, o que con este usuario no se puede. */
     como?: string | null;
     /** Los nombres de lo que se está mostrando por el aviso (vacío = todo). */
@@ -34,7 +40,7 @@ interface Props {
     sinAccesoA?: string | null;
 }
 
-export default function DesdeAviso({ titulo, hacer, como, mostrando = [], total, onVerTodos, onCerrar, sinAccesoA }: Props) {
+export default function DesdeAviso({ titulo, hacer, hecho = false, como, mostrando = [], total, onVerTodos, onCerrar, sinAccesoA }: Props) {
     return (
         <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-sky-950 sm:px-4">
             <div className="flex items-start gap-2.5">
@@ -46,11 +52,15 @@ export default function DesdeAviso({ titulo, hacer, como, mostrando = [], total,
                     {titulo && <p className="text-sm font-semibold leading-snug">{titulo}</p>}
                     {hacer && (
                         <p className="text-sm leading-snug">
-                            <span className="font-semibold">Qué hacer: </span>
+                            <span className="font-semibold">{hecho ? "Ya quedó aplicado: " : "Qué hacer: "}</span>
                             {hacer}
                         </p>
                     )}
-                    {como && !sinAccesoA && <p className="text-xs leading-snug text-sky-900/80">{como}</p>}
+                    {hecho && !hacer && (
+                        <p className="text-sm leading-snug font-semibold">Ya quedó aplicado desde el plan.</p>
+                    )}
+                    {/* Cómo se hace, sólo si falta hacerlo. */}
+                    {como && !sinAccesoA && !hecho && <p className="text-xs leading-snug text-sky-900/80">{como}</p>}
                     {sinAccesoA && (
                         <p className="text-sm leading-snug text-amber-900">
                             Esto se hace en <strong>{sinAccesoA}</strong>, y tu usuario no tiene acceso

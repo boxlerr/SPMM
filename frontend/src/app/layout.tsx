@@ -63,8 +63,12 @@ export default function RootLayout({
                 {children}
                 {/* Arriba al centro. A la derecha tapaba los botones de Guardar y Planificar
                     —Lucas, 10/09: "y esto ponémelo para allá, molesta"— y abajo al centro
-                    se pisa con las barras flotantes de acciones en lote. */}
-                <Toaster position="top-center" />
+                    se pisa con las barras flotantes de acciones en lote.
+                    Con una X para cerrarlo: arriba al centro queda encima de la
+                    cabecera del planificador, y como sonner no se va mientras el mouse
+                    está encima, el click a «Agregar OTs» caía en el cartel y el botón
+                    parecía muerto (25/09/2026). */}
+                <Toaster position="top-center" closeButton />
               </LayoutWrapper>
             </ToastProvider>
           </NotificationProvider>

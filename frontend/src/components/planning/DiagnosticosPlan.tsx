@@ -44,8 +44,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
 import { antiguedadTexto } from "@/lib/borradorPlan";
-import { claveDeAjuste, descripcionDeAccion, type AccionDeSolucion, type AjusteDelPlan } from "@/lib/ajustesPlan";
-import { enlaceARecursos, pestaniaDe } from "@/lib/avisoEnRecursos";
+import {
+    claveDeAjuste, descripcionDeAccion, estadoDeAjuste, objetivosConNombre, objetivosDeAjuste,
+    type AccionDeSolucion, type AjusteDelPlan, type EstadoDeAjuste, type GuardadoSinRecalcular,
+} from "@/lib/ajustesPlan";
+import { enlaceARecursos, enlaceDeLoHecho, pestaniaDe } from "@/lib/avisoEnRecursos";
 import { usePermisos } from "@/hooks/usePermisos";
 
 /** Cuántas líneas se ven antes de "Ver todas". */
@@ -424,6 +427,8 @@ export function DiagnosticosPlan({
     ajustes: ajustesProp,
     onAplicarSoloEstePlan,
     onQuitarAjuste,
+    guardadosSinRecalcular = [],
+    pendientes = 0,
 }: {
     diagnosticos?: Diagnostico[];
     /**
@@ -436,7 +441,7 @@ export function DiagnosticosPlan({
      * acción en la mano la pantalla lo saca (`claveDeAjuste` de `lib/ajustesPlan` da
      * la identidad de los dos lados). Es opcional: quien no la use sigue andando.
      */
-    onResuelto?: (accionAplicada?: AccionDeSolucion) => void;
+    onResuelto?: (accionAplicada?: AccionDeSolucion, titulo?: string) => void;
     /**
      * Volver a calcular para ver si lo que se arregló afuera (en Recursos) ya está.
      *
@@ -446,16 +451,15 @@ export function DiagnosticosPlan({
      * de ayer. No se puede revalidar sin recalcular —el diagnóstico se construye
      * con lo que el solver realmente hizo—, así que esto recalcula.
      *
-     * Desde el 21/08 esto pasa SOLO al volver a la pantalla (ver `revisionAuto`);
-     * el botón queda como salida manual para cuando la revisión automática no
-     * puede correr.
+     * Desde el 25/09/2026 es EL botón de recalcular del panel: los arreglos se
+     * marcan de a varios sin recalcular y, con algo pendiente, dice «Recalcular (N)».
      */
     onRevisar?: () => void;
     revisando?: boolean;
     /** Cuándo se calculó este plan (ISO). Sirve para decir de cuándo es la foto. */
     calculadoEn?: string;
     /** En qué anda la revisión automática, para contarlo en vez de pedir un click. */
-    revisionAuto?: "mirando" | "recalculando" | "con-retoques" | "no-disponible" | null;
+    revisionAuto?: "mirando" | "cambios-en-recursos" | "no-disponible" | null;
     /**
      * Plegado controlado desde la pantalla.
      *
@@ -532,6 +536,17 @@ export function DiagnosticosPlan({
     ajustes?: AjusteDelPlan[];
     onAplicarSoloEstePlan?: (ajuste: AjusteDelPlan) => void;
     onQuitarAjuste?: (clave: string) => void;
+    /**
+     * Lo que se guardó en Recursos desde acá y el plan todavía no tiene (no se
+     * recalcula al guardar desde el 25/09/2026). Sirve para frenar un segundo
+     * guardado sobre la misma máquina o proceso: las dos acciones se armaron contra
+     * la base de ANTES y el PUT reemplaza el conjunto, así que el segundo borraría lo
+     * que acaba de guardar el primero. Con «Solo en este plan» pasa lo mismo en
+     * memoria: el ajuste reemplaza lo de la base y el plan saldría sin lo guardado.
+     */
+    guardadosSinRecalcular?: GuardadoSinRecalcular[];
+    /** Cuántos cambios marcados no tiene todavía el plan: el botón dice «Recalcular (N)». */
+    pendientes?: number;
 }) {
     const todos = diagnosticos ?? [];
     const ajustes = ajustesProp ?? [];
@@ -549,13 +564,45 @@ export function DiagnosticosPlan({
      * La clave del botón PERMANENTE sigue siendo `${d.id}-${i}`: ése no viaja a ningún
      * lado ni sobrevive al recálculo, sólo marca qué botón de ESTA lista se apretó.
      */
-    const clavesAjustadas = new Set(ajustes.map((a) => a.clave));
-    /** Si alguno de los caminos de este aviso ya está puesto como ajuste de este plan. */
+    //
+    // Con el estado de cada uno (25/09/2026): marcado y sin recalcular, ya en el plan,
+    // o saliendo en el próximo recálculo. Cada uno pinta el botón distinto.
+    const estadoPorClave = new Map<string, EstadoDeAjuste>(ajustes.map((a) => [a.clave, estadoDeAjuste(a)]));
+    const clavesAjustadas = new Set(estadoPorClave.keys());
+    /**
+     * Si alguno de los caminos de este aviso está en el plan que acaba de llegar.
+     *
+     * Lo mira el efecto de la tira verde, que corre ANTES de que la pantalla pase lo
+     * enviado a «calculado» (el efecto del hijo corre primero). En ese momento los
+     * «por agregar» ya viajaron y los «por quitar» no: por eso cuentan todos menos
+     * esos. Sin los «por agregar», un aviso destrabado por un ajuste salía como «Se
+     * arregló», afirmando algo que no se guardó.
+     */
     const tieneAjuste = (d: Diagnostico) =>
         d.soluciones.some((s) => {
             const accion = accionAjustable(s);
-            return !!accion && clavesAjustadas.has(claveDeAjuste(accion));
+            if (!accion) return false;
+            const estado = estadoPorClave.get(claveDeAjuste(accion));
+            return !!estado && estado !== "por-quitar";
         });
+    /**
+     * Qué máquina o proceso tiene un guardado sin recalcular, con su nombre, para
+     * apagar los botones que lo pisarían y decir por qué.
+     */
+    const guardadoEn = new Map<string, string>();
+    for (const g of guardadosSinRecalcular) {
+        for (const o of objetivosConNombre(g.accion)) guardadoEn.set(o.clave, o.nombre);
+    }
+    /** El nombre de lo que ya se guardó y esta acción tocaría, o null si no pisa nada. */
+    const pisaUnGuardado = (accion: AccionDeSolucion | null | undefined): string | null => {
+        if (!accion || guardadoEn.size === 0) return null;
+        for (const o of objetivosDeAjuste(accion)) {
+            const nombre = guardadoEn.get(o);
+            if (nombre) return nombre;
+        }
+        return null;
+    };
+    const motivoPisa = (nombre: string) => `Ya guardaste un cambio en ${nombre}: recalculá primero`;
     /**
      * Los ajustes, mirados desde el efecto de la tira verde sin ser dependencia suya.
      *
@@ -612,6 +659,12 @@ export function DiagnosticosPlan({
     const [aplicando, setAplicando] = useState<string | null>(null);
     const [aplicadas, setAplicadas] = useState<Set<string>>(new Set());
     /**
+     * Los avisos que se guardaron en Recursos y, después de recalcular, siguen: el
+     * botón vuelve a «Guardar en Recursos» (ver el efecto de la tira verde) y la
+     * tarjeta dice que ya se guardó, para que nadie crea que el click no anduvo.
+     */
+    const [siguenTrasGuardar, setSiguenTrasGuardar] = useState<Set<string>>(new Set());
+    /**
      * RF-24: «Guardar en Recursos» escribe en Recursos, no en el plan, y el backend pide
      * lo mismo que si se hiciera desde allá: los rangos de un proceso o de una máquina
      * son la solapa Rangos; la habilidad de una persona, la solapa Recurso humano. Quien
@@ -637,16 +690,6 @@ export function DiagnosticosPlan({
         return enlaceARecursos(s, d.titulo, nombreDeRango);
     };
     /**
-     * Cuál de los botones índigo disparó el recálculo que está corriendo.
-     *
-     * El botón no pega en ningún endpoint —el ajuste viaja adentro del pedido del
-     * plan— así que no tiene un "aplicando" propio: lo que tarda es el recálculo, y de
-     * eso se entera el panel por `revisando`. Sin esto el botón se quedaba quieto
-     * mientras el plan se rehacía y, como el velo de recálculo es `pointer-events-none`,
-     * el segundo click pasaba igual y salían dos POST encimados.
-     */
-    const [ajustando, setAjustando] = useState<string | null>(null);
-    /**
      * Botón en dos pasos: el primer click pregunta, el segundo aplica.
      *
      * Estos cambios tocan quién puede usar una máquina — el 18/08 un cambio así,
@@ -668,9 +711,9 @@ export function DiagnosticosPlan({
      * que es justo lo contrario de lo que hay que transmitir.
      */
     const aplicarSoloEstePlan = (d: Diagnostico, clave: string, accion: AccionDeSolucion) => {
-        // Poner y sacar disparan los dos un recálculo, así que los dos tienen que dejar
-        // el botón trabajando hasta que vuelva el plan.
-        setAjustando(clave);
+        // Ya no recalcula (25/09/2026): poner y sacar sólo lo marcan, y el recálculo se
+        // pide una vez con el botón del pie. Tocarlo de nuevo lo desmarca, o revierte
+        // el «se saca al recalcular» (ver `quitarAjusteDelPlan` en la pantalla).
         if (clavesAjustadas.has(clave)) {
             onQuitarAjuste?.(clave);
             return;
@@ -694,6 +737,9 @@ export function DiagnosticosPlan({
      */
     const previos = useRef<Diagnostico[]>([]);
     const [resueltos, setResueltos] = useState<Diagnostico[]>([]);
+    // Las guardadas, vistas desde el efecto de abajo sin ser dependencia suya.
+    const aplicadasRef = useRef(aplicadas);
+    aplicadasRef.current = aplicadas;
 
     useEffect(() => {
         const ahora = new Set(todos.map((d) => d.id));
@@ -735,6 +781,26 @@ export function DiagnosticosPlan({
         });
         previos.current = todos;
 
+        // «Guardado» se suelta en los avisos que SIGUEN después de recalcular.
+        //
+        // La lista nueva de avisos sólo llega con un recálculo, y el recálculo ya salió
+        // con lo guardado: si el aviso sigue, el guardado no alcanzó y el botón tiene que
+        // volver a andar. Antes la marca no se limpiaba nunca y el botón quedaba
+        // «Guardado», apagado para siempre; como la clave es `${aviso}-${índice}` y el
+        // índice se corre entre recálculos, podía quedar así arriba de otra solución.
+        // Las de avisos que se fueron se quedan: son las que usa «Se aplicó» de la tira
+        // verde.
+        const idDe = (k: string) => k.slice(0, k.lastIndexOf("-"));
+        const guardadasQueSiguen = [...aplicadasRef.current].filter((k) => ahora.has(idDe(k)));
+        if (guardadasQueSiguen.length > 0) {
+            setAplicadas((prev) => new Set([...prev].filter((k) => !ahora.has(idDe(k)))));
+        }
+        setSiguenTrasGuardar((prev) => {
+            const siguen = new Set([...prev].filter((id) => ahora.has(id)));
+            guardadasQueSiguen.forEach((k) => siguen.add(idDe(k)));
+            return siguen.size === prev.size && [...siguen].every((id) => prev.has(id)) ? prev : siguen;
+        });
+
         // Las marcas a mano de avisos que ya no están se tiran: el recálculo dijo
         // que el problema no existe más, así que ya lo cuenta la tira verde de
         // arriba. Sin esto la marca queda pegada al id y, si el mismo aviso vuelve
@@ -768,10 +834,9 @@ export function DiagnosticosPlan({
      */
     useEffect(() => {
         setConfirmando(null);
-        setAjustando(null);
     }, [diagnosticos]);
 
-    const aplicar = async (clave: string, accion: DiagnosticoAccion) => {
+    const aplicar = async (clave: string, accion: DiagnosticoAccion, titulo?: string) => {
         if (confirmando !== clave) {
             setConfirmando(clave);
             return;
@@ -805,42 +870,56 @@ export function DiagnosticosPlan({
 
             // En serie y no en paralelo: son pocos y así, si el tercero falla, los dos
             // primeros ya quedaron aplicados y el reintento no los pisa de nuevo.
+            //
+            // Con tope de 20 segundos cada uno. Sin tope, un PUT colgado —el pooler tiene
+            // 15 conexiones y un recálculo de 4 minutos se queda con una— dejaba
+            // `aplicando` puesto, y eso apaga TODOS los «Guardar en Recursos» del panel
+            // hasta recargar la página: botones que parecían muertos.
             const fallidos: string[] = [];
+            let sinRespuesta = 0;
             for (const o of objetivos) {
                 try {
                     const r = await fetch(urlDe(o.id), {
                         method: "PUT",
                         headers: cabeceras,
                         body: JSON.stringify(cuerpoDe(o)),
+                        signal: AbortSignal.timeout(20000),
                     });
                     if (!r.ok) fallidos.push(o.nombre);
-                } catch {
+                } catch (e) {
                     fallidos.push(o.nombre);
+                    if (e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) sinRespuesta += 1;
                 }
             }
             // Todo mal es un error; algo mal se dice con nombre y apellido, porque el
             // resto SÍ se aplicó y volver a tocar el botón repetiría lo que ya está.
-            if (fallidos.length === objetivos.length) throw new Error("todos");
+            if (fallidos.length === objetivos.length) {
+                throw new Error(sinRespuesta > 0 ? "sin-respuesta" : "todos");
+            }
             if (fallidos.length > 0) {
                 toast.warning(`Quedó a medias: no se pudo con ${fallidos.join(", ")}`, {
                     description: "El resto se aplicó. Terminá esos desde Recursos.",
                 });
             }
             setAplicadas((prev) => new Set(prev).add(clave));
+            // Ya no recalcula (25/09/2026): el cambio queda anotado y entra en el
+            // recálculo que se pide una vez, al terminar de revisar.
             toast.success(
                 objetivos.length === 1
-                    ? `Listo: ${objetivos[0].nombre} actualizado`
-                    : `Listo: ${objetivos.length} actualizados`,
-                { description: "Recalculando el plan con el cambio…" },
+                    ? `Guardado en Recursos: ${objetivos[0].nombre}`
+                    : `Guardado en Recursos: ${objetivos.length} cambios`,
+                { description: "Se ve en el plan al recalcular." },
             );
             // Con la acción y no vacío: lo que se acaba de guardar en Recursos puede ser
             // lo mismo que alguien había puesto como ajuste "solo en este plan", y ese
             // ajuste lleva el conjunto de rangos de ANTES. Si no se saca, el próximo
             // recálculo lo manda igual y pisa en memoria lo recién guardado.
-            onResuelto?.(accion);
-        } catch {
+            onResuelto?.(accion, titulo);
+        } catch (e) {
             toast.error(`No se pudo actualizar ${accion.nombre}`, {
-                description: "Probá desde Recursos.",
+                description: e instanceof Error && e.message === "sin-respuesta"
+                    ? "El servidor no contestó en 20 segundos (puede estar ocupado con otro cálculo). Fijate en Recursos si quedó guardado antes de volver a tocar."
+                    : "Probá de nuevo o hacelo desde Recursos.",
             });
         } finally {
             setAplicando(null);
@@ -1034,8 +1113,9 @@ export function DiagnosticosPlan({
                         {/* Con el sidebar abierto y una pantalla de 1150px, el tercer
                             botón del encabezado le come el ancho al resumen y "1 traba
                             detectada y 7 avisos" se parte en diez renglones. Abajo de
-                            xl queda el ícono solo: la acción sigue estando y el resumen
-                            —que es lo que se lee— se queda con su renglón. */}
+                            xl va un texto corto, y no el ícono solo: sin palabra se
+                            leía como un adorno y no como un botón (25/09/2026). */}
+                        <span className="xl:hidden">Todo listo</span>
                         <span className="hidden xl:inline">Marcar todo listo</span>
                     </button>
                 )}
@@ -1046,11 +1126,20 @@ export function DiagnosticosPlan({
                         size="sm"
                         onClick={onRevisar}
                         disabled={revisando}
-                        className="mr-2 h-7 shrink-0 gap-1.5 text-xs text-gray-700 hover:bg-white/70"
-                        title="Recalcular ahora para ver si lo que arreglaste en Recursos ya está"
+                        className={cn(
+                            "mr-2 h-7 shrink-0 gap-1.5 text-xs",
+                            pendientes > 0
+                                ? "border border-amber-400 bg-amber-100 font-semibold text-amber-900 hover:bg-amber-200"
+                                : "text-gray-700 hover:bg-white/70",
+                        )}
+                        title={revisando
+                            ? "Esperá a que termine el recálculo"
+                            : pendientes > 0
+                                ? `Recalcular el plan con ${pendientes === 1 ? "el cambio que marcaste" : `los ${pendientes} cambios que marcaste`}`
+                                : "Recalcular ahora para ver si lo que arreglaste en Recursos ya está"}
                     >
                         <RefreshCw className={cn("w-3.5 h-3.5", revisando && "animate-spin")} />
-                        {revisando ? "Revisando…" : "Volver a revisar"}
+                        {revisando ? "Recalculando…" : pendientes > 0 ? `Recalcular (${pendientes})` : "Volver a revisar"}
                     </Button>
                 ) : (
                     <span className="w-2 shrink-0" />
@@ -1066,25 +1155,21 @@ export function DiagnosticosPlan({
                 <div className="border-t bg-slate-50 px-3 py-1.5 text-[11.5px] leading-snug text-slate-600">
                     <div className="flex items-center gap-2">
                       {revisionAuto === "mirando" && <Loader2 className="w-3 h-3 animate-spin text-slate-400 shrink-0" />}
-                      {revisionAuto === "recalculando" && <RefreshCw className="w-3 h-3 animate-spin text-blue-500 shrink-0" />}
-                      {revisionAuto === "con-retoques" && <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />}
+                      {revisionAuto === "cambios-en-recursos" && <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />}
+                      {/* Nunca recalcula solo (25/09/2026): cada vuelta son unos 4 minutos
+                          con 48 OT, y Julián quiere terminar de revisar y recalcular una
+                          vez. Un cambio en Recursos se anota como pendiente y listo. */}
                       <span>
                           {revisionAuto === "mirando"
                               ? "Fijándose si cambió algo en Recursos…"
-                              : revisionAuto === "recalculando"
-                                  ? <>Cambió algo en Recursos: <strong>recalculando el plan</strong> para ver qué quedó resuelto.</>
-                                  : revisionAuto === "con-retoques"
-                                      ? <>
-                                          Cambió algo en Recursos, pero <strong>no recalculo solo</strong> porque tenés
-                                          cambios hechos a mano en este plan y el recálculo los rehace.
-                                          {" "}Tocá <strong>Volver a revisar</strong> cuando quieras.
-                                      </>
-                                      : revisionAuto === "no-disponible"
-                                          ? <>No se pudo consultar Recursos{calculadoEn ? <> (esta revisión es {antiguedadTexto(calculadoEn)})</> : null}. Si arreglaste algo, tocá <strong>Volver a revisar</strong>.</>
-                                          : <>
-                                              Revisión del plan {calculadoEn ? antiguedadTexto(calculadoEn) : "recién"}.
-                                              {" "}Si vas a Recursos y arreglás algo, al volver acá se revisa y se recalcula solo.
-                                          </>}
+                              : revisionAuto === "cambios-en-recursos"
+                                  ? <>Cambió algo en Recursos (puede haber sido otra persona). <strong>Recalculá cuando termines.</strong></>
+                                  : revisionAuto === "no-disponible"
+                                      ? <>No se pudo consultar Recursos{calculadoEn ? <> (esta revisión es {antiguedadTexto(calculadoEn)})</> : null}. Si arreglaste algo, recalculá cuando termines.</>
+                                      : <>
+                                          Revisión del plan {calculadoEn ? antiguedadTexto(calculadoEn) : "recién"}.
+                                          {" "}Si cambiás algo en Recursos, al volver lo marco como pendiente; recalculás vos cuando termines.
+                                      </>}
                       </span>
                     </div>
 
@@ -1102,11 +1187,30 @@ export function DiagnosticosPlan({
                         Ajustes solo para este plan ({ajustes.length})
                     </p>
                     <ul className="mt-1 space-y-1">
-                        {ajustes.map((a) => (
+                        {ajustes.map((a) => {
+                            // Marcado sin recalcular, en el plan, o saliendo al recalcular
+                            // (25/09/2026: los ajustes ya no recalculan en el click).
+                            const estado = estadoDeAjuste(a);
+                            return (
                             <li key={a.clave} className="flex items-start gap-2">
-                                <SlidersHorizontal className="mt-[3px] w-3 h-3 shrink-0 text-indigo-500" />
-                                <span className="min-w-0 flex-1 text-[11.5px] leading-snug text-indigo-950">
+                                {estado === "por-agregar"
+                                    ? <Clock className="mt-[3px] w-3 h-3 shrink-0 text-indigo-500" />
+                                    : <SlidersHorizontal className="mt-[3px] w-3 h-3 shrink-0 text-indigo-500" />}
+                                <span className={cn(
+                                    "min-w-0 flex-1 text-[11.5px] leading-snug text-indigo-950",
+                                    estado === "por-quitar" && "line-through decoration-indigo-400/70 text-indigo-950/60",
+                                )}>
                                     {a.descripcion}
+                                    {estado === "por-agregar" && (
+                                        <span className="ml-1.5 inline-block rounded border border-amber-300 bg-amber-50 px-1 text-[10px] font-semibold leading-[15px] text-amber-800 no-underline">
+                                            pendiente
+                                        </span>
+                                    )}
+                                    {estado === "por-quitar" && (
+                                        <span className="ml-1.5 inline-block rounded border border-amber-300 bg-amber-50 px-1 text-[10px] font-semibold leading-[15px] text-amber-800">
+                                            se saca al recalcular
+                                        </span>
+                                    )}
                                     <span className="block text-[10.5px] text-indigo-800/70">{a.titulo}</span>
                                 </span>
                                 {onQuitarAjuste && (
@@ -1114,22 +1218,30 @@ export function DiagnosticosPlan({
                                         type="button"
                                         onClick={() => onQuitarAjuste(a.clave)}
                                         className="shrink-0 inline-flex items-center gap-1 rounded border border-indigo-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 hover:bg-indigo-50 transition-colors"
-                                        title="Sacar este ajuste y volver a calcular el plan con los datos como están"
+                                        title={estado === "por-quitar"
+                                            ? "Dejarlo: sigue en el plan y no se saca al recalcular"
+                                            : estado === "por-agregar"
+                                                ? "Desmarcarlo: todavía no entró al plan"
+                                                : "Sacarlo del plan en el próximo recálculo"}
                                     >
                                         <RotateCcw className="w-3 h-3" />
-                                        Deshacer
+                                        {estado === "por-quitar" ? "Dejarlo" : "Deshacer"}
                                     </button>
                                 )}
                             </li>
-                        ))}
+                            );
+                        })}
                     </ul>
                     {/* La frase más importante del panel entero: alguien puede mirar este
                         plan mañana, ver que entra todo y salir a prometer fechas que se
                         apoyan en un rango que nadie cargó nunca. */}
                     <p className="mt-1.5 text-[10.5px] leading-snug text-indigo-900/80">
-                        Esto <strong>no quedó guardado en Recursos</strong>: el plan se calculó como si el
+                        Esto <strong>no quedó guardado en Recursos</strong>: el plan se calcula como si el
                         dato estuviera, pero en el sistema sigue como antes. Se pierde si descartás el
                         borrador. Para dejarlo cargado de verdad, usá <strong>Guardar en Recursos</strong>.
+                        {ajustes.some((a) => estadoDeAjuste(a) !== "calculado") && (
+                            <> Lo <strong>pendiente</strong> entra al plan recién cuando recalcules.</>
+                        )}
                     </p>
                 </div>
             )}
@@ -1151,7 +1263,10 @@ export function DiagnosticosPlan({
                         const abierta = abiertos.has(clave);
                         const iAplicada = d.soluciones.findIndex((_, i) => aplicadas.has(`${d.id}-${i}`));
                         const solAplicada = iAplicada >= 0 ? d.soluciones[iAplicada] : null;
-                        const linkResuelto = solAplicada ? enlace(d, solAplicada) : null;
+                        const linkBase = solAplicada ? enlace(d, solAplicada) : null;
+                        // Con `hecho=1`: Recursos dice «Ya quedó aplicado» en vez de «Qué
+                        // hacer: …», que hacía parecer que el botón no había hecho nada.
+                        const linkResuelto = linkBase ? enlaceDeLoHecho(linkBase) : null;
                         return (
                             <li
                                 key={clave}
@@ -1317,7 +1432,13 @@ export function DiagnosticosPlan({
                         // índice de la solución se corre entre recálculos y el botón
                         // terminaba marcado arriba de la solución equivocada.
                         const claveAjuste = accionSol ? claveDeAjuste(accionSol) : "";
-                        const ajustada = !!claveAjuste && clavesAjustadas.has(claveAjuste);
+                        const estadoAjuste = claveAjuste ? estadoPorClave.get(claveAjuste) : undefined;
+                        const ajustada = !!estadoAjuste;
+                        // Guardado en Recursos sobre lo mismo y sin recalcular: los dos
+                        // botones lo pisarían (ver `guardadosSinRecalcular`). No aplica al
+                        // propio botón ya guardado, que ya está apagado por `hecha`.
+                        const pisaAjuste = ajustada ? null : pisaUnGuardado(accionSol);
+                        const pisaGuardar = hecha ? null : pisaUnGuardado(sol?.accion);
                         // La solución de ESTA tarjeta que está esperando confirmación, si
                         // hay alguna. La clave es `${d.id}-${i}` y el id del aviso trae
                         // guiones ("maquina-incompatible-101"), así que se parte por el
@@ -1606,11 +1727,19 @@ export function DiagnosticosPlan({
                                                        recalculaba quedaba vivo. El velo de recálculo es
                                                        `pointer-events-none`, o sea que el click pasaba igual y
                                                        salían dos POST /planificar encimados. */
-                                                    disabled={aplicando !== null || revisando}
+                                                    disabled={aplicando !== null || revisando || !!pisaAjuste}
                                                     onClick={() => aplicarSoloEstePlan(d, claveAjuste, accionSol)}
-                                                    title={ajustada
-                                                        ? "Sacar este ajuste y volver a calcular con los datos como están"
-                                                        : `${descripcionDeAccion(accionSol, nombreDeRango)} — solo para este cálculo, en Recursos no se guarda nada.`}
+                                                    title={revisando
+                                                        ? "Esperá a que termine el recálculo"
+                                                        : pisaAjuste
+                                                            ? motivoPisa(pisaAjuste)
+                                                            : estadoAjuste === "por-agregar"
+                                                                ? "Marcado para el próximo recálculo. Tocá para desmarcarlo."
+                                                                : estadoAjuste === "por-quitar"
+                                                                    ? "Se saca al recalcular. Tocá para dejarlo."
+                                                                    : ajustada
+                                                                        ? "Sacarlo de este plan en el próximo recálculo"
+                                                                        : `${descripcionDeAccion(accionSol, nombreDeRango)} — solo para este cálculo, en Recursos no se guarda nada. Entra al recalcular.`}
                                                     /* Lo que el botón HACE, para el lector de pantalla y para el
                                                        que llega con el teclado: la etiqueta de la cara puesta es
                                                        un estado ("Puesto en este plan") y sola no dice que se
@@ -1620,17 +1749,23 @@ export function DiagnosticosPlan({
                                                         : `Aplicar solo en este plan: ${d.titulo}`}
                                                     className={cn(
                                                         "group inline-flex h-7 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md border px-2 text-[10.5px] font-semibold transition-colors disabled:opacity-50",
-                                                        ajustada
-                                                            ? "border-indigo-400 bg-indigo-100 text-indigo-800 hover:bg-indigo-200"
-                                                            : "border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100"
+                                                        estadoAjuste === "por-agregar" || estadoAjuste === "por-quitar"
+                                                            ? "border-indigo-400 bg-indigo-50 text-indigo-800 hover:bg-indigo-100"
+                                                            : ajustada
+                                                                ? "border-indigo-400 bg-indigo-100 text-indigo-800 hover:bg-indigo-200"
+                                                                : "border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100"
                                                     )}
                                                 >
-                                                    {ajustando === claveAjuste && revisando
-                                                        ? <Loader2 className="w-3 h-3 shrink-0 animate-spin" />
+                                                    {estadoAjuste === "por-agregar" || estadoAjuste === "por-quitar"
+                                                        ? <Clock className="w-3 h-3 shrink-0" />
                                                         : ajustada
                                                             ? <Check className="w-3 h-3 shrink-0" />
                                                             : <SlidersHorizontal className="w-3 h-3 shrink-0" />}
-                                                    {ajustada ? (
+                                                    {estadoAjuste === "por-agregar" ? (
+                                                        <>Marcado · falta recalcular</>
+                                                    ) : estadoAjuste === "por-quitar" ? (
+                                                        <>Se saca al recalcular</>
+                                                    ) : ajustada ? (
                                                         /* "Puesto en este plan" es un estado, pero el botón que lo
                                                            dice es el que lo SACA, y eso vivía sólo en el `title=`:
                                                            el que se arrepiente lo lee como etiqueta y no lo toca.
@@ -1684,11 +1819,17 @@ export function DiagnosticosPlan({
                                             {sol?.accion && puedeGuardarEnRecursos(sol.accion) && (
                                                 <Button
                                                     size="sm"
-                                                    disabled={hecha || aplicando !== null}
-                                                    onClick={() => aplicar(claveSol, sol.accion!)}
-                                                    title={confirmando === claveSol
-                                                        ? "Abajo está el detalle de lo que va a cambiar"
-                                                        : "Queda guardado en Recursos para siempre, para todos los planes"}
+                                                    disabled={hecha || aplicando !== null || !!pisaGuardar}
+                                                    onClick={() => aplicar(claveSol, sol.accion!, d.titulo)}
+                                                    title={hecha
+                                                        ? "Ya está guardado en Recursos. Se ve en el plan al recalcular."
+                                                        : pisaGuardar
+                                                            ? motivoPisa(pisaGuardar)
+                                                            : aplicando !== null
+                                                                ? "Esperá a que termine de guardar"
+                                                                : confirmando === claveSol
+                                                                    ? "Abajo está el detalle de lo que va a cambiar"
+                                                                    : "Queda guardado en Recursos para siempre, para todos los planes"}
                                                     /* Sin ancho fijo: con dos botones en la fila, dos
                                                        anchos fijos no entran abajo de 2xl y el par se
                                                        partía en dos renglones. La alineación de tarjeta
@@ -1710,7 +1851,7 @@ export function DiagnosticosPlan({
                                                         <Save className="w-3 h-3" />
                                                     )}
                                                     {hecha
-                                                        ? "Guardado"
+                                                        ? "Guardado · falta recalcular"
                                                         : confirmando === claveSol
                                                             ? "Mirá y confirmá"
                                                             : (
@@ -1775,6 +1916,18 @@ export function DiagnosticosPlan({
                                             {/* Acá había un segundo chevron: la cabecera entera ya
                                                 abre y cierra, y tiene el suyo. */}
                                     </div>
+                                    {/* Escrito y no sólo en el `title`: en la tablet no hay
+                                        hover, y un botón apagado sin motivo es un botón muerto. */}
+                                    {(pisaGuardar || pisaAjuste) && (
+                                        <p className="basis-full text-right text-[10.5px] leading-snug text-amber-800">
+                                            {motivoPisa((pisaGuardar || pisaAjuste)!)}
+                                        </p>
+                                    )}
+                                    {siguenTrasGuardar.has(d.id) && !hecha && (
+                                        <p className="basis-full text-right text-[10.5px] leading-snug text-gray-500">
+                                            Lo guardaste en Recursos, pero después de recalcular el aviso sigue.
+                                        </p>
+                                    )}
                                 </div>
 
                                 {/* Abierto: TODAS las soluciones (no solo la que se ve plegada),
@@ -1830,7 +1983,11 @@ export function DiagnosticosPlan({
                                                     // Mismo criterio que arriba: el ajuste se reconoce por lo
                                                     // que toca, no por el número de renglón.
                                                     const claveAjusteEsta = accionEsta ? claveDeAjuste(accionEsta) : "";
-                                                    const ajustadaEsta = !!claveAjusteEsta && clavesAjustadas.has(claveAjusteEsta);
+                                                    const estadoEsta = claveAjusteEsta ? estadoPorClave.get(claveAjusteEsta) : undefined;
+                                                    const ajustadaEsta = !!estadoEsta;
+                                                    const pendienteEsta = estadoEsta === "por-agregar" || estadoEsta === "por-quitar";
+                                                    const pisaAjusteEsta = ajustadaEsta ? null : pisaUnGuardado(accionEsta);
+                                                    const pisaGuardarEsta = hechaEsta ? null : pisaUnGuardado(s.accion);
                                                     return (
                                                         <li key={idx} className="flex items-start gap-1.5 text-[11.5px] leading-[1.4]">
                                                             <Wrench className="w-3 h-3 mt-[3px] shrink-0 text-emerald-600" />
@@ -1870,27 +2027,39 @@ export function DiagnosticosPlan({
                                                                             /* Igual que el de la tarjeta plegada: mientras el plan
                                                                                se recalcula este botón no se puede tocar, o salen
                                                                                dos POST /planificar encimados. */
-                                                                            disabled={aplicando !== null || revisando}
+                                                                            disabled={aplicando !== null || revisando || !!pisaAjusteEsta}
                                                                             onClick={() => aplicarSoloEstePlan(d, claveAjusteEsta, accionEsta)}
-                                                                            title={ajustadaEsta
-                                                                                ? "Sacar este ajuste y volver a calcular con los datos como están"
-                                                                                : `${descripcionDeAccion(accionEsta, nombreDeRango)} — solo para este cálculo, en Recursos no se guarda nada.`}
+                                                                            title={revisando
+                                                                                ? "Esperá a que termine el recálculo"
+                                                                                : pisaAjusteEsta
+                                                                                    ? motivoPisa(pisaAjusteEsta)
+                                                                                    : estadoEsta === "por-agregar"
+                                                                                        ? "Marcado para el próximo recálculo. Tocá para desmarcarlo."
+                                                                                        : estadoEsta === "por-quitar"
+                                                                                            ? "Se saca al recalcular. Tocá para dejarlo."
+                                                                                            : ajustadaEsta
+                                                                                                ? "Sacarlo de este plan en el próximo recálculo"
+                                                                                                : `${descripcionDeAccion(accionEsta, nombreDeRango)} — solo para este cálculo, en Recursos no se guarda nada. Entra al recalcular.`}
                                                                             aria-label={ajustadaEsta
                                                                                 ? `Sacar de este plan: ${d.titulo}`
                                                                                 : `Aplicar solo en este plan: ${d.titulo}`}
                                                                             className={cn(
                                                                                 "group inline-flex h-5 items-center gap-1 whitespace-nowrap rounded border px-1.5 align-baseline text-[10px] font-medium transition-colors disabled:opacity-50",
-                                                                                ajustadaEsta
-                                                                                    ? "border-indigo-400 bg-indigo-100 text-indigo-800 hover:bg-indigo-200"
-                                                                                    : "border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 hover:bg-indigo-100"
+                                                                                pendienteEsta
+                                                                                    ? "border-indigo-400 bg-indigo-50 text-indigo-800 hover:bg-indigo-100"
+                                                                                    : ajustadaEsta
+                                                                                        ? "border-indigo-400 bg-indigo-100 text-indigo-800 hover:bg-indigo-200"
+                                                                                        : "border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 hover:bg-indigo-100"
                                                                             )}
                                                                         >
-                                                                            {ajustando === claveAjusteEsta && revisando
-                                                                                ? <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                                                            {pendienteEsta
+                                                                                ? <Clock className="w-2.5 h-2.5" />
                                                                                 : ajustadaEsta
                                                                                     ? <Check className="w-2.5 h-2.5" />
                                                                                     : <SlidersHorizontal className="w-2.5 h-2.5" />}
-                                                                            {ajustadaEsta ? (
+                                                                            {estadoEsta === "por-agregar" ? "Marcado · falta recalcular"
+                                                                            : estadoEsta === "por-quitar" ? "Se saca al recalcular"
+                                                                            : ajustadaEsta ? (
                                                                                 /* Mismo cambio de cara que arriba: puesto dice el
                                                                                    estado, y con el mouse encima o con el foco del
                                                                                    teclado dice que ése es el botón que lo saca. */
@@ -1908,11 +2077,17 @@ export function DiagnosticosPlan({
                                                                         <Button
                                                                             size="sm"
                                                                             variant={hechaEsta ? "ghost" : "outline"}
-                                                                            disabled={hechaEsta || aplicando !== null}
-                                                                            onClick={() => aplicar(clave, s.accion!)}
-                                                                            title={confirmando === clave
-                                                                                ? "Abajo está el detalle de lo que va a cambiar"
-                                                                                : "Queda guardado en Recursos para siempre, para todos los planes"}
+                                                                            disabled={hechaEsta || aplicando !== null || !!pisaGuardarEsta}
+                                                                            onClick={() => aplicar(clave, s.accion!, d.titulo)}
+                                                                            title={hechaEsta
+                                                                                ? "Ya está guardado en Recursos. Se ve en el plan al recalcular."
+                                                                                : pisaGuardarEsta
+                                                                                    ? motivoPisa(pisaGuardarEsta)
+                                                                                    : aplicando !== null
+                                                                                        ? "Esperá a que termine de guardar"
+                                                                                        : confirmando === clave
+                                                                                            ? "Abajo está el detalle de lo que va a cambiar"
+                                                                                            : "Queda guardado en Recursos para siempre, para todos los planes"}
                                                                             className={cn(
                                                                                 "h-5 px-1.5 text-[10px] gap-1 align-baseline",
                                                                                 hechaEsta
@@ -1936,7 +2111,7 @@ export function DiagnosticosPlan({
                                                                                 cambia" arriba— el paso del medio parecía otra
                                                                                 cosa según de dónde lo hubieras tocado. */}
                                                                             {hechaEsta
-                                                                                ? "Guardado"
+                                                                                ? "Guardado · falta recalcular"
                                                                                 : confirmando === clave
                                                                                     ? "Mirá y confirmá"
                                                                                     : "Guardar en Recursos"}
@@ -1951,12 +2126,21 @@ export function DiagnosticosPlan({
                                                                     donde hay alto para gastar; plegada sigue
                                                                     alcanzando el nombre del botón, porque la
                                                                     tarjeta plegada es para barrer la lista. */}
+                                                                {(pisaGuardarEsta || pisaAjusteEsta) && (
+                                                                    <span className="mt-0.5 block text-[10.5px] leading-snug text-amber-800">
+                                                                        {motivoPisa((pisaGuardarEsta || pisaAjusteEsta)!)}
+                                                                    </span>
+                                                                )}
                                                                 {accionEsta && onAplicarSoloEstePlan && (
                                                                     <span className="mt-0.5 flex items-start gap-1 text-[10.5px] leading-snug text-indigo-800/90">
                                                                         <SlidersHorizontal className="mt-[2px] w-2.5 h-2.5 shrink-0" />
                                                                         <span className="min-w-0">
                                                                             <strong className="font-semibold">
-                                                                                {ajustadaEsta ? "Puesto solo en este plan: " : "Solo en este plan: "}
+                                                                                {estadoEsta === "por-agregar"
+                                                                                    ? "Marcado solo para este plan (entra al recalcular): "
+                                                                                    : estadoEsta === "por-quitar"
+                                                                                        ? "Se saca de este plan al recalcular: "
+                                                                                        : ajustadaEsta ? "Puesto solo en este plan: " : "Solo en este plan: "}
                                                                             </strong>
                                                                             {descripcionDeAccion(accionEsta, nombreDeRango)}. En Recursos no se guarda nada.
                                                                         </span>
@@ -2058,7 +2242,7 @@ export function DiagnosticosPlan({
                                             <Button
                                                 size="sm"
                                                 onMouseDown={(e) => e.preventDefault()}
-                                                onClick={() => aplicar(confirmando!, armada.accion!)}
+                                                onClick={() => aplicar(confirmando!, armada.accion!, d.titulo)}
                                                 disabled={aplicando !== null}
                                                 className="h-6 gap-1 bg-emerald-600 px-2 text-[11px] font-semibold text-white hover:bg-emerald-700"
                                             >

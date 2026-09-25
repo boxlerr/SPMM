@@ -66,6 +66,16 @@ export const NOVEDADES: Novedad[] = [
             "Abajo en el menú de la izquierda, al lado de tu nombre, hay un megáfono: lo tocás y se abre de nuevo el último aviso, con su botón para ir a Novedades. Mientras tenga un puntito rojo es que hay un aviso que todavía no leíste. El puntito se apaga cuando tocás «Entendido» o «Ver todas las novedades», o cuando lo tuviste abierto un rato; si lo cerrás enseguida, sigue prendido. Con el menú achicado, el megáfono está arriba de tu inicial, y en el teléfono el puntito se ve también en el botón redondo del menú. Antes el aviso salía una sola vez: si lo cerrabas sin leerlo, no había cómo volver a verlo.",
     },
     {
+        id: "trabas-se-recalcula-una-vez",
+        fecha: "2026-09-25",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "En la vista previa del plan marcás todos los arreglos de las trabas y recalculás una sola vez al final",
+        detalle:
+            "Antes cada «Solo en este plan», cada «Deshacer» y cada «Guardar en Recursos» recalculaba el plan entero en el momento, y con muchas OT eran unos 4 minutos de espera por arreglo. Ahora quedan marcados («Marcado · falta recalcular», «Guardado · falta recalcular») y una franja arriba de los avisos dice qué le falta al plan. Cuando terminás, tocás «Recalcular con N cambios» en el pie, que dice cuánto va a tardar. Volver de Recursos ya no recalcula solo: avisa que cambió algo y esperás a terminar. Si confirmás con cambios sin recalcular, te avisa antes y podés volver a recalcular o guardar igual. Además: los cartelitos de arriba tienen una X para cerrarlos, «Marcar todo listo» se lee en pantallas chicas, «Ver detalles» deja el panel de avisos a la vista, y «Ver cómo quedó» en Recursos dice que ya quedó aplicado.",
+        href: "/operaciones",
+    },
+    {
         id: "avisos-preparacion-unificada",
         fecha: "2026-09-25",
         tipo: "arreglo",

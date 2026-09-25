@@ -32,8 +32,11 @@ import { huellaRecursos } from "@/lib/huellaRecursos";
 import type { TandaManual } from "@/lib/borradorPlan";
 import {
     payloadDeAjustes, descripcionDeAccion, claveDeAjuste, objetivosDeAjuste,
-    type AjusteDelPlan, type AjustesDelPlanPayload, type AccionDeSolucion,
+    ajustesParaElProximo, ajustesDelPlanMostrado, estadoDeAjuste,
+    type AjusteDelPlan, type AjustesDelPlanPayload, type AccionDeSolucion, type GuardadoSinRecalcular,
 } from "@/lib/ajustesPlan";
+import { duracionEstimada } from "@/components/planning/ProgresoPlanificacion";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MaterialChip } from "@/components/common/MaterialChip";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { AvisoPausadasEnElPlan } from "@/components/pausas/AvisoPausadasEnElPlan";
@@ -339,6 +342,29 @@ export function PlanningPreviewScreen({
      */
     const [ajustesDelPlan, setAjustesDelPlan] = React.useState<AjusteDelPlan[]>(ajustesIniciales ?? []);
 
+    /**
+     * Lo guardado en Recursos desde el panel de avisos que el plan de la pantalla
+     * todavía no tiene.
+     *
+     * Hasta el 25/09/2026 «Guardar en Recursos» recalculaba en el mismo click, igual
+     * que «Solo en este plan», y con 48 OT cada vuelta son unos 4 minutos. Julián:
+     * *"cada vez que hago un cambio de alguna traba se replanifica todo, cuando tendría
+     * que dejarme terminar de verlas y ahí se replanifique; es una paja esperar con
+     * cada una"*. Ahora los arreglos se juntan y se recalcula una vez, con el botón
+     * del pie. Esta lista es la mitad de lo que ese botón cuenta; la otra mitad son
+     * los ajustes con estado pendiente.
+     */
+    const [guardadosSinRecalcular, setGuardadosSinRecalcular] = React.useState<GuardadoSinRecalcular[]>([]);
+    const idGuardado = React.useRef(0);
+    /**
+     * Qué se mandó en el último recálculo, para pasarlo a «calculado» recién cuando
+     * vuelve el plan que lo incluyó. Si el recálculo falla, `calculadoEn` no cambia y
+     * lo marcado sigue pendiente, que es lo cierto. `null` = no hay nada en viaje: así
+     * abrir un borrador (que también cambia `calculadoEn`) no da por calculado lo que
+     * quedó marcado en él.
+     */
+    const enviadosRef = React.useRef<{ agregados: Set<string>; sacados: Set<string>; guardados: Set<number> } | null>(null);
+
     // Cada retoque sube al borrador. Va en un efecto y no dentro de cada setter
     // porque los cambios entran por varios lados (celda, popover, atajo) y con un
     // solo lugar no hay forma de que alguno se olvide de avisar.
@@ -386,6 +412,11 @@ export function PlanningPreviewScreen({
         // manda la lista vacía y eso los limpia: valen para el plan en el que se
         // aplicaron y no para el siguiente.
         setAjustesDelPlan(ajustesIniciales ?? []);
+        // Lo guardado en Recursos no viaja en el borrador: al retomarlo, la huella de
+        // Recursos lo detecta como «cambió algo». Y nada está en viaje: el `calculadoEn`
+        // del borrador que llega no es la vuelta de ningún recálculo de esta pantalla.
+        setGuardadosSinRecalcular([]);
+        enviadosRef.current = null;
         // Solo al entrar: adentro de la pantalla mandan los cambios del usuario.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
@@ -582,11 +613,11 @@ export function PlanningPreviewScreen({
      *     reparte el trabajo distinto—, así que el plan mirado y el guardado podían
      *     no coincidir. Nadie se iba a dar cuenta.
      *
-     * Recalcular no hacía falta: cada decisión que se toma acá —forzar una OT,
-     * quitarla, agregar procesos, editarle los procesos a una OT— YA dispara su
-     * recálculo en el momento, y al volver a la pantalla se compara la huella de
-     * Recursos y se recalcula solo si cambió algo (`revisarSiCambioAlgo`). Para
-     * cuando se aprieta Guardar, lo que está en pantalla es el plan vigente.
+     * Recalcular no hacía falta: forzar una OT, quitarla o agregar procesos YA
+     * disparan su recálculo en el momento. Lo que NO recalcula solo desde el
+     * 25/09/2026 —los arreglos de las trabas, lo guardado en Recursos, los procesos
+     * editados de una OT— queda contado en el pie («Recalcular con N cambios») y, si
+     * se guarda sin recalcular, el primer eslabón de la cadena lo avisa.
      *
      * Qué se guarda: los procesos del plan con los retoques hechos a mano, más los
      * unfit que se completaron. Los unfit a medio completar se omiten, como antes.
@@ -649,7 +680,7 @@ export function PlanningPreviewScreen({
      * eslabón se ve igual que guardar bien, y por eso no se nota hasta que ya está
      * guardado.
      */
-    const [showProcesosWarn, setShowProcesosWarn] = React.useState(false);
+    const [showDesactualizadoWarn, setShowDesactualizadoWarn] = React.useState(false);
 
     /**
      * Aviso al guardar un plan que se calculó con arreglos «Solo en este plan».
@@ -680,11 +711,20 @@ export function PlanningPreviewScreen({
      * justo la forma de romper la cadena que advierte el comentario de arriba.
      */
     const seguirGuardando = () => {
-        if (ajustesDelPlan.length > 0) { setShowAjustesWarn(true); return; }
+        // Los que el plan de la pantalla YA tiene: si se guarda sin recalcular, los
+        // recién marcados no están en lo que se guarda.
+        if (ajustesDelPlanMostrado(ajustesDelPlan).length > 0) { setShowAjustesWarn(true); return; }
         seguirDespuesDeAjustes();
     };
+    /**
+     * El primer eslabón: cambios marcados que el plan todavía no tiene.
+     *
+     * Era sólo el de procesos editados; desde que los arreglos de las trabas se
+     * juntan y se recalculan una vez (25/09/2026) son uno más de la misma lista, y un
+     * solo aviso los cuenta a todos. Avisa y deja seguir, como el resto de la cadena.
+     */
     const onClickConfirmar = () => {
-        if (procesosEnPlan.hayCambios) { setShowProcesosWarn(true); return; }
+        if (cantidadPendientes > 0) { setShowDesactualizadoWarn(true); return; }
         seguirGuardando();
     };
 
@@ -896,7 +936,19 @@ export function PlanningPreviewScreen({
      * lista VIEJA. Sin el override, el primer ajuste se aplicaría mandando la lista
      * vacía y el deshecho se volvería a mandar.
      */
-    const ajustesParaEnviar = (override?: AjusteDelPlan[]) => payloadDeAjustes(override ?? ajustesDelPlan);
+    const ajustesParaEnviar = (override?: AjusteDelPlan[]) => {
+        // Los que se están sacando no viajan; los recién marcados sí. Y se anota qué
+        // salió, para pasarlo a «calculado» cuando vuelva ESTE plan (efecto sobre
+        // `calculadoEn`). Por acá pasa cualquier recálculo —Forzar, Agregar, Quitar
+        // una OT, el botón del pie—, así que cualquiera vacía la cola de pendientes.
+        const todos = override ?? ajustesDelPlan;
+        enviadosRef.current = {
+            agregados: new Set(todos.filter(a => estadoDeAjuste(a) === "por-agregar").map(a => a.clave)),
+            sacados: new Set(todos.filter(a => estadoDeAjuste(a) === "por-quitar").map(a => a.clave)),
+            guardados: new Set(guardadosSinRecalcular.map(g => g.id)),
+        };
+        return payloadDeAjustes(ajustesParaElProximo(todos));
+    };
 
     /** Recalcula el plan con las OTs actuales + las nuevas pendientes + decisiones de forzar. */
     const handleRecalculate = (
@@ -935,7 +987,8 @@ export function PlanningPreviewScreen({
     );
 
     /**
-     * Aplica una solución SOLO a este cálculo, sin escribir nada en Recursos.
+     * Marca una solución para aplicarla SOLO a este cálculo, sin escribir nada en
+     * Recursos.
      *
      * Pedido de Julián (17/09/2026), copiado tal cual se escribió —tipeos incluidos, y
      * por lo mismo que en `lib/ajustesPlan`: una cita "arreglada" ya no se puede buscar
@@ -948,18 +1001,30 @@ export function PlanningPreviewScreen({
      * Éste es de un click a propósito: no toca ningún dato y se deshace con un botón,
      * así que pedir confirmación sería sólo un paso más para nada.
      *
-     * El recálculo va con la lista NUEVA y no con la del estado: `setAjustesDelPlan`
-     * recién se ve en el render siguiente, y sin el override el primer ajuste se
-     * aplicaría mandando la lista vacía.
+     * NO recalcula (25/09/2026): queda «por agregar» y entra en el próximo recálculo,
+     * que se pide una sola vez con el botón del pie cuando se terminó de revisar.
      */
     const aplicarAjusteDelPlan = (ajuste: AjusteDelPlan) => {
-        if (!onRecalculate) {
-            toast.error("Recalcular no está disponible en este contexto.");
+        const existente = ajustesDelPlan.find(a => a.clave === ajuste.clave);
+        if (existente) {
+            // Se estaba sacando y se vuelve a poner: queda como estaba, calculado.
+            if (estadoDeAjuste(existente) === "por-quitar") {
+                setAjustesDelPlan(ajustesDelPlan.map(a => a.clave === ajuste.clave ? { ...a, estado: "calculado" } : a));
+            }
+            // Dos veces el mismo ajuste no suma nada —los rangos son un conjunto final,
+            // no una suma— y dejaría dos líneas iguales en la tira.
             return;
         }
-        // Dos veces el mismo ajuste no suma nada —los rangos son un conjunto final,
-        // no una suma— y dejaría dos líneas iguales en la tira.
-        if (ajustesDelPlan.some(a => a.clave === ajuste.clave)) return;
+        // Sobre algo que se acaba de guardar en Recursos y todavía no se recalculó, el
+        // ajuste REEMPLAZA en memoria el conjunto de la base: el plan saldría sin lo
+        // recién guardado. El panel ya deja el botón apagado con el motivo; esto es la
+        // red por si llega igual.
+        const tocados = new Set(objetivosDeAjuste(ajuste.accion));
+        const pisa = guardadosSinRecalcular.find(g => objetivosDeAjuste(g.accion).some(o => tocados.has(o)));
+        if (pisa) {
+            toast.error(`Ya guardaste un cambio en ${pisa.accion.nombre}: recalculá primero`);
+            return;
+        }
 
         // Dos ajustes sobre la misma máquina CONVIVEN, no se pisan.
         //
@@ -983,68 +1048,77 @@ export function PlanningPreviewScreen({
             // el dato que se necesita para decidir si ese ajuste se deshace o se deja.
             // El del panel queda de red por si la acción viene sin nada que traducir.
             descripcion: descripcionDeAccion(ajuste.accion, nombreDeRango) || ajuste.descripcion?.trim() || "",
+            estado: "por-agregar",
         };
-        const nueva = [...ajustesDelPlan, conTexto];
-        setAjustesDelPlan(nueva);
-        toast.info("Aplicado solo a este plan", {
-            description: `${conTexto.descripcion}. No se guardó nada en Recursos: vale para este plan y se pierde si lo descartás.`,
+        setAjustesDelPlan([...ajustesDelPlan, conTexto]);
+        toast.info("Marcado para el próximo recálculo", {
+            description: `${conTexto.descripcion}. Solo para este plan, en Recursos no se guarda nada. Seguí revisando y recalculá una vez al terminar.`,
         });
-        handleRecalculate([], undefined, nueva);
     };
 
     /**
-     * Saca un ajuste y recalcula como si nunca se hubiera aplicado.
+     * Deshace un ajuste, sin recalcular.
      *
-     * Saca ESE y nada más. Hubo una versión que además arrastraba los posteriores que
-     * tocaran alguna de las mismas cosas, porque se suponía que se habían calculado
-     * encima —el segundo ajuste sobre la misma máquina contenía al primero—. Esa
-     * suposición se cayó cuando las acciones pasaron a calcularse contra lo que dice
-     * Recursos: cada ajuste es ahora independiente de los otros, y `payloadDeAjustes`
-     * los suma. Arrastrar se llevaba puestos ajustes que nadie había tocado y que no
-     * dependían de éste.
+     * Según dónde esté: el recién marcado se va (nunca entró al plan); el que ya está
+     * en el plan queda «se saca al recalcular»; y el que se estaba sacando vuelve a
+     * quedar («No, dejarlo»). Saca ESE y nada más: cada ajuste es independiente de los
+     * otros desde que las acciones se calculan contra lo que dice Recursos, y
+     * `payloadDeAjustes` los suma.
      */
     const quitarAjusteDelPlan = (clave: string) => {
-        const i = ajustesDelPlan.findIndex(a => a.clave === clave);
-        if (i < 0) return;
-
-        const nueva = ajustesDelPlan.filter((_, j) => j !== i);
-        setAjustesDelPlan(nueva);
-        toast.info("Ajuste deshecho", {
-            description: nueva.length > 0
-                ? "Recalculando el plan sin ese ajuste."
-                : "Recalculando el plan con los datos tal como están en Recursos.",
-        });
-        // Misma razón que arriba para el override: si mandara el estado, el ajuste que
-        // se acaba de sacar viajaría igual y el plan volvería idéntico.
-        handleRecalculate([], undefined, nueva);
+        const a = ajustesDelPlan.find(x => x.clave === clave);
+        if (!a) return;
+        const estado = estadoDeAjuste(a);
+        if (estado === "por-agregar") {
+            setAjustesDelPlan(ajustesDelPlan.filter(x => x.clave !== clave));
+            return;
+        }
+        setAjustesDelPlan(ajustesDelPlan.map(x => x.clave === clave
+            ? { ...x, estado: estado === "por-quitar" ? "calculado" : "por-quitar" }
+            : x));
     };
 
     /**
      * Los ajustes que quedan pisados cuando un cambio se guarda EN SERIO en Recursos.
      *
-     * El caso: hay un ajuste vigente sobre una fresadora y después, desde el mismo
-     * panel, se usa «Guardar en Recursos» sobre esa misma fresadora. El ajuste viejo
-     * tiene un conjunto final armado antes de ese guardado, y como el conjunto
-     * REEMPLAZA (no suma), el próximo recálculo lo manda y le pisa a la máquina lo que
-     * se acaba de dejar cargado — en silencio y con el ajuste diciendo que sólo vale
-     * para este plan. Lo permanente manda: el ajuste se va.
+     * El caso: hay un ajuste sobre una fresadora y después, desde el mismo panel, se
+     * usa «Guardar en Recursos» sobre esa misma fresadora. El ajuste tiene un conjunto
+     * final armado antes de ese guardado, y como el conjunto REEMPLAZA (no suma), el
+     * próximo recálculo lo mandaría y le pisaría a la máquina lo que se acaba de
+     * dejar cargado — en silencio y con el ajuste diciendo que sólo vale para este
+     * plan. Lo permanente manda: el recién marcado se va y el que ya estaba en el plan
+     * queda «se saca al recalcular» (sigue en el plan de la pantalla hasta entonces).
      *
      * `accion` es opcional porque el panel puede no mandarla (versión anterior del
-     * componente): sin ella no hay forma de saber qué se tocó y se recalcula como
-     * siempre, que es el comportamiento de antes.
+     * componente): sin ella no hay forma de saber qué se tocó.
      */
-    const olvidarAjustesPisadosPor = (accion?: AccionDeSolucion): AjusteDelPlan[] => {
-        if (!accion) return ajustesDelPlan;
+    const olvidarAjustesPisadosPor = (accion?: AccionDeSolucion) => {
+        if (!accion) return;
         const tocados = new Set(objetivosDeAjuste(accion));
-        const nueva = ajustesDelPlan.filter(a => !objetivosDeAjuste(a.accion).some(o => tocados.has(o)));
-        if (nueva.length === ajustesDelPlan.length) return ajustesDelPlan;
-
-        const sacados = ajustesDelPlan.length - nueva.length;
-        setAjustesDelPlan(nueva);
-        toast.info("Se dio de baja el ajuste temporal", {
-            description: `Lo acabás de dejar cargado en Recursos, así que ${sacados === 1 ? "el ajuste que tenías" : `los ${sacados} ajustes que tenías`} sobre eso ${sacados === 1 ? "sale" : "salen"} de la lista: si ${sacados === 1 ? "se quedaba" : "se quedaban"}, el próximo cálculo te pisaba lo que guardaste.`,
+        const pisa = (a: AjusteDelPlan) =>
+            estadoDeAjuste(a) !== "por-quitar" && objetivosDeAjuste(a.accion).some(o => tocados.has(o));
+        const sacados = ajustesDelPlan.filter(pisa).length;
+        if (sacados === 0) return;
+        setAjustesDelPlan(ajustesDelPlan
+            .filter(a => !(pisa(a) && estadoDeAjuste(a) === "por-agregar"))
+            .map(a => pisa(a) ? { ...a, estado: "por-quitar" as const } : a));
+        toast.info("Se da de baja el ajuste temporal", {
+            description: `Lo acabás de dejar cargado en Recursos, así que ${sacados === 1 ? "el ajuste que tenías" : `los ${sacados} ajustes que tenías`} sobre eso ${sacados === 1 ? "sale" : "salen"} al recalcular: si ${sacados === 1 ? "se quedaba" : "se quedaban"}, el próximo cálculo te pisaba lo que guardaste.`,
         });
-        return nueva;
+    };
+
+    /** «Guardar en Recursos» del panel: anota el cambio para el próximo recálculo. */
+    const anotarGuardado = (accion?: AccionDeSolucion, titulo?: string) => {
+        olvidarAjustesPisadosPor(accion);
+        if (!accion) return;
+        idGuardado.current += 1;
+        const nuevo: GuardadoSinRecalcular = {
+            id: idGuardado.current,
+            titulo: titulo ?? "",
+            descripcion: descripcionDeAccion(accion, nombreDeRango),
+            accion,
+        };
+        setGuardadosSinRecalcular(prev => [...prev, nuevo]);
     };
 
     /**
@@ -1054,7 +1128,8 @@ export function PlanningPreviewScreen({
      * se leen — el que quiere el detalle lo tiene en la tira, que es donde están todos.
      */
     const resumenDeAjustes = React.useMemo(() => {
-        const textos = ajustesDelPlan.map(a => a.descripcion?.trim()).filter(Boolean) as string[];
+        // Los del plan que se va a guardar, no los recién marcados (ver `seguirGuardando`).
+        const textos = ajustesDelPlanMostrado(ajustesDelPlan).map(a => a.descripcion?.trim()).filter(Boolean) as string[];
         if (textos.length === 0) return "";
         const muestra = textos.slice(0, 3).join("; ");
         const resto = textos.length - 3;
@@ -1842,18 +1917,20 @@ export function PlanningPreviewScreen({
      * revisar"— y el aviso resuelto seguía en rojo hasta que alguien se acordaba
      * de tocarlo.
      *
-     * Ahora, al volver a esta pantalla, se compara la huella de los datos de
-     * Recursos contra la que tenía el plan cuando se calculó (`lib/huellaRecursos`,
-     * tres GET chicos). Si no cambió nada, no se molesta a nadie. Si cambió, se
-     * recalcula solo y los avisos que desaparecieron quedan tachados en verde.
+     * Al volver a esta pantalla se compara la huella de los datos de Recursos
+     * contra la que tenía el plan cuando se calculó (`lib/huellaRecursos`, tres GET
+     * chicos). Si no cambió nada, no se molesta a nadie. Si cambió, queda anotado
+     * como un cambio pendiente más, y se recalcula cuando se termina de revisar.
      *
-     * Lo que NO se hace solo: recalcular cuando hay retoques a mano en el plan. El
-     * recálculo rehace las asignaciones automáticas, y perder de golpe las máquinas
-     * y horarios que alguien acomodó a mano —sin haber pedido nada— es peor que un
-     * aviso viejo. En ese caso se avisa y la decisión queda en el botón.
+     * Hasta el 25/09/2026 acá se recalculaba solo, y era la mitad de la queja de
+     * Julián (*"cada vez que hago un cambio de alguna traba se replanifica todo"*):
+     * cada ida y vuelta a Recursos —o a «Ver cómo quedó ↗», que abre otra pestaña—
+     * eran 4 minutos de pantalla tapada. Y la huella mira a TODO el taller: un cambio
+     * de otra persona en Recursos recalculaba la vista previa abierta de uno. Ahora
+     * nunca recalcula solo.
      */
     const [revisionAuto, setRevisionAuto] = React.useState<
-        "mirando" | "recalculando" | "con-retoques" | "no-disponible" | null
+        "mirando" | "cambios-en-recursos" | "no-disponible" | null
     >(null);
     const revisionEnCurso = React.useRef(false);
 
@@ -1863,9 +1940,22 @@ export function PlanningPreviewScreen({
     // Con las marcas de procesos editados pasa lo mismo, y por eso se limpian acá: el
     // cálculo que acaba de volver ya salió con los minutos, el orden y los pasos nuevos
     // de la OT, así que no hay nada viejo que marcar.
+    //
+    // Y lo marcado para el recálculo que acaba de volver pasa a «calculado»: sólo si
+    // ESTA pantalla mandó algo (`enviadosRef`), porque abrir un borrador también cambia
+    // `calculadoEn` y lo que quedó marcado en él sigue sin estar en el plan.
     React.useEffect(() => {
         setRevisionAuto(null);
         olvidarCambiosDeProcesos();
+        const enviados = enviadosRef.current;
+        if (!enviados) return;
+        enviadosRef.current = null;
+        // Sólo lo que estaba así AL MANDAR: lo que se hubiera marcado después sigue
+        // pendiente, porque este plan no lo tiene.
+        setAjustesDelPlan(prev => prev
+            .filter(a => !(estadoDeAjuste(a) === "por-quitar" && enviados.sacados.has(a.clave)))
+            .map(a => estadoDeAjuste(a) === "por-agregar" && enviados.agregados.has(a.clave) ? { ...a, estado: "calculado" } : a));
+        setGuardadosSinRecalcular(prev => prev.filter(g => !enviados.guardados.has(g.id)));
     }, [calculadoEn, olvidarCambiosDeProcesos]);
 
     const revisarSiCambioAlgo = async () => {
@@ -1881,23 +1971,17 @@ export function PlanningPreviewScreen({
         }
 
         revisionEnCurso.current = true;
-        setRevisionAuto("mirando");
+        // Si ya estaba anotado, se queda anotado mientras mira: si no, el contador del
+        // pie bajaba y subía de nuevo cada vez que se volvía a la pestaña.
+        setRevisionAuto(prev => prev === "cambios-en-recursos" ? prev : "mirando");
         const ahora = await huellaRecursos();
         revisionEnCurso.current = false;
 
         if (ahora === null) { setRevisionAuto("no-disponible"); return; }
         if (ahora === huellaAlCalcular) { setRevisionAuto(null); return; }
 
-        if (Object.keys(editedResults).length > 0) {
-            setRevisionAuto("con-retoques");
-            return;
-        }
-
-        setRevisionAuto("recalculando");
-        toast.info("Cambió algo en Recursos", {
-            description: "Recalculando el plan para ver qué avisos quedaron resueltos.",
-        });
-        handleRecalculate();
+        // Nunca recalcula solo: queda como un pendiente más, en la franja y en el pie.
+        setRevisionAuto("cambios-en-recursos");
     };
 
     /**
@@ -1906,7 +1990,7 @@ export function PlanningPreviewScreen({
      * Si el efecto dependiera de la función, se volvería a montar con cada retoque
      * a mano (cada cambio de `editedResults` la recrea) y volvería a consultar
      * Recursos: tres GET por cada desplegable que alguien toca. La ref además evita
-     * lo contrario —quedarse con una versión vieja de `handleRecalculate`—, porque
+     * lo contrario —quedarse con una versión vieja de la huella o de los avisos—, porque
      * se actualiza en cada render.
      */
     const revisarRef = React.useRef(revisarSiCambioAlgo);
@@ -2161,6 +2245,44 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         }
         return m;
     }, [results, stickyExcedentes]);
+
+    /**
+     * Lo que se marcó y el plan de la pantalla todavía no tiene: la cola que se
+     * recalcula de una vez con el botón del pie (25/09/2026).
+     *
+     * Un cambio en Recursos detectado al volver a la pestaña cuenta uno solo y sólo
+     * si no hay guardados desde el panel: esos también cambian la huella, y contarlos
+     * dos veces sería decir que hay más cambios de los que hubo.
+     */
+    const pendientes = React.useMemo(() => {
+        const lista: { clave: string; texto: string }[] = [];
+        for (const a of ajustesDelPlan) {
+            const estado = estadoDeAjuste(a);
+            if (estado === "por-agregar") lista.push({ clave: `a-${a.clave}`, texto: `Solo en este plan: ${a.descripcion || a.titulo}` });
+            if (estado === "por-quitar") lista.push({ clave: `q-${a.clave}`, texto: `Se saca de este plan: ${a.descripcion || a.titulo}` });
+        }
+        for (const g of guardadosSinRecalcular) {
+            lista.push({ clave: `g-${g.id}`, texto: `Guardado en Recursos: ${g.descripcion || g.titulo}` });
+        }
+        if (revisionAuto === "cambios-en-recursos" && guardadosSinRecalcular.length === 0) {
+            lista.push({ clave: "recursos", texto: "Cambió algo en Recursos (puede haber sido otra persona)" });
+        }
+        for (const oid of procesosEnPlan.otsCambiadas) {
+            lista.push({ clave: `p-${oid}`, texto: `Procesos editados en la OT #${numeroDeOT(oid)}` });
+        }
+        return lista;
+    }, [ajustesDelPlan, guardadosSinRecalcular, revisionAuto, procesosEnPlan.otsCambiadas, numeroDeOT]);
+    const cantidadPendientes = pendientes.length;
+    const textoCambios = (n: number) => `${n} ${n === 1 ? "cambio que marcaste" : "cambios que marcaste"}`;
+    /**
+     * Cuánto va a tardar el recálculo, escrito al lado del botón: con 48 OT son unos
+     * 4 minutos, y saberlo antes de tocar es lo que deja decidir si conviene juntar
+     * un arreglo más. Misma cuenta que la barra de progreso.
+     */
+    const tardaElRecalculo = (() => {
+        const seg = duracionEstimada(buildOrdenIdsForRecalc(Array.from(forzarOrdenIds)).length);
+        return seg < 60 ? `~${Math.max(5, Math.round(seg / 5) * 5)} s` : `~${Math.round(seg / 60)} min`;
+    })();
 
     /**
      * A qué traer a la vista después del próximo dibujado. Un ref y no un
@@ -3128,7 +3250,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                 <div className="px-3 py-3 sm:px-6 sm:py-4 flex items-center justify-between gap-3">
                     {/* Lado izquierdo: contexto + Volver */}
                     <div className="flex items-center gap-3 text-xs text-gray-500">
-                        <Button variant="outline" onClick={onBack} disabled={isConfirming || isCalculating} className="border-gray-300 text-gray-700 hover:bg-gray-50">
+                        <Button variant="outline" onClick={onBack} disabled={isConfirming || isCalculating} title={isCalculating ? "Esperá a que termine el recálculo" : undefined} className="border-gray-300 text-gray-700 hover:bg-gray-50">
                             Volver
                         </Button>
                         {forzarOrdenIds.size > 0 && (
@@ -3137,11 +3259,42 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             </span>
                         )}
                     </div>
-                    {/* Lado derecho: confirmar */}
+                    {/* Lado derecho: recalcular lo marcado (si hay) y confirmar.
+                        El botón de recalcular vive acá, fijo en el pie, porque los
+                        arreglos se marcan de a varios y se recalcula una sola vez
+                        (25/09/2026): tiene que estar a la vista mientras se revisa, no
+                        sólo arriba del panel. Con pendientes, Confirmar pasa a segundo
+                        plano: guardar así se puede, pero no es lo que se recomienda. */}
+                    <div className="flex items-center gap-2">
+                    {cantidadPendientes > 0 && onRecalculate && (
+                        <Button
+                            onClick={() => handleRecalculate()}
+                            disabled={isConfirming || isCalculating}
+                            title={isCalculating
+                                ? "Esperá a que termine el recálculo"
+                                : `El plan de la pantalla todavía no tiene ${textoCambios(cantidadPendientes)}. Tarda ${tardaElRecalculo}.`}
+                            className="h-auto flex-col items-center gap-0 bg-amber-500 px-3 py-1.5 text-white shadow-md hover:bg-amber-600 sm:px-4"
+                        >
+                            <span className="flex items-center gap-1.5">
+                                <RefreshCw className={cn("h-4 w-4", isCalculating && "animate-spin")} />
+                                <span className="sm:hidden">Recalcular ({cantidadPendientes})</span>
+                                <span className="hidden sm:inline">
+                                    Recalcular con {cantidadPendientes} {cantidadPendientes === 1 ? "cambio" : "cambios"}
+                                </span>
+                            </span>
+                            <span className="text-[10.5px] font-normal leading-tight text-white/85">tarda {tardaElRecalculo}</span>
+                        </Button>
+                    )}
                     <Button
                         onClick={onClickConfirmar}
                         disabled={isConfirming || isCalculating || (results.length === 0 && displayedExcedentes.length === 0)}
-                        className="bg-blue-600 hover:bg-blue-700 shadow-md px-4 sm:px-6"
+                        title={isCalculating ? "Esperá a que termine el recálculo" : undefined}
+                        className={cn(
+                            "px-4 sm:px-6",
+                            cantidadPendientes > 0
+                                ? "border border-blue-300 bg-white text-blue-700 shadow-none hover:bg-blue-50"
+                                : "bg-blue-600 hover:bg-blue-700 shadow-md",
+                        )}
                     >
                         {isConfirming ? (
                             <span className="flex items-center gap-2">
@@ -3157,6 +3310,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             </>
                         )}
                     </Button>
+                    </div>
                 </div>
             }
         >
@@ -3185,7 +3339,52 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 hasta ahí y quedaban cortados por el panel de Carga de Operarios.
                                 `sticky left-0` lo mantiene a la vista cuando la tabla se scrollea
                                 en horizontal. */}
-                            <div ref={panelAvisos} className="sticky left-0 w-full">
+                            {/* `scroll-mt`: «Ver detalles» de la cifra de trabas trae el panel
+                                arriba de todo, y sin margen el encabezado —con «Recalcular»—
+                                quedaba abajo de la cabecera fija. La cabecera sólo es fija
+                                desde md. */}
+                            <div ref={panelAvisos} className="sticky left-0 w-full md:scroll-mt-[calc(var(--alto-cabecera)+8px)]">
+                                {/* Lo marcado que el plan de abajo todavía no tiene. Arriba de
+                                    los avisos, porque es lo que cambia cómo se leen: el aviso
+                                    que se ve rojo puede estar ya arreglado y sin recalcular. */}
+                                {cantidadPendientes > 0 && (
+                                    <div className="mx-3 sm:mx-4 mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5">
+                                        <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                                            <Clock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                                            <div className="min-w-0 flex-1 basis-60">
+                                                <p className="text-[13px] font-semibold leading-snug text-amber-950">
+                                                    El plan de abajo todavía no tiene {textoCambios(cantidadPendientes)}
+                                                </p>
+                                                <p className="text-[12px] leading-snug text-amber-900/80">
+                                                    Seguí revisando y recalculá una sola vez al terminar (tarda {tardaElRecalculo}).
+                                                </p>
+                                                <ul className="mt-1 space-y-0.5 text-[11.5px] leading-snug text-amber-950">
+                                                    {pendientes.slice(0, 6).map(p => (
+                                                        <li key={p.clave} className="flex gap-1.5">
+                                                            <span className="text-amber-500">•</span>
+                                                            <span className="min-w-0">{p.texto}</span>
+                                                        </li>
+                                                    ))}
+                                                    {pendientes.length > 6 && (
+                                                        <li className="text-amber-800/80">y {pendientes.length - 6} más</li>
+                                                    )}
+                                                </ul>
+                                            </div>
+                                            {onRecalculate && (
+                                                <Button
+                                                    size="sm"
+                                                    onClick={() => handleRecalculate()}
+                                                    disabled={isCalculating || isConfirming}
+                                                    title={isCalculating ? "Esperá a que termine el recálculo" : `Recalcular el plan con estos cambios (${tardaElRecalculo})`}
+                                                    className="h-8 shrink-0 gap-1.5 bg-amber-500 text-white hover:bg-amber-600"
+                                                >
+                                                    <RefreshCw className={cn("h-3.5 w-3.5", isCalculating && "animate-spin")} />
+                                                    Recalcular ahora
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                                 <DiagnosticosPlan
                                     diagnosticos={diagnosticos}
                                     /* El plegado lo maneja la pantalla, no la tira: la cifra
@@ -3195,25 +3394,14 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     /* Marcados a mano: los cuenta la cifra de arriba. */
                                     marcados={avisosMarcados}
                                     onMarcadosChange={setAvisosMarcados}
-                                    /* Aplicado el cambio de rangos, se recalcula el mismo
-                                       plan al toque: el aviso desaparece solo si de verdad
-                                       se resolvió, y las fechas se actualizan con el dato
-                                       nuevo sin salir de la vista previa. */
-                                    onResuelto={(accion?: AccionDeSolucion) => {
-                                        if (!onRecalculate) return;
-                                        // Lo que se acaba de cargar en Recursos pisa al ajuste
-                                        // temporal que tocaba lo mismo: el ajuste tiene un
-                                        // conjunto final viejo y, como reemplaza, el recálculo
-                                        // de acá abajo le borraría a la máquina lo recién
-                                        // guardado sin decir una palabra. Manda lo permanente.
-                                        const quedan = olvidarAjustesPisadosPor(accion);
-                                        const forcedArr = Array.from(forzarOrdenIds);
-                                        const ids = buildOrdenIdsForRecalc(forcedArr);
-                                        // Con la lista NUEVA y no con la del estado, por lo mismo
-                                        // de siempre: `setAjustesDelPlan` se ve recién en el
-                                        // render que viene.
-                                        onRecalculate(ids, planningRange, forcedArr, lineasParaEnviar(ids), ajustesParaEnviar(quedan));
-                                    }}
+                                    /* Guardado el cambio en Recursos, NO se recalcula: queda
+                                       anotado como pendiente y entra en el recálculo que se
+                                       pide una vez al terminar de revisar (25/09/2026). Lo
+                                       que se acaba de cargar pisa al ajuste temporal que
+                                       tocaba lo mismo: ése sale al recalcular. */
+                                    onResuelto={anotarGuardado}
+                                    guardadosSinRecalcular={guardadosSinRecalcular}
+                                    pendientes={cantidadPendientes}
                                     /* El otro camino: destrabar el aviso SOLO para este
                                        cálculo. No escribe en Recursos —el plan sale como
                                        si el dato estuviera cargado y nada más—, así que
@@ -4731,22 +4919,53 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                     </div>
                 )}
         </PantallaPlanificador>
-        <ConfirmationDialog
-            isOpen={showProcesosWarn}
-            onClose={() => setShowProcesosWarn(false)}
-            onConfirm={seguirGuardando}
-            title="Cambiaste procesos y no recalculaste"
-            description={
-                `Editaste los procesos de ${procesosEnPlan.otsCambiadas.length === 1
-                    ? `la OT ${numeroDeOT(procesosEnPlan.otsCambiadas[0])}`
-                    : `${procesosEnPlan.otsCambiadas.length} OT (${procesosEnPlan.otsCambiadas.slice(0, 4).map(numeroDeOT).join(", ")}${procesosEnPlan.otsCambiadas.length > 4 ? "…" : ""})`}`
-                + ". Eso ya está guardado en las órdenes, pero el plan que se va a guardar se calculó antes: "
-                + "los horarios son los de antes del cambio y los pasos que agregaste no tienen lugar todavía. "
-                + "Si querés que el motor los acomode, volvé y usá «Recalcular el plan»."
-            }
-            confirmText="Guardar igual"
-            cancelText="Volver a revisar"
-        />
+        {/* Primer eslabón: lo marcado que el plan de la pantalla todavía no tiene.
+            Avisa y deja seguir: guardar el plan como está puede ser lo que se quiere.
+            «Volver y recalcular» es la salida recomendada, y va con el color fuerte. */}
+        <Dialog open={showDesactualizadoWarn} onOpenChange={setShowDesactualizadoWarn}>
+            <DialogContent className="sm:max-w-[480px]">
+                <DialogHeader className="gap-2">
+                    <div className="flex items-center gap-2">
+                        <div className="rounded-full bg-amber-100 p-2 text-amber-600">
+                            <AlertTriangle className="h-5 w-5" />
+                        </div>
+                        <DialogTitle>El plan todavía no tiene {textoCambios(cantidadPendientes)}</DialogTitle>
+                    </div>
+                    <DialogDescription className="pt-2 text-left">
+                        Lo que se guarda es el plan de la pantalla, y se calculó antes de estos cambios.
+                        {" "}Si guardás igual, sale sin los arreglos recién marcados
+                        {procesosEnPlan.hayCambios ? " y con los horarios de antes de editar los procesos (los pasos nuevos no tienen lugar todavía)" : ""}.
+                        {" "}Lo que guardaste en Recursos queda guardado igual. Recalcular tarda {tardaElRecalculo}.
+                    </DialogDescription>
+                </DialogHeader>
+                <ul className="max-h-48 space-y-0.5 overflow-y-auto rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-950">
+                    {pendientes.map(p => (
+                        <li key={p.clave} className="flex gap-1.5">
+                            <span className="text-amber-500">•</span>
+                            <span className="min-w-0">{p.texto}</span>
+                        </li>
+                    ))}
+                </ul>
+                <DialogFooter className="mt-2 gap-2 sm:gap-0">
+                    <Button
+                        variant="outline"
+                        type="button"
+                        onClick={() => { setShowDesactualizadoWarn(false); seguirGuardando(); }}
+                    >
+                        Guardar igual
+                    </Button>
+                    {onRecalculate && (
+                        <Button
+                            type="button"
+                            className="bg-amber-500 text-white hover:bg-amber-600"
+                            onClick={() => { setShowDesactualizadoWarn(false); handleRecalculate(); }}
+                        >
+                            Volver y recalcular
+                        </Button>
+                    )}
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
         {/* Segundo eslabón: se guarda un plan que salió de datos que no están cargados.
             Cuenta qué se aplicó y deja las dos salidas abiertas —guardar igual, o volver
             y dejarlo cargado de verdad con «Guardar en Recursos»—. */}
@@ -4756,7 +4975,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
             onConfirm={seguirDespuesDeAjustes}
             title="Este plan salió con arreglos que no están cargados"
             description={
-                `Para destrabar este plan se aplicaron ${ajustesDelPlan.length} ${ajustesDelPlan.length === 1 ? "arreglo que vale" : "arreglos que valen"} `
+                `Para destrabar este plan se aplicaron ${ajustesDelPlanMostrado(ajustesDelPlan).length} ${ajustesDelPlanMostrado(ajustesDelPlan).length === 1 ? "arreglo que vale" : "arreglos que valen"} `
                 // Sin descripción no se inventa una lista vacía: se dice igual cuántos son.
                 + (resumenDeAjustes ? `solo para él: ${resumenDeAjustes}. ` : "solo para él. ")
                 + "Eso NO quedó cargado en el sistema: en Recursos los datos siguen como estaban. "

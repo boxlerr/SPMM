@@ -71,7 +71,7 @@ const TECHO = 92;
  * El techo de 380 no es un redondeo: el navegador corta el pedido a los 420, así
  * que una estimación más larga que eso prometería un final que nunca va a llegar.
  */
-function duracionEstimada(cantidadOts: number, modo: "calcular" | "guardar" = "calcular"): number {
+export function duracionEstimada(cantidadOts: number, modo: "calcular" | "guardar" = "calcular"): number {
     // Guardar es una escritura, no un cálculo: desde que dejó de pasar por el solver
     // son segundos, no minutos. Con la estimación vieja la barra se arrastraba al 3%
     // mientras la pantalla ya se había cerrado.

@@ -218,9 +218,27 @@ export function enlaceARecursos(
     return `/recursos?${params.toString()}`;
 }
 
+/**
+ * El mismo link, pero para MIRAR lo que ya se guardó («Ver cómo quedó ↗» de la tira
+ * verde del plan).
+ *
+ * Era el mismo link que «Ir a arreglarlo» y Recursos llegaba diciendo «Qué hacer:
+ * Ponele…», con los rangos propuestos tildados, como si todavía faltara: para quien
+ * acababa de guardarlo, el botón «no hizo nada» (25/09/2026). Con `hecho=1` el
+ * cartel dice que ya quedó aplicado y no propone nada.
+ */
+export function enlaceDeLoHecho(enlace: string): string {
+    return `${enlace}${enlace.includes("?") ? "&" : "?"}hecho=1`;
+}
+
+/** Si el link viene de «Ver cómo quedó»: lo que decía el aviso ya se guardó. */
+export function leerHechoDelLink(params: URLSearchParams): boolean {
+    return params.get("hecho") === "1";
+}
+
 /** Si un parámetro de la URL es de los que trae el link del aviso (para limpiarlos al entrar). */
 export function esParamDelAviso(clave: string): boolean {
-    return ["tab", "foco", "q", "rangos", "aviso", "hacer", "cambio"].includes(clave)
+    return ["tab", "foco", "q", "rangos", "aviso", "hacer", "cambio", "hecho"].includes(clave)
         || clave.startsWith("rangos.");
 }
 
