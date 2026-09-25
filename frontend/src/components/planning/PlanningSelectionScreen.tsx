@@ -6,11 +6,6 @@ import { WorkOrder } from "@/lib/types"
 import { resumirMaterial } from "@/lib/materialOT"
 import { toast } from "@/lib/toast"
 import { Badge } from "@/components/ui/badge"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar as CalendarUI } from "@/components/ui/calendar"
-import { format } from "date-fns"
-import { es } from "date-fns/locale"
-import type { DateRange } from "react-day-picker"
 import { API_URL } from "@/config"
 
 import {
@@ -21,7 +16,7 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { Calendar, CalendarDays, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, ListChecks, LogOut, Search, X } from "lucide-react"
+import { CalendarDays, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, ListChecks, LogOut, Search, X } from "lucide-react"
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "@/components/common/WorkOrderFilters"
 import { resumenFiltrosOT } from "@/lib/exportes/ordenes"
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
@@ -35,6 +30,8 @@ import {
 } from "@/lib/estimarPlan"
 import { numeroEs } from "@/lib/diasHabiles"
 import { inicioDelPlan } from "@/lib/plan-fechas"
+import { ChipPeriodoPlan, SelectorFechasPlan } from "./SelectorFechasPlan"
+import { fechasVigentes, rangoParaElPlan, type FechasDelPlan } from "@/lib/fechasDelPlan"
 
 export interface PlanningRange {
     fecha_desde?: string  // "YYYY-MM-DD"
@@ -53,6 +50,9 @@ interface PlanningSelectionScreenProps {
     initialSelectedIds?: number[]
     /** Abre un plan calculado y sin confirmar, sin volver a calcularlo. */
     onAbrirBorrador?: (borrador: BorradorPlan) => void
+    /** El período con el que quedó el plan cuando lo cambió la vista previa o se abrió
+     *  un borrador: este paso lo adopta para que el chip diga lo mismo que el plan. */
+    rangoDeLaVistaPrevia?: { rango: PlanningRange; vez: number } | null
 }
 
 export function PlanningSelectionScreen({
@@ -64,6 +64,7 @@ export function PlanningSelectionScreen({
     onDataRefresh,
     initialSelectedIds = [],
     onAbrirBorrador,
+    rangoDeLaVistaPrevia = null,
 }: PlanningSelectionScreenProps) {
     const [selectedIds, setSelectedIds] = useState<number[]>(initialSelectedIds)
 
@@ -119,12 +120,35 @@ export function PlanningSelectionScreen({
     const [dateSort, setDateSort] = useState<'DEFAULT' | 'OLDEST_FIRST' | 'NEWEST_FIRST'>('DEFAULT')
     const [clientSearchTerm, setClientSearchTerm] = useState('')
 
-    // Date range state
-    const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
-    const [blockedDates, setBlockedDates] = useState<Date[]>([])
-    const [datePopoverOpen, setDatePopoverOpen] = useState(false)
+    /**
+     * Para qué fechas es el plan. `null` = todavía no se eligieron: al tocar
+     * Planificar se abre el selector antes de calcular (Julián, 25/9: «se olvida de
+     * seleccionarlas»). «Sin tope» es una elección más, no lo que pasa por olvido.
+     * Se queda al volver de la vista previa: la pantalla sigue montada y oculta.
+     */
+    const [fechas, setFechas] = useState<FechasDelPlan | null>(null)
+    /** Días no laborables de Disponibilidad, "YYYY-MM-DD". */
+    const [feriados, setFeriados] = useState<string[]>([])
+    /** El selector de fechas. El modo va aparte de «abierto» para que el botón no
+     *  cambie de texto mientras el diálogo se desvanece al cerrarse. */
+    const [selectorAbierto, setSelectorAbierto] = useState(false)
+    const [modoSelector, setModoSelector] = useState<"planificar" | "elegir">("elegir")
 
-    // Fetch blocked dates when modal opens (to display in calendar)
+    // Si la vista previa recalculó con otras fechas («Cambiar», «Ampliar rango») o se
+    // abrió un borrador, éstas son las fechas del plan: el chip las muestra al volver y
+    // un nuevo «Planificar» calcula con ellas, no con las de antes. Sin «hasta» es un
+    // plan sin tope, que también es una elección.
+    useEffect(() => {
+        if (!rangoDeLaVistaPrevia) return
+        const { fecha_desde, fecha_hasta } = rangoDeLaVistaPrevia.rango
+        const desde = fecha_desde?.slice(0, 10)
+        setFechas(fecha_hasta
+            ? { desde, hasta: fecha_hasta.slice(0, 10) }
+            : { desde, atajo: "sin-tope" })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [rangoDeLaVistaPrevia?.vez])
+
+    // Los días no laborables, para apagarlos en el calendario y contar días hábiles.
     useEffect(() => {
         if (!isOpen) return
         const getAuthHeaders = (): HeadersInit => {
@@ -135,13 +159,12 @@ export function PlanningSelectionScreen({
         fetch(`${API_URL}/config/availability`, { headers: getAuthHeaders() })
             .then(r => r.ok ? r.json() : { blocked_dates: [] })
             .then(data => {
-                const dates = (data.blocked_dates || []).map((d: string) => {
-                    const [y, m, day] = d.split('-').map(Number)
-                    return new Date(y, m - 1, day)
-                })
-                setBlockedDates(dates)
+                const dias = (data.blocked_dates || [])
+                    .map((d: unknown) => String(d).slice(0, 10))
+                    .filter((d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+                setFeriados(dias)
             })
-            .catch(() => { /* silencioso: si falla, solo no se pintan en rojo */ })
+            .catch(() => { /* silencioso: si falla, solo no se apagan en el calendario */ })
     }, [isOpen])
 
     /**
@@ -153,7 +176,17 @@ export function PlanningSelectionScreen({
      * Se calcula en cada render a propósito: con la pantalla abierta a las 06:59, a las
      * 07:00 hoy ya no se puede elegir.
      */
-    const arranqueReal = inicioDelPlan(new Date(), blockedDates.map(d => format(d, "yyyy-MM-dd")))
+    const arranqueReal = inicioDelPlan(new Date(), feriados)
+
+    /** Lo elegido, puesto al día con el arranque real (`null` si ya no sirve: un «hasta»
+     *  que quedó antes del arranque). Y lo que eso le manda al planificador. */
+    const fechasElegidas = fechasVigentes(fechas, arranqueReal)
+    const rangoElegido = rangoParaElPlan(fechasElegidas, arranqueReal)
+
+    const abrirSelectorFechas = (modo: "planificar" | "elegir") => {
+        setModoSelector(modo)
+        setSelectorAbierto(true)
+    }
 
     // Derived lists
     const uniqueClients = Array.from(new Set(unplannedOrders.map(o => o.cliente?.nombre).filter((n): n is string => !!n))).sort()
@@ -363,9 +396,9 @@ export function PlanningSelectionScreen({
     const [calculandoDias, setCalculandoDias] = useState(false)
 
     const idsParaEstimar = [...selectedIds].sort((a, b) => a - b).join(",")
-    const fechaDesdeParaEstimar = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : null
+    const fechaDesdeParaEstimar = rangoElegido.fecha_desde ?? null
     // Con una fecha «hasta» la cuenta además dice qué entra en ese rango.
-    const fechaHastaParaEstimar = dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : null
+    const fechaHastaParaEstimar = rangoElegido.fecha_hasta ?? null
     // Si cambian los minutos de un proceso (se editan desde la lista) la cuenta también
     // cambia, aunque lo tildado sea lo mismo.
     const huellaDeCarga = estimacion?.tipo === "ok" ? `${estimacion.cargaMin}|${estimacion.cadenaMin}` : ""
@@ -427,6 +460,98 @@ export function PlanningSelectionScreen({
         return null
     })()
 
+    // En los toasts la OT se nombra por su número VISIBLE (id_otvieja), que es el que
+    // está en la columna OT de la lista. Antes se mostraba el id interno: el aviso decía
+    // "#8599" y buscar 8599 en la lista no encontraba nada, así que parecía que el
+    // sistema se quejaba de órdenes que no existen.
+    const nro = (o: WorkOrder) => `#${o.id_otvieja ?? o.id}`
+
+    /**
+     * Tocar «Planificar». Primero lo que frena de verdad (OT sin procesos); después,
+     * si no hay fechas elegidas, el selector de fechas ANTES de calcular: el cálculo
+     * tarda minutos y hacerlo sin tope por olvido era tirarlos (Julián, 25/9). Con
+     * fechas ya elegidas —o «sin tope» elegido a propósito— va directo.
+     */
+    const alTocarPlanificar = () => {
+        const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id))
+        const emptyOrders = selectedOrders.filter(o => !o.procesos || o.procesos.length === 0)
+        if (emptyOrders.length > 0) {
+            const orderIds = emptyOrders.map(nro).join(", ")
+            toast.error(`Las órdenes ${orderIds} no tienen procesos. Agregue procesos antes de planificar.`, {
+                duration: 6000,
+                description: "Destildalas para planificar el resto, o cargales los procesos primero.",
+            })
+            return
+        }
+        if (!fechasElegidas) {
+            abrirSelectorFechas("planificar")
+            return
+        }
+        planificarCon(fechasElegidas)
+    }
+
+    /** Calcula lo tildado para esas fechas. Las fechas llegan por parámetro y no del
+     *  estado: al confirmar el selector, `setFechas` todavía no se aplicó. */
+    const planificarCon = (f: FechasDelPlan) => {
+        const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id))
+        const range: PlanningRange = rangoParaElPlan(f, inicioDelPlan(new Date(), feriados))
+
+        // Material: avisar, NUNCA frenar.
+        //
+        // Acá había un `return` y dejaba 14 órdenes sin poder planificarse.
+        // El comentario que estaba puesto decía «avisar, no bloquear» y el
+        // código hacía lo contrario: la única salida del cartel era «Sacarlas
+        // y planificar», que las sacaba. No existía un «planificar igual».
+        //
+        // Y lo que frenaba casi nunca era falta de material. El corte metía
+        // en la misma bolsa `sin_stock` (falta y no se pidió) con `sin_datos`
+        // (nadie cargó la lista). De las 175 órdenes abiertas, 17 estaban en
+        // el segundo caso y NINGUNA en el primero: todo el freno venía de un
+        // dato que además no se puede cargar, porque la solapa de Materias
+        // Primas todavía no guarda.
+        //
+        // Planificar una orden sin material no rompe nada: el plan es una
+        // intención, y si el material no llega se replanifica. Frenar, en
+        // cambio, dejaba trabajo afuera sin que nadie lo decidiera.
+        const sinStockReal = selectedOrders.filter(
+            o => resumirMaterial(o.estado_material, o.no_lleva_materia_prima).faltaMaterial
+        )
+
+        if (sinStockReal.length > 0) {
+            const orderIds = sinStockReal.map(nro).join(", ")
+            const restantes = selectedIds.filter(
+                id => !sinStockReal.some(o => o.id === id)
+            )
+            // «Falta pedir»: alguna línea no está ni pedida, ni reservada, ni
+            // disponible (las demás pueden estar listas). No es «no tiene material».
+            toast.warning(
+                sinStockReal.length === 1
+                    ? `La orden ${orderIds} tiene material sin pedir.`
+                    : `${sinStockReal.length} órdenes tienen material sin pedir: ${orderIds}.`,
+                {
+                    duration: 8000,
+                    description: restantes.length > 0
+                        ? "Se van a planificar igual. Si preferís dejarlas afuera, sacalas."
+                        : "Se van a planificar igual.",
+                    action: restantes.length > 0
+                        ? {
+                            label: "Sacarlas",
+                            onClick: () => {
+                                setSelectedIds(restantes)
+                                setSoloTildadas(prev =>
+                                    prev === null ? null : prev.filter(id => restantes.includes(id)))
+                                onPlan(restantes, range)
+                            },
+                        }
+                        : undefined,
+                }
+            )
+            // Sin return: el aviso sale y la planificación sigue.
+        }
+
+        onPlan(selectedIds, range)
+    }
+
     return (
         <PantallaPlanificador
             visible={isOpen}
@@ -440,7 +565,7 @@ export function PlanningSelectionScreen({
                         de 2». Desde `lg` los botones bajan a su renglón y la esquina queda
                         libre, como siempre. */}
                     <div className="px-3 sm:px-6 pr-14 sm:pr-14 lg:pr-6 pt-2 pb-2 flex items-center justify-between gap-x-4 gap-y-1 flex-wrap">
-                        <div className="min-w-0 flex items-baseline gap-3">
+                        <div className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                             <h1 className="text-xl font-bold text-gray-900 flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-1 min-w-0 sm:shrink-0">
                                 <ListChecks className="w-5 h-5 text-blue-600 shrink-0" />
                                 Planificar órdenes
@@ -448,8 +573,18 @@ export function PlanningSelectionScreen({
                                     Paso 1 de 2
                                 </span>
                             </h1>
-                            <p className="text-sm text-gray-500 min-w-0 truncate hidden xl:block">
-                                Elegí qué OTs entran en el plan y, si hace falta, entre qué fechas. Se calcula sobre lo tildado.
+                            {/* El período del plan, pegado al título y siempre a la vista
+                                (la cabecera queda fija desde `md`). Era un botón «Rango de
+                                fechas» al final de la fila de chips y nadie lo tocaba: el plan
+                                salía sin tope y se estiraba hasta fin de mes (25/9). En ámbar
+                                mientras no se elija; tocarlo abre el selector. */}
+                            <ChipPeriodoPlan
+                                fechas={fechasElegidas}
+                                feriados={feriados}
+                                onClick={() => abrirSelectorFechas("elegir")}
+                            />
+                            <p className="text-sm text-gray-500 min-w-0 truncate hidden 2xl:block">
+                                Elegí qué OTs entran en el plan y para qué fechas. Se calcula sobre lo tildado.
                             </p>
                         </div>
                         <div className="flex items-center gap-2.5 flex-wrap justify-end min-w-0">
@@ -604,107 +739,6 @@ export function PlanningSelectionScreen({
                             </Button>
                         )}
 
-                        {/* Date Range Picker */}
-                        <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
-                            <PopoverTrigger asChild>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className={cn(
-                                        "h-8 gap-2 font-normal",
-                                        !dateRange?.from && "text-slate-500"
-                                    )}
-                                    title="Definir desde y hasta qué día planificar"
-                                >
-                                    <Calendar className="w-3.5 h-3.5" />
-                                    {dateRange?.from ? (
-                                        dateRange.to ? (
-                                            <span className="text-xs">
-                                                {format(dateRange.from, "d MMM", { locale: es })} – {format(dateRange.to, "d MMM yyyy", { locale: es })}
-                                            </span>
-                                        ) : (
-                                            <span className="text-xs">
-                                                Desde {format(dateRange.from, "d MMM yyyy", { locale: es })}
-                                            </span>
-                                        )
-                                    ) : (
-                                        <span className="text-xs">Rango de fechas</span>
-                                    )}
-                                    {dateRange?.from && (
-                                        <span
-                                            role="button"
-                                            tabIndex={0}
-                                            onClick={(e) => {
-                                                e.stopPropagation()
-                                                setDateRange(undefined)
-                                            }}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' || e.key === ' ') {
-                                                    e.stopPropagation()
-                                                    setDateRange(undefined)
-                                                }
-                                            }}
-                                            className="ml-1 hover:text-red-600 inline-flex items-center"
-                                            aria-label="Limpiar rango"
-                                        >
-                                            <X className="w-3 h-3" />
-                                        </span>
-                                    )}
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0" align="start">
-                                <div className="p-3 border-b text-xs text-slate-600 bg-slate-50">
-                                    Seleccione el rango de días en los que se distribuirán las órdenes.
-                                    Los días <span className="text-red-600 font-medium">no laborables</span> (configurados en Disponibilidad) se omitirán automáticamente.
-                                    <span className="block mt-1">
-                                        Lo más temprano que puede arrancar el plan es el <span className="font-medium text-slate-700">{diaCorto(format(arranqueReal, "yyyy-MM-dd"))}</span>:
-                                        si la jornada de hoy ya empezó, arranca el próximo día hábil.
-                                    </span>
-                                </div>
-                                <CalendarUI
-                                    mode="range"
-                                    selected={dateRange}
-                                    onSelect={setDateRange}
-                                    numberOfMonths={2}
-                                    locale={es}
-                                    // Los días antes de que arranque el plan no se pueden elegir:
-                                    // un rango que termina ahí no tiene ni un día hábil.
-                                    disabled={{ before: arranqueReal }}
-                                    modifiers={{ blocked: blockedDates }}
-                                    modifiersStyles={{
-                                        blocked: {
-                                            backgroundColor: "#fee2e2",
-                                            color: "#ef4444",
-                                            textDecoration: "line-through"
-                                        }
-                                    }}
-                                />
-                                <div className="flex justify-between items-center p-3 border-t bg-slate-50">
-                                    <span className="text-xs text-slate-500">
-                                        {dateRange?.from && dateRange?.to
-                                            ? `${Math.round((dateRange.to.getTime() - dateRange.from.getTime()) / 86400000) + 1} días`
-                                            : "Sin rango definido"}
-                                    </span>
-                                    <div className="flex gap-2">
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => setDateRange(undefined)}
-                                            className="h-7 text-xs"
-                                        >
-                                            Limpiar
-                                        </Button>
-                                        <Button
-                                            size="sm"
-                                            onClick={() => setDatePopoverOpen(false)}
-                                            className="h-7 text-xs"
-                                        >
-                                            Listo
-                                        </Button>
-                                    </div>
-                                </div>
-                            </PopoverContent>
-                        </Popover>
                             {/* El cálculo es caro (minutos con 34 OTs) y antes cerrar la
                                 vista previa lo tiraba entero. Acá se retoma sin recalcular.
                                 El componente no se dibuja si no hay borradores guardados. */}
@@ -814,90 +848,17 @@ export function PlanningSelectionScreen({
             pie={
                 <>
                     <div className="px-3 sm:px-6 py-3 flex flex-wrap items-center justify-end gap-2">
+                    {/* En el teléfono la cabecera no queda fija (RF-27) y se va con el
+                        scroll: el período se repite acá, al lado del botón, que es lo
+                        que sí queda siempre a la vista. */}
+                    <ChipPeriodoPlan
+                        fechas={fechasElegidas}
+                        feriados={feriados}
+                        onClick={() => abrirSelectorFechas("elegir")}
+                        className="md:hidden mr-auto min-w-0"
+                    />
                     <Button
-                        onClick={() => {
-                            const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id));
-
-                            // En los toasts la OT se nombra por su número VISIBLE (id_otvieja),
-                            // que es el que está en la columna OT de la lista. Antes se mostraba
-                            // el id interno: el aviso decía "#8599" y buscar 8599 en la lista no
-                            // encontraba nada, así que parecía que el sistema se quejaba de
-                            // órdenes que no existen.
-                            const nro = (o: WorkOrder) => `#${o.id_otvieja ?? o.id}`;
-
-                            // 1. Check for empty processes
-                            const emptyOrders = selectedOrders.filter(o => !o.procesos || o.procesos.length === 0);
-                            if (emptyOrders.length > 0) {
-                                const orderIds = emptyOrders.map(nro).join(", ");
-                                toast.error(`Las órdenes ${orderIds} no tienen procesos. Agregue procesos antes de planificar.`, {
-                                    duration: 6000,
-                                    description: "Destildalas para planificar el resto, o cargales los procesos primero.",
-                                });
-                                return;
-                            }
-
-                            // 2. Material: avisar, NUNCA frenar.
-                            //
-                            // Acá había un `return` y dejaba 14 órdenes sin poder planificarse.
-                            // El comentario que estaba puesto decía «avisar, no bloquear» y el
-                            // código hacía lo contrario: la única salida del cartel era «Sacarlas
-                            // y planificar», que las sacaba. No existía un «planificar igual».
-                            //
-                            // Y lo que frenaba casi nunca era falta de material. El corte metía
-                            // en la misma bolsa `sin_stock` (falta y no se pidió) con `sin_datos`
-                            // (nadie cargó la lista). De las 175 órdenes abiertas, 17 estaban en
-                            // el segundo caso y NINGUNA en el primero: todo el freno venía de un
-                            // dato que además no se puede cargar, porque la solapa de Materias
-                            // Primas todavía no guarda.
-                            //
-                            // Planificar una orden sin material no rompe nada: el plan es una
-                            // intención, y si el material no llega se replanifica. Frenar, en
-                            // cambio, dejaba trabajo afuera sin que nadie lo decidiera.
-                            const sinStockReal = selectedOrders.filter(
-                                o => resumirMaterial(o.estado_material, o.no_lleva_materia_prima).faltaMaterial
-                            );
-
-                            if (sinStockReal.length > 0) {
-                                const orderIds = sinStockReal.map(nro).join(", ");
-                                const restantes = selectedIds.filter(
-                                    id => !sinStockReal.some(o => o.id === id)
-                                );
-                                // «Falta pedir»: alguna línea no está ni pedida, ni reservada, ni
-                                // disponible (las demás pueden estar listas). No es «no tiene material».
-                                toast.warning(
-                                    sinStockReal.length === 1
-                                        ? `La orden ${orderIds} tiene material sin pedir.`
-                                        : `${sinStockReal.length} órdenes tienen material sin pedir: ${orderIds}.`,
-                                    {
-                                        duration: 8000,
-                                        description: restantes.length > 0
-                                            ? "Se van a planificar igual. Si preferís dejarlas afuera, sacalas."
-                                            : "Se van a planificar igual.",
-                                        action: restantes.length > 0
-                                            ? {
-                                                label: "Sacarlas",
-                                                onClick: () => {
-                                                    setSelectedIds(restantes);
-                                                    setSoloTildadas(prev =>
-                                                        prev === null ? null : prev.filter(id => restantes.includes(id)));
-                                                    onPlan(restantes, {
-                                                        fecha_desde: dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : undefined,
-                                                        fecha_hasta: dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined,
-                                                    });
-                                                },
-                                            }
-                                            : undefined,
-                                    }
-                                );
-                                // Sin return: el aviso sale y la planificación sigue.
-                            }
-
-                            const range: PlanningRange = {
-                                fecha_desde: dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : undefined,
-                                fecha_hasta: dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined,
-                            }
-                            onPlan(selectedIds, range)
-                        }}
+                        onClick={alTocarPlanificar}
                         disabled={selectedIds.length === 0 || isLoading}
                         className="bg-blue-600 hover:bg-blue-700 gap-2"
                     >
@@ -911,6 +872,23 @@ export function PlanningSelectionScreen({
                         )}
                     </Button>
                     </div>
+                    {/* El mismo selector desde el chip («elegir») y desde Planificar sin
+                        fechas elegidas («planificar»: confirmar elige Y calcula). */}
+                    <SelectorFechasPlan
+                        abierto={selectorAbierto}
+                        onAbiertoChange={setSelectorAbierto}
+                        modo={modoSelector}
+                        valor={fechasElegidas}
+                        onConfirmar={(f) => {
+                            setFechas(f)
+                            if (modoSelector === "planificar") planificarCon(f)
+                        }}
+                        feriados={feriados}
+                        ordenesIds={selectedIds}
+                        prometidas={unplannedOrders
+                            .filter(o => selectedIds.includes(o.id))
+                            .map(o => ({ numero: String(o.id_otvieja ?? o.id), fecha: o.fecha_prometida }))}
+                    />
                 </>
             }
         >

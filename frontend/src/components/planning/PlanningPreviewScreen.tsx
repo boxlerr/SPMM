@@ -1,5 +1,8 @@
 import React from 'react';
 import { PantallaPlanificador, CifraPlan } from "./PantallaPlanificador";
+import { SelectorFechasPlan } from "./SelectorFechasPlan";
+import { rangoParaElPlan, type FechasDelPlan } from "@/lib/fechasDelPlan";
+import { CalendarRange } from "lucide-react";
 import { nombreLindo, nombrePersona } from "@/lib/nombres";
 import { limitacionDeMaquina } from "@/lib/maquinas";
 import { Button } from "@/components/ui/button";
@@ -1862,7 +1865,7 @@ export function PlanningPreviewScreen({
         let comoTermina: string;
         if (!tope) {
             etiqueta = `Termina el ${conDia(fin)} · ${dias} · sin fecha tope`;
-            comoTermina = `Termina el ${conDia(fin)}, cuando termina el último proceso de lo que tildaste. Sin fecha «hasta», el plan dura lo que tarda todo lo tildado; para ver solo una semana, volvé al Paso 1 y elegí el rango.`;
+            comoTermina = `Termina el ${conDia(fin)}, cuando termina el último proceso de lo que tildaste. Sin fecha «hasta», el plan dura lo que tarda todo lo tildado; para ver solo una semana, tocá «Cambiar» y elegí las fechas.`;
         } else if (fin === tope) {
             etiqueta = `Elegiste hasta el ${formatDate(tope)} · ${dias}`;
             comoTermina = `Elegiste hasta el ${formatDate(tope)} en el Paso 1. Lo que no entra hasta ese día queda en «Fuera del plan».`;
@@ -1952,6 +1955,38 @@ export function PlanningPreviewScreen({
             ajustesParaEnviar(),
         );
     };
+
+    /**
+     * Cambiar el período desde la cabecera (Julián, 25/9: que las fechas «estén arriba
+     * en el planificador»). Abre el mismo selector del Paso 1 y, al confirmar, recalcula
+     * con el rango nuevo: es un recálculo pedido a propósito, como «Ampliar rango», con
+     * las mismas OT, las mismas forzadas y los mismos ajustes.
+     */
+    const [selectorFechasAbierto, setSelectorFechasAbierto] = React.useState(false);
+    const fechasDelPlanActual: FechasDelPlan = planningRange.fecha_hasta
+        ? { desde: planningRange.fecha_desde?.slice(0, 10), hasta: planningRange.fecha_hasta.slice(0, 10) }
+        : { desde: planningRange.fecha_desde?.slice(0, 10), atajo: "sin-tope" };
+    const recalcularConFechas = (f: FechasDelPlan) => {
+        if (!onRecalculate) return;
+        const forcedArr = Array.from(forzarOrdenIds);
+        const ids = buildOrdenIdsForRecalc(forcedArr);
+        onRecalculate(
+            ids,
+            rangoParaElPlan(f, inicioDelPlan(new Date(), feriados)),
+            forcedArr,
+            lineasParaEnviar(ids),
+            ajustesParaEnviar(),
+        );
+    };
+    /** Las OT que entrarían en el recálculo, con su prometida (para el atajo del selector). */
+    const prometidasDelPlan = (ids: number[]) => ids.map(id => {
+        const ot = unplannedOrders.find(o => o.id === id);
+        const fila = ot ? undefined : results.find(r => r.orden_id === id);
+        return {
+            numero: String(ot?.id_otvieja ?? fila?.id_otvieja ?? id),
+            fecha: ot?.fecha_prometida ?? fila?.fecha_prometida ?? null,
+        };
+    });
 
     // ---------- Revisión automática al volver de Recursos ----------
 
@@ -3289,8 +3324,44 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     : periodoDelPlan.etiqueta)
                                 : "Período del plan"}
                             /* Por clic y no en un `title`: el title tarda en abrir, no
-                               existe en el teléfono y nadie sabe que está. */
-                            accion={periodoDelPlan ? (
+                               existe en el teléfono y nadie sabe que está.
+                               «Cambiar» abre el selector de fechas del Paso 1 y recalcula
+                               con el rango nuevo al confirmar (25/9). */
+                            accion={
+                                <div className="flex items-center gap-0.5">
+                                {onRecalculate && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectorFechasAbierto(true)}
+                                        disabled={isCalculating || isConfirming}
+                                        className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:pointer-events-none disabled:opacity-40"
+                                        title={isCalculating ? "Esperá a que termine el recálculo" : "Elegir otras fechas y recalcular el plan"}
+                                        aria-label="Cambiar las fechas del plan"
+                                    >
+                                        <CalendarRange className="h-3.5 w-3.5" />
+                                        {/* El texto sólo donde sobra lugar (teléfono, con la celda a
+                                            todo el ancho, y pantallas grandes): en la notebook la
+                                            celda mide ~260px y el texto le comía la fecha. */}
+                                        <span className="md:hidden 2xl:inline">Cambiar</span>
+                                    </button>
+                                )}
+                                {onRecalculate && (
+                                    <SelectorFechasPlan
+                                        abierto={selectorFechasAbierto}
+                                        onAbiertoChange={setSelectorFechasAbierto}
+                                        modo="recalcular"
+                                        valor={fechasDelPlanActual}
+                                        onConfirmar={recalcularConFechas}
+                                        feriados={feriados}
+                                        ordenesIds={selectorFechasAbierto ? buildOrdenIdsForRecalc(Array.from(forzarOrdenIds)) : []}
+                                        prometidas={selectorFechasAbierto ? prometidasDelPlan(buildOrdenIdsForRecalc(Array.from(forzarOrdenIds))) : []}
+                                        diasDelTaller={diasDelTaller}
+                                        nota={forzarOrdenIds.size > 0
+                                            ? `Forzaste ${forzarOrdenIds.size} OT: con una sola forzada el plan se recalcula sin fecha tope, así que el «hasta» no se respeta.`
+                                            : `Se recalcula el plan entero: tarda ${tardaElRecalculo}.`}
+                                    />
+                                )}
+                                {periodoDelPlan && (
                                 <Popover>
                                     <PopoverTrigger asChild>
                                         <button
@@ -3310,7 +3381,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                         </p>
                                     </PopoverContent>
                                 </Popover>
-                            ) : undefined}
+                                )}
+                                </div>
+                            }
                         />
                         <CifraPlan
                             icono={<Cog className="w-4 h-4" />}

@@ -66,6 +66,16 @@ export const NOVEDADES: Novedad[] = [
             "Abajo en el menú de la izquierda, al lado de tu nombre, hay un megáfono: lo tocás y se abre de nuevo el último aviso, con su botón para ir a Novedades. Mientras tenga un puntito rojo es que hay un aviso que todavía no leíste. El puntito se apaga cuando tocás «Entendido» o «Ver todas las novedades», o cuando lo tuviste abierto un rato; si lo cerrás enseguida, sigue prendido. Con el menú achicado, el megáfono está arriba de tu inicial, y en el teléfono el puntito se ve también en el botón redondo del menú. Antes el aviso salía una sola vez: si lo cerrabas sin leerlo, no había cómo volver a verlo.",
     },
     {
+        id: "planificar-elegir-fechas",
+        fecha: "2026-09-25",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Al planificar se eligen las fechas en un calendario, y el período del plan queda siempre a la vista",
+        detalle:
+            "Si tocás «Planificar» sin haber elegido fechas, antes de calcular se abre un calendario con atajos: «Esta semana», «Dos semanas», «Hasta la prometida más lejana» de lo tildado y «Sin tope». Los feriados y días no laborables aparecen apagados, y abajo te dice en el momento cuántas de las OT tildadas entran en esas fechas. El botón dice el período con todas las letras, por ejemplo «Planificar del lun 28/9 al vie 9/10», y la próxima vez te propone lo último que elegiste. Arriba, al lado del título, un recuadro muestra el período elegido (en amarillo mientras no elijas) y lo cambiás desde ahí. En la vista previa, el botón del calendario al lado del período te deja cambiarlo y recalcula el plan con las fechas nuevas. Antes el rango era un botón chico al final de la fila y, si nadie lo tocaba, el plan no tenía tope y se estiraba semanas.",
+        href: "/operaciones",
+    },
+    {
         id: "vista-previa-orden-y-atraso",
         fecha: "2026-09-25",
         tipo: "arreglo",

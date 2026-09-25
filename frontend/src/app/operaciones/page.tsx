@@ -286,6 +286,11 @@ export default function OperacionesPage() {
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false)
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]) // Used for confirmation
   const [planningRange, setPlanningRange] = useState<{ fecha_desde?: string, fecha_hasta?: string }>({}) // Used for confirmation
+  /** El período con el que quedó el plan cuando lo cambió la vista previa («Cambiar»
+   *  las fechas, «Ampliar rango») o cuando se abrió un borrador. El Paso 1 lo adopta:
+   *  si no, al «Volver» su chip seguía mostrando las fechas de antes y volver a
+   *  planificar calculaba con ésas. `vez` cambia en cada aviso aunque el rango sea igual. */
+  const [rangoDeLaVistaPrevia, setRangoDeLaVistaPrevia] = useState<{ rango: { fecha_desde?: string; fecha_hasta?: string }; vez: number } | null>(null)
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const [previewResults, setPreviewResults] = useState<any[]>([])
   const [excedentesResults, setExcedentesResults] = useState<any[]>([])
@@ -1526,6 +1531,7 @@ export default function OperacionesPage() {
     setCalculando({ activo: true, ots: ids.length, listo: false });
     setSelectedOrderIds(ids);
     setPlanningRange(range);
+    setRangoDeLaVistaPrevia(prev => ({ rango: range, vez: (prev?.vez ?? 0) + 1 }));
     // Los ajustes tal como salen en ESTE pedido. Desde el 25/09/2026 se marcan de a
     // varios sin recalcular, con estado «por agregar» / «por quitar», y la vista
     // previa los pasa a calculados recién cuando vuelve el plan. El guardado del
@@ -1765,6 +1771,7 @@ export default function OperacionesPage() {
     setDiagnosticosPlan(borrador.diagnosticos || []);
     setSelectedOrderIds(borrador.ordenesIds || []);
     setPlanningRange(borrador.rango || {});
+    setRangoDeLaVistaPrevia(prev => ({ rango: borrador.rango || {}, vez: (prev?.vez ?? 0) + 1 }));
     baseBorrador.current = {
       ordenesIds: borrador.ordenesIds || [],
       rango: borrador.rango || {},
@@ -2899,6 +2906,7 @@ export default function OperacionesPage() {
             onDataRefresh={fetchData}
             initialSelectedIds={isReplanning ? plannedOrdenes.map(o => o.id) : []}
             onAbrirBorrador={handleAbrirBorrador}
+            rangoDeLaVistaPrevia={rangoDeLaVistaPrevia}
           />
           <PlanningPreviewScreen
             isOpen={isPreviewOpen}
