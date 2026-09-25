@@ -9,7 +9,7 @@ import {
     Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw,
     ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
     HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
-    Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp, Printer, ArrowLeft, Pencil} from "lucide-react";
+    Columns3, Layers, ListFilter, ListChecks, LogOut, Printer, ArrowLeft, Pencil} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,9 +24,10 @@ import { API_URL } from "@/config";
 import { HORA_APERTURA, inicioDelPlan, minutosDesdeFecha } from "@/lib/plan-fechas";
 import {
     capacidadEnElPeriodo, contarDiasHabiles, describirDias, diasQueTrabajaElTaller, jornadaDelOperario,
-    numeroEs, type CapacidadEnElPeriodo,
+    type CapacidadEnElPeriodo,
 } from "@/lib/diasHabiles";
 import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/DiagnosticosPlan";
+import { PanelCargaRecursoHumano } from "@/components/planning/PanelCargaRecursoHumano";
 import { unificarPreparaciones } from "@/lib/unificarAvisos";
 import { huellaRecursos } from "@/lib/huellaRecursos";
 import type { TandaManual } from "@/lib/borradorPlan";
@@ -2461,6 +2462,28 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
     }, [availableOperators, operatorLoads, results, editedResults]);
 
     /**
+     * Las filas que ve el panel de carga: las efectivas (con los retoques a mano), y
+     * marcadas cuando alguien les movió el inicio en la tabla. Esas traen el fin que
+     * calculó el motor para el inicio viejo, así que el panel las reparte desde el
+     * inicio nuevo en vez de creerle al fin.
+     */
+    const filasParaCarga = React.useMemo(
+        () => results.map(r => {
+            const e = getEffectiveItem(r);
+            return { ...e, fechaEditada: e.fecha_inicio_estimada !== r.fecha_inicio_estimada };
+        }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [results, editedResults]
+    );
+
+    /** Lo que no entró al plan: el panel lo suma a su desglose para que cuadre con
+     *  «Carga total» del encabezado, que también lo cuenta. */
+    const excedentesMin = React.useMemo(
+        () => displayedExcedentes.reduce((a, e) => a + (e.duracion_min || 0), 0),
+        [displayedExcedentes]
+    );
+
+    /**
      * Contra qué se compara la carga de cada persona: el período del plan.
      *
      * Hasta el 23/9 era contra 44 h fijas «de la semana», y el plan no dura una
@@ -2515,19 +2538,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         [availableOperators, minutosPorOperario, capacidadPorOperario]
     );
 
-    /** La bajada del panel: qué se compara contra qué, con las fechas de verdad. */
-    const bajadaDeCarga = (() => {
-        if (!periodoDeCarga) {
-            return "Sin fechas en el plan: se compara contra una semana de 5 días con la jornada de cada uno.";
-        }
-        const corta = (iso: string) => {
-            const [a, m, d] = iso.slice(0, 10).split("-").map(Number);
-            return a && m && d ? `${d}/${m}` : iso;
-        };
-        const n = periodoDeCarga.habiles;
-        const hayPrevia = availableOperators.some(op => (operatorLoads[op.id] || 0) > 0);
-        return `Del ${corta(periodoDeCarga.desde)} al ${corta(periodoDeCarga.hasta)}: lo que tiene cada uno${hayPrevia ? " (este plan y lo que ya tenía esos días)" : ""} contra lo que trabaja en ${n === 1 ? "ese día hábil" : `esos ${n} días hábiles`}, con su jornada.`;
-    })();
+    const tituloDelRiel = sobrecargados > 0
+        ? `Mostrar la carga de recurso humano: ${sobrecargados} ${sobrecargados === 1 ? "pasado" : "pasados"} en todo el plan`
+        : "Mostrar la carga de recurso humano";
 
     /**
      * A quién le saltó la carga con lo último que se agregó a mano, y cuánto.
@@ -4704,7 +4717,11 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             <button
                                 type="button"
                                 onClick={alternarCarga}
-                                title="Mostrar la carga de recurso humano"
+                                // El globito rojo solo no se entiende en la tablet (no hay
+                                // mouse encima): el nombre accesible dice qué cuenta. Cuenta
+                                // TODO el plan, no la semana que abre el panel.
+                                title={tituloDelRiel}
+                                aria-label={tituloDelRiel}
                                 className="flex-1 w-full flex flex-row lg:flex-col items-center gap-3 px-4 lg:px-0 py-3 hover:bg-gray-100 transition-colors"
                             >
                                 <ChevronRight className="w-4 h-4 text-gray-400 rotate-90 lg:rotate-180 shrink-0 order-last ml-auto lg:order-none lg:ml-0" />
@@ -4719,188 +4736,28 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 </span>
                             </button>
                         ) : (
-                        <>
-                        <div className="px-4 py-3 border-b border-gray-200 bg-white/50 flex items-start gap-2">
-                            <div className="min-w-0 flex-1">
-                                <h3 className="font-bold text-gray-800 flex items-center gap-2 flex-wrap">
-                                    <User className="w-4 h-4 text-gray-500" />
-                                    Carga de recurso humano
-                                    {sobrecargados > 0 && (
-                                        <span className="rounded-full bg-rose-100 text-rose-700 text-[11px] font-bold px-2 py-0.5 tabular-nums">
-                                            {sobrecargados} {sobrecargados === 1 ? "pasado" : "pasados"}
-                                        </span>
-                                    )}
-                                </h3>
-                                <p className="text-xs text-gray-500 mt-1">{bajadaDeCarga}</p>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={alternarCarga}
-                                title="Plegar el panel y darle el ancho a la tabla"
-                                className="p-1 -mr-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-700 shrink-0"
-                            >
-                                {/* Apilado se pliega para arriba; al costado, hacia la derecha. */}
-                                <ChevronRight className="w-4 h-4 -rotate-90 lg:rotate-0" />
-                            </button>
-                        </div>
-                        {/* Scroll nativo, tercera vez en este archivo que Radix no sirve acá
-                            (ver los comentarios de las líneas ~1660 y ~1934). El motivo puntual:
-                            el panel se limita con `max-h`, no con `h`. Contra un alto INDEFINIDO
-                            el `h-full` del Viewport de Radix resuelve a `auto`, así que el
-                            Viewport crece con la lista y el `overflow-hidden` del Root la corta
-                            en seco: los operarios de abajo quedaban inalcanzables. Un
-                            `overflow-y-auto` nativo no necesita resolver ningún porcentaje —al
-                            item flex lo clampea el max-height del contenedor— y scrollea. */}
-                        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4">
-                            {/* Apilado abajo de la tabla (abajo de `lg`) el panel tiene todo el
-                                ancho: las tarjetas van de a dos desde `sm` en vez de una
-                                debajo de la otra. Al costado, como siempre. */}
-                            <div className={cn(cargaCompleta ? "grid grid-cols-1 sm:grid-cols-2 gap-3" : "grid grid-cols-1 sm:grid-cols-2 gap-3 lg:flex lg:flex-col lg:gap-4")}>
-                                {availableOperators
-                                    .filter(op => op.sector?.toUpperCase() !== 'PRUEBAS') // Filter 'PRUEBAS' if hidden
-                                    .sort((a, b) => {
-                                        // Sort by Total Load DESC
-                                        const loadA = minutosPorOperario[a.id] || 0;
-                                        const loadB = minutosPorOperario[b.id] || 0;
-                                        return loadB - loadA;
-                                    })
-                                    .map(op => {
-                                        // La misma cuenta que usan el contador de pasados y el
-                                        // orden del panel: `minutosPorOperario` contra lo que
-                                        // esa persona trabaja en el período del plan.
-                                        const ocupacion = ocupacionDe(op.id);
-                                        const totalLoadMin = ocupacion.cargaMin;
-                                        const totalLoadHours = (totalLoadMin / 60);
-                                        // Lo que suma ESTE plan sobre lo que ya tenía cargado.
-                                        const sessionLoadMin = totalLoadMin - (operatorLoads[op.id] || 0);
-                                        // El salto de las últimas horas agregadas, si le tocó a esta persona.
-                                        const salto = saltoCarga?.opId === op.id ? saltoCarga : null;
-
-                                        // Antes: 44 h fijas «de la semana» contra la carga de un
-                                        // plan de dos semanas. Ahora: sus días en el período × su
-                                        // jornada (ver `periodoDeCarga`).
-                                        const capacidadHs = ocupacion.capacidadMin / 60;
-                                        // El número dice cuánto se pasó (118%); la barra se llena y listo.
-                                        const percentage = ocupacion.porcentaje;
-                                        const anchoBarra = Math.min(percentage, 100);
-                                        const isOverloaded = ocupacion.pasado;
-                                        const capacidadTitulo = ocupacion.capacidad
-                                            ? `${ocupacion.capacidad.dias} ${ocupacion.capacidad.dias === 1 ? "día que trabaja" : "días que trabaja"} en el período × ${numeroEs(ocupacion.capacidad.jornada / 60, 2)} h de jornada = ${numeroEs(capacidadHs, 2)} h`
-                                            : "";
-
-                                        // Rangos del operario: pueden venir como [{id, nombre}] o como [id]. Manejamos ambos.
-                                        const rawRangos: any[] = op.rangos || [];
-                                        const rangosNombres: string[] = rawRangos
-                                            .map(r => {
-                                                if (typeof r === "object" && r !== null) return r.nombre || (r.id ? formatRangoIds([r.id]) : "");
-                                                return formatRangoIds([Number(r)]);
-                                            })
-                                            .filter(Boolean);
-                                        const horario = (op.hora_inicio && op.hora_fin)
-                                            ? `${op.hora_inicio.slice(0, 5)} – ${op.hora_fin.slice(0, 5)}`
-                                            : null;
-                                        return (
-                                            <div key={op.id} className={cn(
-                                                "bg-white p-3 rounded-lg border shadow-sm transition-colors",
-                                                // A quien le acaba de saltar la carga se lo marca por unos
-                                                // segundos: es la persona que hay que mirar ahora.
-                                                salto && "border-indigo-400 ring-2 ring-indigo-200"
-                                            )}>
-                                                <div className="flex justify-between items-start mb-1.5 gap-2">
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="text-sm font-medium text-gray-800 truncate">{nombrePersona(op.nombre, op.apellido)}</div>
-                                                        {/* Subtítulo uniforme: sector → si no hay, rango principal → si no, "Sin sector".
-                                                            Antes se ocultaba cuando el operario no tenía sector, dejando tarjetas sin subtítulo. */}
-                                                        {op.sector ? (
-                                                            <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold truncate">{op.sector}</div>
-                                                        ) : rangosNombres.length > 0 ? (
-                                                            <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold truncate">{rangosNombres[0]}</div>
-                                                        ) : (
-                                                            <div className="text-[10px] uppercase tracking-wide text-gray-300 font-semibold italic truncate">Sin sector</div>
-                                                        )}
-                                                    </div>
-                                                    <span className={cn(
-                                                        "text-xs font-bold px-1.5 py-0.5 rounded tabular-nums shrink-0",
-                                                        isOverloaded ? "bg-red-100 text-red-700" : percentage > 80 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600"
-                                                    )}>
-                                                        {Math.round(percentage)}%
-                                                    </span>
-                                                </div>
-                                                <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden mb-1.5">
-                                                    <div
-                                                        className={cn(
-                                                            "h-full transition-all duration-500 rounded-full",
-                                                            isOverloaded ? "bg-red-500" :
-                                                                percentage > 80 ? "bg-amber-500" : "bg-green-500"
-                                                        )}
-                                                        style={{ width: `${anchoBarra}%` }}
-                                                    />
-                                                </div>
-                                                <div className="flex justify-between items-center text-xs text-gray-500 mb-1.5">
-                                                    <span className="tabular-nums cursor-help" title={capacidadTitulo}>{numeroEs(totalLoadHours)}h / {numeroEs(capacidadHs)}h</span>
-                                                    {sessionLoadMin > 0 && (
-                                                        <span className="text-blue-600 font-medium">+{numeroEs(sessionLoadMin / 60)}h nuevas</span>
-                                                    )}
-                                                </div>
-                                                {/* El "antes → después" de lo último que se agregó. Dura unos
-                                                    segundos y se va: es un aviso, no un dato más de la tarjeta. */}
-                                                {salto && (
-                                                    <div className="mb-1.5 flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-semibold text-indigo-800 tabular-nums">
-                                                        <ArrowUp className="w-3 h-3 shrink-0" />
-                                                        <span className="min-w-0 truncate">
-                                                            {horasEs(salto.antes)} → {horasEs(salto.despues)} h
-                                                        </span>
-                                                        <span className="shrink-0 font-normal text-indigo-600">recién agregadas</span>
-                                                    </div>
-                                                )}
-                                                {/* Rangos del operario: chips compactos para ver qué procesos puede hacer. */}
-                                                {rangosNombres.length > 0 && (
-                                                    <div className="flex flex-wrap gap-1 pt-1 border-t border-gray-100">
-                                                        {(cargaCompleta ? rangosNombres : rangosNombres.slice(0, 4)).map((nombre, i) => (
-                                                            <span key={i} className="text-[9px] uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200 px-1.5 py-0.5 rounded font-semibold">
-                                                                {nombre}
-                                                            </span>
-                                                        ))}
-                                                        {!cargaCompleta && rangosNombres.length > 4 && (
-                                                            <span className="text-[9px] text-gray-400 px-1 py-0.5" title={rangosNombres.slice(4).join(", ")}>
-                                                                +{rangosNombres.length - 4}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                )}
-                                                {/* Horario laboral del operario */}
-                                                {horario && (
-                                                    <div className="flex items-center gap-1 mt-1 text-[10px] text-gray-400">
-                                                        <Clock className="w-2.5 h-2.5" />
-                                                        <span className="tabular-nums">{horario}</span>
-                                                        {op.disponible === false && (
-                                                            <span className="ml-auto text-red-600 font-bold uppercase">Ausente</span>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })
-                                }
-                            </div>
-                        </div>
-                        {/* "Ver carga completa": ensancha el panel y deja de recortar. Los
-                            chips de rangos se cortaban en 4 y las tarjetas de 320px no
-                            dejan comparar a dos personas sin scrollear. No manda a otra
-                            pantalla a propósito: la carga de OTRA pantalla es la del plan
-                            YA guardado, no la de este borrador. */}
-                        <div className="p-3 border-t border-gray-200 bg-white/60">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setCargaCompleta(v => !v)}
-                                className="w-full h-8 gap-1.5 text-xs text-gray-600 hover:text-gray-900"
-                            >
-                                <Users className="w-3.5 h-3.5" />
-                                {cargaCompleta ? "Ver compacto" : "Ver carga completa"}
-                            </Button>
-                        </div>
-                        </>
+                            /* El panel dibuja encabezado, lista y pie; el contenedor, el
+                               riel plegado y `saltoCarga` siguen acá. Las cuentas viven en
+                               `lib/cargaDelPlan.ts`, que tiene su test. */
+                            <PanelCargaRecursoHumano
+                                filas={filasParaCarga}
+                                operarios={availableOperators}
+                                cargaPrevia={operatorLoads}
+                                feriados={feriados}
+                                span={spanPlan}
+                                periodoSinFechas={periodoDeCarga}
+                                diasDelTaller={diasDelTaller}
+                                excedentesMin={excedentesMin}
+                                rangos={rangosCatalog}
+                                saltoCarga={saltoCarga}
+                                completa={cargaCompleta}
+                                onAlternarCompleta={() => setCargaCompleta(v => !v)}
+                                onPlegar={alternarCarga}
+                                onVerOT={verOT}
+                                onVerSinNadie={() => setFiltros(f => ({ ...f, sinOperario: true }))}
+                                onIrAAvisos={diagnosticos.length > 0 ? irAAvisos : undefined}
+                                cargaTotalMin={totalDemandMinutes}
+                            />
                         )}
                     </div>
                 </div >
