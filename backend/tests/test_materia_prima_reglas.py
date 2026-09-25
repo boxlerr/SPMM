@@ -296,3 +296,20 @@ def test_la_semilla_de_formatos_es_la_misma_en_la_migracion_y_en_python():
 def test_las_constantes_de_la_api():
     assert reglas.UNIDADES_LINEA == ("Un", "Mts", "Kg", "Lts")
     assert [t["valor"] for t in reglas.TIPOS_CATALOGO] == list(reglas.TIPOS_INSUMO)
+
+
+# ─── La reserva parcial falta pedir (25/09/2026) ───
+# El color de la OT (estado_material) tiene que decir lo mismo que la línea en Pendientes
+# y en la solapa de la OT: una reserva que no cubre toda la cantidad todavía FALTA PEDIR.
+def test_reserva_parcial_es_falta_pedir():
+    from backend.application.materia_prima.estado import estado_material
+    parcial = {"usado": 1, "disponible": 0, "pedido": 0, "reserva": 1,
+               "cantidad": 6, "cantidad_reservada": 2}
+    entera = {"usado": 1, "disponible": 0, "pedido": 0, "reserva": 1,
+              "cantidad": 6, "cantidad_reservada": 6}
+    assert estado_material(0, [parcial]) == "sin_stock"
+    assert estado_material(0, [entera]) == "pedido"
+    # Una reserva sin cantidades (datos viejos) cuenta como que cubre todo, como antes.
+    assert estado_material(0, [{"usado": 1, "disponible": 0, "pedido": 0, "reserva": 1}]) == "pedido"
+    # Pedida, aunque la reserva sea parcial, ya no falta pedir.
+    assert estado_material(0, [dict(parcial, pedido=1)]) == "pedido"

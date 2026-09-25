@@ -11,7 +11,7 @@ y el estado se calcula acá, una sola vez, sobre las líneas que se usan (usado 
   no_lleva   la OT está marcada «No lleva materias primas»
   sin_datos  no tiene ninguna línea usada: nadie cargó la lista (no es que falte)
   ok         todas las líneas usadas están disponibles
-  sin_stock  alguna línea no está ni disponible, ni pedida, ni reservada: FALTA PEDIR
+  sin_stock  alguna línea no está ni disponible, ni pedida, ni reservada entera: FALTA PEDIR
   pedido     el resto: todo lo que falta está pedido o reservado, esperando
 
 El orden importa: una OT con una línea sin pedir y otra pedida está en «sin_stock»,
@@ -75,6 +75,29 @@ def _disponible(linea) -> bool:
     return bool(_marca(linea, "disponible")) or _sin_material(linea)
 
 
+def _numero(linea, campo: str) -> float:
+    valor = linea.get(campo) if isinstance(linea, dict) else getattr(linea, campo, None)
+    try:
+        return float(valor or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _falta_pedir(linea) -> bool:
+    """¿Queda algo por conseguir de esta línea? Ni disponible, ni pedida, y la reserva (si
+    hay) no cubre toda la cantidad. Una reserva PARCIAL cuenta como que falta pedir: es la
+    misma regla de la columna «Falta» de Pendientes (falta_de en MateriaPrimaOTService) y
+    del estadoLinea del front, así el color de la OT dice lo mismo que la línea. Sin la
+    cantidad (dict viejo sin esos campos) una reserva cuenta como que cubre todo."""
+    if _disponible(linea) or _marca(linea, "pedido"):
+        return False
+    if not _marca(linea, "reserva"):
+        return True
+    if _numero(linea, "cantidad") <= 0 and _numero(linea, "cantidad_reservada") <= 0:
+        return False
+    return _numero(linea, "cantidad_reservada") < _numero(linea, "cantidad")
+
+
 def estado_material(no_lleva, lineas) -> str:
     """El estado del material de UNA OT a partir de su marca y sus líneas. PURA.
 
@@ -90,8 +113,7 @@ def estado_material(no_lleva, lineas) -> str:
         return "sin_datos"
     if all(_disponible(l) for l in usadas):
         return "ok"
-    if any(not _disponible(l) and not _marca(l, "pedido") and not _marca(l, "reserva")
-           for l in usadas):
+    if any(_falta_pedir(l) for l in usadas):
         return "sin_stock"
     return "pedido"
 
@@ -110,15 +132,19 @@ async def estados_de_ots(session, ids_ot) -> dict[int, str]:
             .where(OrdenTrabajo.id.in_(tanda))
         )).all():
             no_lleva[id_ot] = marca or 0
-        for id_ot, usado, disponible, pedido, reserva, codigo in (await session.execute(
+        for (id_ot, usado, disponible, pedido, reserva, codigo,
+             cantidad, cantidad_reservada) in (await session.execute(
             select(OrdenTrabajoPieza.id_orden_trabajo, OrdenTrabajoPieza.usado,
                    OrdenTrabajoPieza.disponible, OrdenTrabajoPieza.pedido,
-                   OrdenTrabajoPieza.reserva, Pieza.cod_pieza)
+                   OrdenTrabajoPieza.reserva, Pieza.cod_pieza,
+                   OrdenTrabajoPieza.cantidad, OrdenTrabajoPieza.cantidad_reservada)
             .outerjoin(Pieza, Pieza.id == OrdenTrabajoPieza.id_pieza)
             .where(OrdenTrabajoPieza.id_orden_trabajo.in_(tanda))
         )).all():
             lineas[id_ot].append({"usado": usado, "disponible": disponible,
-                                  "pedido": pedido, "reserva": reserva, "codigo": codigo})
+                                  "pedido": pedido, "reserva": reserva, "codigo": codigo,
+                                  "cantidad": cantidad,
+                                  "cantidad_reservada": cantidad_reservada})
     return {i: estado_material(no_lleva.get(i, 0), lineas.get(i, [])) for i in ids}
 
 

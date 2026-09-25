@@ -111,7 +111,8 @@ async def test_la_semana_sale_del_plan(session):
         # Lo que falta pedir primero; después por OT y en el orden de carga. La que no se
         # usa no está.
         assert ids(d) == [1, 5, 2, 3, 6, 7]
-        assert d["resumen"] == {"ot_count": 3, "lineas_a_pedir": 1, "lineas_esperando": 2,
+        # La 5 está reservada 1 de 3: todavía falta pedir 2, así que cuenta como «a pedir».
+        assert d["resumen"] == {"ot_count": 3, "lineas_a_pedir": 2, "lineas_esperando": 1,
                                 "lineas_listas": 3}
 
         # La semana siguiente: entra B, y A, D y H siguen (se arrastran).

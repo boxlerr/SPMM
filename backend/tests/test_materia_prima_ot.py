@@ -217,7 +217,10 @@ async def test_el_estado_material_de_la_ot_sigue_a_las_marcas(session):
         assert await estado() == "sin_stock"                 # todavía falta una
         await c.put(f"/materia-prima/lineas/{b}", json={"reserva": True, "cantidad_reservada": 1},
                     params={"forzar": "true"})
-        assert await estado() == "pedido"                    # todo pedido o reservado
+        assert await estado() == "sin_stock"                 # reserva parcial: falta pedir el resto
+        await c.put(f"/materia-prima/lineas/{b}", json={"cantidad_reservada": 4},
+                    params={"forzar": "true"})
+        assert await estado() == "pedido"                    # todo pedido o reservado entero
         await c.put("/materia-prima/lineas/lote", json={"ids": [a, b], "cambios": {"disponible": True}})
         assert await estado() == "ok"
         await c.put(f"/materia-prima/ot/{OT_A}/no-lleva", json={"no_lleva": True})

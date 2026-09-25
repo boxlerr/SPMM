@@ -258,10 +258,11 @@ class MateriaPrimaPendientesService:
         # El resumen: antes del radio (las tarjetas SON el radio), después del buscador.
         resumen = {
             "ot_count": len({l["id_orden_trabajo"] for l in lineas}) if filtrando else len(ots),
-            "lineas_a_pedir": sum(1 for l in lineas
-                                  if not l["disponible"] and not l["pedido"] and not l["reserva"]),
+            # Una reserva parcial (falta > 0) cuenta como «a pedir», igual que el color de
+            # la OT (estado.py) y el estadoLinea del front.
+            "lineas_a_pedir": sum(1 for l in lineas if not l["disponible"] and l["falta"] > 0),
             "lineas_esperando": sum(1 for l in lineas
-                                    if not l["disponible"] and (l["pedido"] or l["reserva"])),
+                                    if not l["disponible"] and l["falta"] <= 0),
             "lineas_listas": sum(1 for l in lineas if l["disponible"]),
         }
 
@@ -270,9 +271,11 @@ class MateriaPrimaPendientesService:
         elif filtro == "parciales":
             lineas = [l for l in lineas if l["id_orden_trabajo"] in parciales]
 
-        # Lo que falta pedir primero; después por número de OT y en el orden de carga.
+        # Lo que falta pedir primero (falta > 0, reserva parcial incluida), después lo que
+        # se espera y al final lo listo; dentro de cada grupo por número de OT y en el
+        # orden de carga. El mismo orden que arma el front.
         lineas.sort(key=lambda l: (
-            l["pedido"],
+            0 if (not l["disponible"] and l["falta"] > 0) else (2 if l["disponible"] else 1),
             l["numero_ot"] if l["numero_ot"] is not None else float("inf"),
             l["orden"] or 0,
             l["id"],
