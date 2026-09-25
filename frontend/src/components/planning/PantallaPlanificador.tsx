@@ -136,7 +136,8 @@ export function CifraPlan({
 }: {
     icono: React.ReactNode;
     valor: React.ReactNode;
-    etiqueta: string;
+    /** Texto; un nodo sólo para teñirlo (la fecha, cuando el plan se pasó del tope). */
+    etiqueta: React.ReactNode;
     /** "fecha" = la celda del período del plan: mismo peso que las otras cifras,
      *  acento azul para que se lea como el dato que ordena todo lo demás. */
     tono?: "neutral" | "alerta" | "ok" | "fecha";

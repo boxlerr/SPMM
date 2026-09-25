@@ -411,21 +411,24 @@ export function DiagnosticosPlan({
     marcados?: Set<string>;
     onMarcadosChange?: (v: Set<string>) => void;
     /**
-     * El #OT que se ve en la tabla del plan, a partir del `orden_id` interno.
+     * Cómo se escribe en pantalla un número de `impacto.ots`.
      *
-     * Los avisos los arma el backend con el id de la base, que no es el número que
-     * el taller conoce ni el que muestra la tabla. Traducirlo lo puede hacer sólo
-     * quien tiene el plan a mano, así que entra por acá. Sin esta función los
-     * números no se muestran: un "#212" que no existe en ningún papel es peor que
-     * nada.
+     * `impacto.ots` YA TRAE el número que el taller conoce: el del sistema viejo
+     * (`id_otvieja`), o el `id` si la OT nació en SPMM. La traducción la hace el
+     * backend una sola vez (PlanificacionService, `nro_visible`) y la fija
+     * backend/tests/test_planner_pausas.py. Hasta el 25/9 este comentario decía
+     * que venía el `orden_id` interno; era falso desde el 15/8, y por eso los
+     * chips #OT no abrían ninguna OT. Sin esta función los números no se
+     * muestran (la tira se usa también sin el plan al lado).
      */
-    numeroDeOT?: (ordenId: number) => string;
+    numeroDeOT?: (numero: number) => string;
     /**
      * Abrir la OT del aviso de un click (Lucas, 28/08: "estaría bueno que hagas
-     * clic acá"). Lo resuelve la pantalla —desplegar la fila, traerla a la vista—
-     * porque es la que tiene la tabla; el aviso sólo sabe a qué OT apunta.
+     * clic acá"). Recibe el número VISIBLE, tal cual viene en `impacto.ots`: pasarlo
+     * al `orden_id` interno de la tabla lo hace la pantalla, que es la que tiene el
+     * plan a mano; el aviso sólo sabe a qué OT apunta.
      */
-    onVerOT?: (ordenId: number) => void;
+    onVerOT?: (numero: number) => void;
     /**
      * El nombre de un rango, a partir del id.
      *
@@ -1239,10 +1242,10 @@ export function DiagnosticosPlan({
                         // Se parte en chips en vez de reescribirlo: mismos datos, sin
                         // inventar campos y sin decir dos veces lo mismo.
                         const impacto = d.impacto.resumen.split("·").map((t) => t.trim()).filter(Boolean);
-                        // El aviso habla en ids internos; en pantalla va el número que el
-                        // taller conoce. Si la pantalla no sabe traducirlo (esta tira se usa
-                        // también sin el plan al lado), no se muestran: un número que no
-                        // existe en ningún papel confunde más de lo que ayuda.
+                        // El aviso ya trae el número que el taller conoce (el del sistema
+                        // viejo), no el id interno. Sin `numeroDeOT` (esta tira se usa
+                        // también sin el plan al lado) no se muestran: sin la tabla al
+                        // lado, el chip no tendría adónde llevar.
                         const otsDelAviso = numeroDeOT
                             ? d.impacto.ots.map((n) => ({ id: n, numero: numeroDeOT(n) }))
                             : [];
@@ -1425,7 +1428,7 @@ export function DiagnosticosPlan({
                                             type="button"
                                             onClick={() => onVerOT(o.id)}
                                             className="shrink-0 rounded-md bg-white/80 px-1.5 text-[10.5px] font-medium leading-[19px] text-slate-600 tabular-nums ring-1 ring-inset ring-slate-200 hover:bg-white hover:text-indigo-700 transition-colors"
-                                            title={`Abrir la OT #${o.numero} en la tabla del plan`}
+                                            title={`Ir a la OT #${o.numero} en el plan`}
                                         >
                                             #{o.numero}
                                         </button>
@@ -1869,7 +1872,7 @@ export function DiagnosticosPlan({
                                                                         type="button"
                                                                         onClick={() => onVerOT(o.id)}
                                                                         className="font-medium text-slate-600 underline decoration-dotted underline-offset-2 hover:text-indigo-700"
-                                                                        title={`Abrir la OT #${o.numero} en la tabla del plan`}
+                                                                        title={`Ir a la OT #${o.numero} en el plan`}
                                                                     >
                                                                         #{o.numero}
                                                                     </button>

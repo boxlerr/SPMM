@@ -66,6 +66,16 @@ export const NOVEDADES: Novedad[] = [
             "Abajo en el menú de la izquierda, al lado de tu nombre, hay un megáfono: lo tocás y se abre de nuevo el último aviso, con su botón para ir a Novedades. Mientras tenga un puntito rojo es que hay un aviso que todavía no leíste. El puntito se apaga cuando tocás «Entendido» o «Ver todas las novedades», o cuando lo tuviste abierto un rato; si lo cerrás enseguida, sigue prendido. Con el menú achicado, el megáfono está arriba de tu inicial, y en el teléfono el puntito se ve también en el botón redondo del menú. Antes el aviso salía una sola vez: si lo cerrabas sin leerlo, no había cómo volver a verlo.",
     },
     {
+        id: "vista-previa-numeros-de-ot-y-periodo",
+        fecha: "2026-09-25",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "En la vista previa del plan, tocar el número de una OT en un aviso te lleva a esa OT, y arriba dice de dónde salen las fechas",
+        detalle:
+            "Los números de OT de los avisos (los #15717 de «Qué hacer» y de la línea «OTs:») decían «no está en la tabla del plan» aunque la OT estuviera: ahora abren su fila, o su tarjeta en «Fuera del plan» si quedó afuera, y si la OT no entró en el plan (por ejemplo, porque está pausada) te lo dicen así. La fecha de arriba ya no muestra sólo «28/09 → 26/10»: dice «sin fecha tope» cuando no elegiste un «hasta», «Elegiste hasta el…» cuando sí, y avisa en naranja si el plan se pasó porque forzaste OT; con la ⓘ de al lado se explica por qué arranca ese día y hasta dónde llega. En el Paso 1, el «hasta el…» estimado ahora se ve también en pantallas chicas. Y en la barra de arriba queda sólo «Salir»: la X hacía lo mismo.",
+        href: "/operaciones",
+    },
+    {
         id: "materia-prima-seccion-nueva",
         fecha: "2026-09-24",
         tipo: "nuevo",

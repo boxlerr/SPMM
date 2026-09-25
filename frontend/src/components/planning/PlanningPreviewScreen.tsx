@@ -9,7 +9,7 @@ import {
     Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw,
     ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
     HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
-    Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp, Printer, X, ArrowLeft, Pencil} from "lucide-react";
+    Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp, Printer, ArrowLeft, Pencil} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +21,7 @@ import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
 import type { WorkOrder } from "@/lib/types";
 import { toast } from "@/lib/toast";
 import { API_URL } from "@/config";
-import { inicioDelPlan, minutosDesdeFecha } from "@/lib/plan-fechas";
+import { HORA_APERTURA, inicioDelPlan, minutosDesdeFecha } from "@/lib/plan-fechas";
 import {
     capacidadEnElPeriodo, contarDiasHabiles, describirDias, diasQueTrabajaElTaller, jornadaDelOperario,
     numeroEs, type CapacidadEnElPeriodo,
@@ -1206,7 +1206,7 @@ export function PlanningPreviewScreen({
             : Array.from(new Set([...planned, ...stickyIds]));
 
         if (mergedIds.length === 0) {
-            toast.error("No podés quitar la última OT del plan. Cerrá la vista previa con la X.");
+            toast.error("No podés quitar la última OT del plan. Salí de la vista previa con «Salir».");
             return;
         }
         // Si la OT había entrado a mano, deja de estar agregada: sale del registro
@@ -1567,7 +1567,7 @@ export function PlanningPreviewScreen({
         const fromResults = results.reduce((acc, r) => acc + (r.duracion_min || 0), 0);
         const fromExcedentes = displayedExcedentes.reduce((acc, e) => acc + (e.duracion_min || 0), 0);
         return fromResults + fromExcedentes;
-    }, [results, excedentes]);
+    }, [results, displayedExcedentes]);
 
     /** Devuelve razones humanas de por qué la OT con ID `ordenId` quedó como excedente. */
     const getExcedenteReasons = (ordenId: number): string[] => {
@@ -1631,8 +1631,8 @@ export function PlanningPreviewScreen({
         return m === 0 ? `${h} h` : `${h}h ${m}m`;
     };
 
-    // Bloqueo de cierre por click afuera / Escape: el modal solo se cierra con la X
-    // del header o el botón "Volver". Esto evita perder los ajustes por error.
+    // Bloqueo de cierre por click afuera / Escape: el modal solo se cierra con
+    // «Salir» o el botón "Volver". Esto evita perder los ajustes por error.
     const handleOpenChange = (open: boolean) => {
         // No cerramos automáticamente; el cierre lo controlan los botones explícitos.
         if (!open) return;
@@ -1686,6 +1686,81 @@ export function PlanningPreviewScreen({
         const habiles = contarDiasHabiles(desde, hasta, feriados, diasDelTaller);
         return { desde, hasta, habiles };
     }, [results, feriados, diasDelTaller]);
+
+    /**
+     * De dónde sale el período del riel, dicho en palabras.
+     *
+     * El riel decía «28/09 → 26/10 · 21 días hábiles» y se leía como el rango
+     * elegido. No lo era: Julián quería ver sólo la semana del piloto y no sabía de
+     * dónde salía el 26/10 (25/9). El 26/10 es donde termina el último proceso de
+     * todo lo tildado, porque sin fecha «hasta» el plan no tiene tope; y el 28/9 no
+     * lo eligió nadie: el plan arranca al día hábil siguiente si la jornada ya había
+     * empezado (`inicio_del_plan` en el backend). La etiqueta va corta porque la
+     * celda trunca; la explicación larga va en el Popover.
+     */
+    const periodoDelPlan = React.useMemo(() => {
+        if (!spanPlan) return null;
+        const claveDia = (d: Date) =>
+            `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        // «lun 26/10»: el día de la semana sólo donde hay lugar.
+        const conDia = (iso: string) => {
+            const dia = fechaLocal(iso).toLocaleDateString("es-AR", { weekday: "short" }).replace(".", "");
+            return `${dia} ${formatDate(iso.slice(0, 10))}`;
+        };
+        const tope = planningRange.fecha_hasta?.slice(0, 10) || null;
+        const fin = spanPlan.hasta.slice(0, 10);
+        const dias = `${spanPlan.habiles} ${spanPlan.habiles === 1 ? "día hábil" : "días hábiles"}`;
+        const forzadas = forzarOrdenIds.size;
+
+        let etiqueta: string;
+        let pasado = false;
+        let comoTermina: string;
+        if (!tope) {
+            etiqueta = `Termina el ${conDia(fin)} · ${dias} · sin fecha tope`;
+            comoTermina = `Termina el ${conDia(fin)}, cuando termina el último proceso de lo que tildaste. Sin fecha «hasta», el plan dura lo que tarda todo lo tildado; para ver solo una semana, volvé al Paso 1 y elegí el rango.`;
+        } else if (fin === tope) {
+            etiqueta = `Elegiste hasta el ${formatDate(tope)} · ${dias}`;
+            comoTermina = `Elegiste hasta el ${formatDate(tope)} en el Paso 1. Lo que no entra hasta ese día queda en «Fuera del plan».`;
+        } else if (fin < tope) {
+            etiqueta = `Termina el ${formatDate(fin)} · elegiste hasta el ${formatDate(tope)}`;
+            comoTermina = `Elegiste hasta el ${formatDate(tope)}, pero todo lo tildado termina antes: el ${conDia(fin)}.`;
+        } else {
+            pasado = true;
+            etiqueta = forzadas > 0
+                ? `Se pasó del ${formatDate(tope)}: forzaste ${forzadas} OT`
+                : `Se pasó del ${formatDate(tope)} · termina el ${formatDate(fin)}`;
+            comoTermina = forzadas > 0
+                ? `Elegiste hasta el ${formatDate(tope)}, pero forzaste ${forzadas} OT. Con una sola forzada el plan se recalcula entero sin fecha tope, así que termina el ${conDia(fin)}.`
+                : `Elegiste hasta el ${formatDate(tope)}, pero el plan termina el ${conDia(fin)}.`;
+        }
+
+        // Cómo arranca. `inicioBase` es el T=0 que usó el backend; el motivo sólo se
+        // dice en el caso que se puede afirmar: se calculó un día de trabajo con la
+        // jornada ya empezada. (Un borrador trae la hora en que se guardó, no la del
+        // cálculo, y esa hora puede ser un sábado: ahí no se inventa el porqué.)
+        let comoArranca: string | null = null;
+        const inicio = inicioBase ? new Date(inicioBase) : new Date(spanPlan.desde);
+        if (!isNaN(inicio.getTime())) {
+            const hora = `${String(inicio.getHours()).padStart(2, "0")}:${String(inicio.getMinutes()).padStart(2, "0")}`;
+            const diaInicio = claveDia(inicio);
+            let porque = "";
+            const calc = calculadoEn ? new Date(calculadoEn) : null;
+            const desdeElegido = planningRange.fecha_desde?.slice(0, 10);
+            if (inicioBase && calc && !isNaN(calc.getTime())) {
+                const diaCalc = claveDia(calc);
+                const laborable = calc.getDay() !== 0 && calc.getDay() !== 6 && !feriados.includes(diaCalc);
+                if (desdeElegido && desdeElegido > diaCalc && desdeElegido === diaInicio) {
+                    porque = " porque elegiste arrancar ese día";
+                } else if (diaInicio > diaCalc && laborable && calc.getHours() >= HORA_APERTURA) {
+                    const cuando = diaCalc === claveDia(new Date()) ? "hoy" : `el ${conDia(diaCalc)}, cuando lo calculaste,`;
+                    porque = ` porque ${cuando} la jornada ya había empezado`;
+                }
+            }
+            comoArranca = `Arranca el ${conDia(diaInicio)} a las ${hora}${porque}.`;
+        }
+
+        return { etiqueta, pasado, comoTermina, comoArranca };
+    }, [spanPlan, planningRange.fecha_desde, planningRange.fecha_hasta, forzarOrdenIds.size, inicioBase, calculadoEn, feriados]);
 
     /**
      * "18/8 07:00 → 27/8 10:30" para una OT. Toma la primera fecha de arranque y
@@ -2030,8 +2105,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
     const resaltadoRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     React.useEffect(() => () => { if (resaltadoRef.current) clearTimeout(resaltadoRef.current); }, []);
 
-    /** El #OT que se ve en la tabla (el del sistema viejo si lo tiene). Los avisos
-     *  hablan en `orden_id` interno y nadie reconoce ese número. */
+    /** El #OT que se ve en la tabla (el del sistema viejo si lo tiene), a partir del
+     *  `orden_id` interno. Lo usa el cartel de procesos cambiados, que habla en ids
+     *  internos. Los avisos NO: esos ya traen el número visible (ver abajo). */
     const numeroDeOT = React.useCallback((ordenId: number) => {
         const fila = results.find(r => r.orden_id === ordenId)
             ?? stickyExcedentes.find(r => r.orden_id === ordenId);
@@ -2039,7 +2115,57 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
     }, [results, stickyExcedentes]);
 
     /**
-     * Abre la OT de un aviso: la despliega, la trae a la vista y la resalta.
+     * Del número que el taller conoce al `orden_id` interno de la tabla.
+     *
+     * Los avisos traen en `impacto.ots` el número VISIBLE —`id_otvieja`, o el `id`
+     * si la OT nació en SPMM— desde el 15/8 (PlanificacionService, `nro_visible`; lo
+     * fija backend/tests/test_planner_pausas.py). La tabla está armada por
+     * `orden_id`. Hasta el 25/9 el chip mandaba el 15717 a buscar una fila 15717, que
+     * no existe (esa OT es la 7495 por dentro): salía «no está en la tabla del plan»
+     * para TODAS las OT, porque desde el 15/9 hasta las creadas en SPMM tienen su
+     * `id_otvieja`.
+     *
+     * Misma regla que el backend, invertida, y SIN respaldo a «usar el número tal
+     * cual»: si no está acá, la OT no está en este plan, y un respaldo sólo podría
+     * llevar a OTRA OT cuyo id interno coincidiera de casualidad. Caso raro que cae
+     * en el cartel: una fila sin `id_otvieja` porque la OT la cargó otra persona
+     * después de abrir la pantalla.
+     */
+    const ordenIdPorNumeroVisible = React.useMemo(() => {
+        const m = new Map<number, number>();
+        for (const r of [...results, ...stickyExcedentes]) {
+            const visible = Number(r.id_otvieja || r.orden_id);
+            if (!m.has(visible)) m.set(visible, r.orden_id);
+        }
+        return m;
+    }, [results, stickyExcedentes]);
+
+    /**
+     * A qué traer a la vista después del próximo dibujado. Un ref y no un
+     * `setTimeout(80)`: la fila recién existe cuando React pintó el desplegado (y,
+     * si se limpiaron filtros, la tabla entera), y cuánto tarda eso depende del
+     * tamaño del plan. El efecto de abajo corre después de cada render y, apenas
+     * el elemento está, lo centra y se olvida.
+     */
+    const saltoPendiente = React.useRef<string | null>(null);
+    React.useEffect(() => {
+        if (!saltoPendiente.current) return;
+        const el = document.querySelector(saltoPendiente.current);
+        if (!el) return;
+        saltoPendiente.current = null;
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+
+    const resaltar = (ordenId: number) => {
+        setOtResaltada(ordenId);
+        if (resaltadoRef.current) clearTimeout(resaltadoRef.current);
+        resaltadoRef.current = setTimeout(() => setOtResaltada(null), 4000);
+    };
+
+    /**
+     * Abre una OT de la tabla: la despliega, la trae a la vista y la resalta.
+     * Recibe el `orden_id` INTERNO (el panel de carga la llama así); los avisos
+     * pasan por `verOTDelAviso`, que traduce antes.
      *
      * "Y vas a buscarla acá… estaría bueno que hagas clic acá" (Lucas, 28/08,
      * mirando la 15678). El número de la OT estaba en el aviso, en chico, y para
@@ -2048,9 +2174,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
      */
     const verOT = (ordenId: number) => {
         if (!groupedResults[ordenId]) {
-            toast.info(`La OT #${numeroDeOT(ordenId)} no está en la tabla del plan.`, {
-                description: "Puede haber quedado fuera del plan o en la lista de excedentes.",
-            });
+            toast.info(`La OT #${numeroDeOT(ordenId)} no entró en este plan.`);
             return;
         }
         // Con filtros puestos la fila puede no existir en el DOM. Limpiarlos es
@@ -2061,17 +2185,39 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
             setFiltros({ atrasadas: false, forzadas: false, sinOperario: false, sinMaquina: false });
             toast.info("Se limpiaron los filtros para poder mostrarte la OT.");
         }
+        // Lo mismo que hace `toggleRow` al abrir: sin el catálogo cargado, el
+        // selector de proceso de la fila queda trabado en «Buscando procesos…» si
+        // esta es la primera OT que se abre en la pantalla.
+        if (!expandedOrderIds.includes(ordenId)) void pedirCatalogoProcesos();
         setExpandedOrderIds(prev => (prev.includes(ordenId) ? prev : [...prev, ordenId]));
-        setOtResaltada(ordenId);
-        if (resaltadoRef.current) clearTimeout(resaltadoRef.current);
-        resaltadoRef.current = setTimeout(() => setOtResaltada(null), 4000);
-        // Un tick después: la fila recién existe cuando React pintó el desplegado
-        // (y, si había filtros, la tabla entera).
-        setTimeout(() => {
-            document
-                .querySelector(`tr[data-ot="${ordenId}"]`)
-                ?.scrollIntoView({ behavior: "smooth", block: "center" });
-        }, 80);
+        resaltar(ordenId);
+        saltoPendiente.current = `tr[data-ot="${ordenId}"]`;
+    };
+
+    /**
+     * El click en un #OT de un aviso. Tres destinos posibles, y ninguno es un
+     * click que no hace nada:
+     *  - está en la tabla → se abre ahí;
+     *  - quedó en «Fuera del plan» → se abre su tarjeta amarilla, que dice por qué;
+     *  - no está en ninguno → un cartel que dice la verdad. Es el caso de un aviso
+     *    «OT X: pausada…» con la OT entera pausada, o de una OT que se sacó del
+     *    plan después de calcularlo.
+     */
+    const verOTDelAviso = (numero: number) => {
+        const ordenId = ordenIdPorNumeroVisible.get(numero);
+        if (ordenId != null && groupedResults[ordenId]) {
+            verOT(ordenId);
+            return;
+        }
+        if (ordenId != null && excedentesPorOrden[ordenId]) {
+            setExpandedExcedenteId(ordenId);
+            resaltar(ordenId);
+            saltoPendiente.current = `[data-excedente="${ordenId}"]`;
+            return;
+        }
+        toast.info(`La OT #${numero} no entró en este plan`, {
+            description: "Puede estar pausada, o la sacaste del plan después de calcularlo.",
+        });
     };
 
     /**
@@ -2356,14 +2502,15 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                     {/* Las acciones bajan a un segundo renglón cuando no entran al lado del
                         título, y adentro de ese renglón van de a varias filas si hace falta
                         (RF-27). Por ANCHO y no por breakpoint: Hoja del pañol, Agregar OTs,
-                        el zoom, Volver, Salir y la X piden ~820px, y en 1024 con el menú
+                        el zoom, Volver y Salir piden ~780px, y en 1024 con el menú
                         abierto hay ~620 — la fila fija se salía de la tarjeta y la página
-                        entera scrolleaba de costado (en el teléfono, con la X afuera).
+                        entera scrolleaba de costado (en el teléfono, con Salir afuera).
                         Donde entran (una pantalla ancha) es la misma fila de siempre.
                         La campana de avisos flota arriba a la derecha: abajo de `lg` le
                         deja lugar el `pr-11` del título; desde `lg`, el `lg:pr-16` de acá,
-                        porque ahí la que queda en esa esquina es la X de cerrar y la
-                        campana le tapaba un tercio (medido en 1440: 11px de 32). */}
+                        porque ahí la que queda en esa esquina es el último botón de la
+                        barra (hoy «Salir») y la campana le tapaba un tercio (medido en
+                        1440, con la X que había antes: 11px de 32). */}
                     <div className="px-3 sm:px-6 lg:pr-16 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                         {/* El título nunca baja de 12rem: es lo que decide si las acciones
                             le entran al lado o se van al renglón de abajo. Con `min-w-0`
@@ -2829,6 +2976,12 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     <span className="hidden sm:inline">Volver a elegir OTs</span>
                                 </Button>
                             )}
+                            {/* «Salir» es la única salida. Hubo además una X de cerrar
+                                (Julián, 16/09: «falta un botón de x para cerrar»), pero
+                                hacía exactamente lo mismo que «Salir», y dos botones
+                                iguales se leen como dos cosas distintas. Julián, 25/9:
+                                «los botones salir y la x de cerrar hacen lo mismo, sacá
+                                la x». */}
                             <Button
                                 variant="ghost"
                                 size="sm"
@@ -2839,28 +2992,6 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             >
                                 <LogOut className="w-3.5 h-3.5" />
                                 <span className="hidden sm:inline">Salir</span>
-                            </Button>
-                            {/* LA X DE CERRAR.
-
-                                Había una salida —"Salir", con su ícono de puerta— pero
-                                perdida al final de una fila de seis controles, del mismo
-                                tamaño y color que el zoom y los filtros. Julián, 16/09:
-                                «falta un botón de x para cerrar, que sea más intuitivo o
-                                algo para volver atrás». La X es el gesto que todo el mundo
-                                busca primero, y va separada del resto por una línea para
-                                que se lea como "esto cierra la pantalla" y no como un
-                                control más de la barra. */}
-                            <div className="mx-0.5 h-6 w-px bg-gray-200" aria-hidden />
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={onClose}
-                                disabled={isConfirming || isCalculating}
-                                className="h-8 w-8 shrink-0 rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900"
-                                aria-label="Cerrar el planificador"
-                                title="Cerrar el planificador. El plan queda guardado como borrador."
-                            >
-                                <X className="h-4 w-4" />
                             </Button>
                         </div>
                     </div>
@@ -2897,10 +3028,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             Acá tiene la MISMA tipografía que las otras cifras: el peso
                             que pidió el cliente sale de la posición (primera), del ancho
                             (1.5fr) y del acento azul, no de píxeles nuevos de alto —
-                            reusa una fila que ya estaba. El tope elegido se cuenta en la
-                            etiqueta sólo cuando NO coincide con el cierre real del plan,
-                            que es el único caso en que dice algo ("pediste hasta el 5/9
-                            pero el plan cierra el 31/8"); si coincide, va en el title. */}
+                            reusa una fila que ya estaba. La etiqueta dice de dónde sale
+                            el período (sin tope, hasta lo elegido, o pasado del tope por
+                            forzar), y el ⓘ lo explica entero: ver `periodoDelPlan`. */}
                         <CifraPlan
                             className="col-span-2 md:col-span-1"
                             tono="fecha"
@@ -2908,20 +3038,34 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             valor={spanPlan
                                 ? <>{formatDate(spanPlan.desde)} <span className="text-gray-400 font-normal">→</span> {formatDate(spanPlan.hasta)}</>
                                 : "—"}
-                            etiqueta={spanPlan
-                                ? (planningRange.fecha_hasta && planningRange.fecha_hasta.slice(0, 10) !== spanPlan.hasta.slice(0, 10)
-                                    ? `${spanPlan.habiles} ${spanPlan.habiles === 1 ? "día hábil" : "días hábiles"} · tope ${formatDate(planningRange.fecha_hasta)}`
-                                    : `${spanPlan.habiles} ${spanPlan.habiles === 1 ? "día hábil" : "días hábiles"}`)
+                            etiqueta={periodoDelPlan
+                                ? (periodoDelPlan.pasado
+                                    ? <span className="font-medium text-amber-700">{periodoDelPlan.etiqueta}</span>
+                                    : periodoDelPlan.etiqueta)
                                 : "Período del plan"}
-                            title={[
-                                "Período que ocupa el plan.",
-                                spanPlan
-                                    ? `Días hábiles: los que trabaja alguien del taller (${describirDias(diasDelTaller)}), sin feriados, contando el primero y el último aunque sean de media jornada.`
-                                    : "",
-                                planningRange.fecha_hasta
-                                    ? `Tope elegido al planificar: ${formatDate(planningRange.fecha_hasta)}.`
-                                    : "",
-                            ].filter(Boolean).join(" ")}
+                            /* Por clic y no en un `title`: el title tarda en abrir, no
+                               existe en el teléfono y nadie sabe que está. */
+                            accion={periodoDelPlan ? (
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <button
+                                            type="button"
+                                            className="p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                                            aria-label="De dónde sale el período del plan"
+                                        >
+                                            <Info className="w-4 h-4" />
+                                        </button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[min(360px,calc(100vw-2rem))] p-3 text-[13px] text-gray-700 space-y-2 leading-relaxed" align="start">
+                                        <div className="font-semibold text-gray-900">De dónde sale el período</div>
+                                        {periodoDelPlan.comoArranca && <p>{periodoDelPlan.comoArranca}</p>}
+                                        <p>{periodoDelPlan.comoTermina}</p>
+                                        <p className="text-[12px] text-gray-500">
+                                            Días hábiles: los que trabaja alguien del taller ({describirDias(diasDelTaller)}), sin feriados, contando el primero y el último aunque sean de media jornada.
+                                        </p>
+                                    </PopoverContent>
+                                </Popover>
+                            ) : undefined}
                         />
                         <CifraPlan
                             icono={<Cog className="w-4 h-4" />}
@@ -3073,8 +3217,10 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     /* Del aviso a la fila de la OT, desplegada y resaltada, que es
                                        donde se le asigna la persona. Antes el número estaba sólo en
                                        el globito del impacto y había que ir a buscarlo a la tabla. */
-                                    numeroDeOT={numeroDeOT}
-                                    onVerOT={verOT}
+                                    /* Los avisos ya traen el número visible: se escribe tal
+                                       cual, y el click lo traduce al id de la tabla. */
+                                    numeroDeOT={(n) => String(n)}
+                                    onVerOT={verOTDelAviso}
                                     onRevisar={onRecalculate ? () => handleRecalculate() : undefined}
                                     revisando={isCalculating}
                                     calculadoEn={calculadoEn}
@@ -3153,7 +3299,14 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                 const reasons = isExpanded ? getExcedenteReasons(oid) : [];
                                                 const otDurationMin = items.reduce((a, p) => a + (p.duracion_min || 0), 0);
                                                 return (
-                                                    <div key={oid} className="bg-white/60">
+                                                    <div
+                                                        key={oid}
+                                                        data-excedente={oid}
+                                                        className={cn(
+                                                            "bg-white/60 transition-shadow",
+                                                            otResaltada === oid && "ring-2 ring-inset ring-indigo-400"
+                                                        )}
+                                                    >
                                                         {/* Fila principal */}
                                                         <div className="px-4 py-3 flex items-center justify-between gap-4">
                                                             <div className="flex items-start gap-3 min-w-0 flex-1">

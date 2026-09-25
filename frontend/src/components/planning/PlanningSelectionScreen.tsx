@@ -523,8 +523,11 @@ export function PlanningSelectionScreen({
                                     >
                                         <CalendarDays className="w-3 h-3 shrink-0" />
                                         {cartelDeDias ? cartelDeDias.texto : "calculando días…"}
+                                        {/* El «hasta» se ve en todos los anchos: estaba sólo desde
+                                            xl, y en una notebook no se enteraba nadie, antes de
+                                            planificar, de que 48 OT llegaban al 26/10 (25/9). */}
                                         {cartelDeDias && !cartelDeDias.esPiso && diasDelPlan?.tipo === "ok" && diasDelPlan.datos.fin_estimado && (
-                                            <span className="hidden xl:inline font-normal">· hasta el {diaCorto(diasDelPlan.datos.fin_estimado)}</span>
+                                            <span className="font-normal">· hasta el {diaCorto(diasDelPlan.datos.fin_estimado)}</span>
                                         )}
                                         {cartelDeDias && calculandoDias && (
                                             <span className="font-normal">· calculando…</span>
