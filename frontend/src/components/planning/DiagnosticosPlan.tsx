@@ -216,6 +216,27 @@ export interface Diagnostico {
         resumen: string;
     };
     soluciones: DiagnosticoSolucion[];
+    /**
+     * Cuál de las causas de «pidió máquina y no la tuvo» es (`rango_maquina`,
+     * `sin_maquina`, `sin_familia`…). La manda el backend desde el 17/09.
+     */
+    causa?: string;
+    /**
+     * Lo que suma `unificarPreparaciones` (lib/unificarAvisos) cuando un proceso y su
+     * preparación son la misma traba: los pasos que junta el aviso (la producción
+     * primero), los ids de los avisos que se tragó y el título que tenía solo.
+     */
+    pasos?: PasoDelAviso[];
+    absorbidos?: string[];
+    tituloPropio?: string;
+}
+
+/** Un paso de un aviso unificado: «Prensa · 2 procesos, 2 OT». */
+export interface PasoDelAviso {
+    nombre: string;
+    procesos: number;
+    ots: number[];
+    minutos: number;
 }
 
 // El link «Ir a arreglarlo» (`enlaceARecursos`) y a qué solapa apunta cada «dónde»
@@ -256,6 +277,58 @@ function accionDelObjetivo(sol: DiagnosticoSolucion): AccionDeSolucion | null {
 /** La acción aplicable de una solución: la propia, o la que se deduce del objetivo. */
 const accionAjustable = (sol: DiagnosticoSolucion): AccionDeSolucion | null =>
     sol.accion ?? accionDelObjetivo(sol);
+
+/**
+ * Una "solución" que no se puede hacer desde acá: sin botón, sin objetivo y sin
+ * pantalla de Recursos a la que llevar. «La habilidad a mano no destraba esto…» o
+ * «O planificá menos OTs juntas» son consejos, y dibujados con la llave de las
+ * soluciones se leían como un arreglo más (Julián, 25/09/2026).
+ */
+const esNota = (sol: DiagnosticoSolucion) =>
+    !accionAjustable(sol) && !sol.objetivo && !pestaniaDe(sol.donde);
+
+/**
+ * Sin la «O » con que el backend encadena la segunda opción en adelante
+ * (`_como_alternativa`, y a mano en «O planificá menos OTs juntas»). Leída sola —la
+ * primera de la franja, o una nota— era una alternativa a nada. Respeta los `**`.
+ */
+const sinOInicial = (texto: string) =>
+    texto.replace(/^O\s+(\**)(\S)/, (_, negrita: string, c: string) => negrita + c.toUpperCase());
+
+/**
+ * Si `valor` ya se lee en `texto`, como palabra entera y sin importar mayúsculas.
+ *
+ * Los chips de la tarjeta repetían lo que decía la frase de arriba: en el cuello de
+ * FRESADORA CNC «1 máquina» salía en el título, en el resumen y en el chip Hoy
+ * (Julián, 25/09/2026). Se compara texto, así que si el backend cambia la frase el
+ * chip simplemente vuelve: no se pierde nada. Un resumen que corta la lista
+ * («oficial (y 2 más)») no la contiene entera y el chip queda, que es el que la trae
+ * completa.
+ */
+function yaLoDice(texto: string | undefined, valor: string): boolean {
+    if (!texto || !valor.trim()) return false;
+    const escapado = valor.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    return new RegExp(`(^|[^\\p{L}\\p{N}])${escapado}(?=$|[^\\p{L}\\p{N}])`, "iu").test(texto.replace(/\*\*/g, ""));
+}
+
+/**
+ * El detalle sin la frase que el resumen ya dijo arriba.
+ *
+ * El cuello decía «Entra todo, pero por turnos: hay 1 máquina…» en el resumen y, al
+ * abrir, otra vez «Entra todo, pero por turnos: mientras una pieza…». Se saca la
+ * cabeza del resumen (hasta los dos puntos) si aparece en el detalle, y la palabra que
+ * sigue arranca en mayúscula. Si no aparece, el detalle queda como vino.
+ */
+function sinLoQueYaDijo(detalle: string, resumen?: string): string {
+    const i = resumen ? resumen.indexOf(":") : -1;
+    if (!resumen || i <= 0) return detalle;
+    const cabeza = resumen.slice(0, i + 1).trim().toLowerCase();
+    const j = detalle.toLowerCase().indexOf(cabeza);
+    if (j < 0) return detalle;
+    const despues = detalle.slice(j + cabeza.length).replace(/^\s+/, "")
+        .replace(/^(\**)(\S)/, (_, negrita: string, c: string) => negrita + c.toUpperCase());
+    return detalle.slice(0, j) + despues;
+}
 
 
 /**
@@ -642,9 +715,17 @@ export function DiagnosticosPlan({
             // que no se guardó. Esos ya se cuentan, con su nombre, en la tira índigo
             // de ajustes, que además es la única que se puede deshacer.
             const yaEstan = new Set(siguen.map((d) => d.id));
-            const recien = antes.filter(
-                (d) => !ahora.has(d.id) && !yaEstan.has(d.id) && !tieneAjusteRef.current(d)
-            );
+            const recien = antes
+                .filter((d) => !ahora.has(d.id) && !yaEstan.has(d.id) && !tieneAjusteRef.current(d))
+                // Un aviso unificado («Prensa y su preparación») que se fue mientras su
+                // preparación volvió sola: se arregló Prensa, no las dos. Con el título
+                // unificado la tira verde decía que se había arreglado algo que sigue
+                // en la lista de abajo.
+                .map((d) =>
+                    d.tituloPropio && d.absorbidos?.some((id) => ahora.has(id))
+                        ? { ...d, titulo: d.tituloPropio, pasos: undefined, absorbidos: undefined }
+                        : d
+                );
 
             // Se ACUMULAN entre recálculos. Antes cada cálculo pisaba la lista con los
             // de esa vuelta, así que arreglar dos cosas de a una dejaba ver sólo la
@@ -1111,11 +1192,23 @@ export function DiagnosticosPlan({
                                         {solAplicada ? (
                                             <p className="text-[11.5px] leading-snug text-gray-600">
                                                 <span className="font-semibold text-emerald-700">Se aplicó: </span>
-                                                {conNegritas(solAplicada.texto)}
+                                                {conNegritas(sinOInicial(solAplicada.texto))}
+                                                {/* Lo único que se le atribuye al arreglo es lo
+                                                    probado: la preparación usa el rango de su
+                                                    producción, así que se fue con el mismo cambio. */}
+                                                {(d.pasos?.length ?? 0) > 1 && (
+                                                    <> {d.pasos!.length > 2 ? "Sus preparaciones se arreglaron" : "Su preparación se arregló"} con el mismo cambio.</>
+                                                )}
                                             </p>
                                         ) : (
+                                            /* Sin atribuirle la causa a nadie: el solver no es
+                                               determinista (varios hilos, tope de tiempo), así que
+                                               un aviso puede irse de un cálculo a otro sin que nadie
+                                               haya tocado nada. Decía «o lo arreglaste en Recursos, o
+                                               la OT salió del plan», y en la preparación que se había
+                                               ido con el arreglo de Prensa era falso. */
                                             <p className="text-[11.5px] leading-snug text-gray-500">
-                                                Ya no aparece en este cálculo: o lo arreglaste en Recursos, o la OT salió del plan.
+                                                Ya no aparece en este cálculo. Puede haberlo destrabado otro arreglo, un cambio en Recursos, o que la OT salió del plan.
                                             </p>
                                         )}
                                         {linkResuelto && (
@@ -1234,7 +1327,8 @@ export function DiagnosticosPlan({
                             : -1;
                         const armada = iArmada >= 0 ? d.soluciones[iArmada] : null;
                         const link = sol ? enlace(d, sol) : null;
-                        const otras = d.soluciones.length - 1;
+                        // Las notas (consejos sin nada que tocar) no son «opciones».
+                        const otras = d.soluciones.filter((s, i) => i !== iSol && !esNota(s)).length;
 
                         // El backend ya manda el impacto masticado ("3 procesos · 2 OT · 4h").
                         // Decía «3 proc» hasta el 17/09/2026, cuando se escribió entero del
@@ -1252,22 +1346,35 @@ export function DiagnosticosPlan({
                         const otsTexto = otsDelAviso.length > 0
                             ? `OTs: ${otsDelAviso.map((o) => `#${o.numero}`).join(", ")}`
                             : undefined;
-                        // Plegada entran dos sin empujar el "dónde"; abierta van todas.
-                        const otsVisibles = activo ? otsDelAviso : otsDelAviso.slice(0, 2);
+                        // Plegada entran dos sin empujar el "dónde". Abierta NINGUNA acá:
+                        // van todas en la línea «OTs (N):» de abajo, y antes salían en los
+                        // dos lados a la vez (Julián, 25/09/2026).
+                        const otsVisibles = activo ? [] : otsDelAviso.slice(0, 2);
 
                         /* Los datos del aviso, cada uno con su etiqueta, como en el mockup.
                            El impacto viene del backend masticado y en orden («2 procesos · 3 OT
                            · 4 jornadas»): procesos y OT se juntan en una caja —son la misma
                            pregunta, cuánto trabajo toca— y el tiempo va en la suya. */
                         const [impProcesos, impOts, impTiempo] = impacto;
-                        const trabajo = [impProcesos, impOts].filter(Boolean).join(" · ");
-                        const datos = [
+                        // Un aviso unificado cuenta sus pasos: «2 pasos · 3 procesos · 2 OT».
+                        const trabajo = [
+                            (d.pasos?.length ?? 0) > 1 && `${d.pasos!.length} pasos`,
+                            impProcesos,
+                            impOts,
+                        ].filter(Boolean).join(" · ");
+                        // Sin chips que repitan lo que ya dice la frase de arriba, ni un
+                        // «Necesita» que es el mismo número que el Tiempo (el cuello pide
+                        // «10 jornadas» y tarda «10 jornadas»).
+                        const datos = ([
                             // En una pausa lo que viene en `tiene` es el motivo, no «lo que hay hoy».
                             d.tiene && { etiqueta: esPausa(d) ? "Motivo" : "Hoy", valor: d.tiene, icono: Icono },
-                            d.pide && { etiqueta: "Necesita", valor: d.pide, icono: Wrench },
+                            d.pide && d.pide.trim().toLowerCase() !== (impTiempo ?? "").toLowerCase()
+                                && { etiqueta: "Necesita", valor: d.pide, icono: Wrench },
                             trabajo && { etiqueta: "Trabajo", valor: trabajo, icono: Layers },
                             impTiempo && { etiqueta: "Tiempo", valor: impTiempo, icono: Clock },
-                        ].filter(Boolean) as { etiqueta: string; valor: string; icono: LucideIcon }[];
+                        ].filter(Boolean) as { etiqueta: string; valor: string; icono: LucideIcon }[])
+                            .filter((dato) => !yaLoDice(d.resumen, dato.valor));
+                        const notas = d.soluciones.filter((s, i) => i !== iSol && esNota(s));
 
                         return (
                             <li
@@ -1369,7 +1476,10 @@ export function DiagnosticosPlan({
                                                 {datos.map((dato) => (
                                                     <span
                                                         key={dato.etiqueta}
-                                                        className="inline-flex min-w-0 max-w-[15rem] items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50/70 px-2 py-1"
+                                                        className={cn(
+                                                            "inline-flex min-w-0 items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50/70 px-2 py-1",
+                                                            !activo && "max-w-[15rem]",
+                                                        )}
                                                         title={`${dato.etiqueta}: ${dato.valor}`}
                                                     >
                                                         <dato.icono className="h-3.5 w-3.5 shrink-0 text-gray-400" />
@@ -1377,7 +1487,14 @@ export function DiagnosticosPlan({
                                                             <span className="block text-[9.5px] uppercase leading-none tracking-wide text-gray-400">
                                                                 {dato.etiqueta}
                                                             </span>
-                                                            <span className="mt-0.5 block truncate text-[11.5px] font-medium leading-none text-gray-700">
+                                                            {/* Abierta, el valor entero y no cortado: en la
+                                                                tablet no hay `title`, y abajo ya no se repite
+                                                                «Hoy: … · Hace falta: …» (era el mismo dato
+                                                                dos veces en cuanto el chip entraba entero). */}
+                                                            <span className={cn(
+                                                                "mt-0.5 block text-[11.5px] font-medium text-gray-700",
+                                                                activo ? "leading-tight" : "truncate leading-none",
+                                                            )}>
                                                                 {dato.valor}
                                                             </span>
                                                         </span>
@@ -1408,7 +1525,7 @@ export function DiagnosticosPlan({
                                     )}>
                                         {sol ? (
                                             <>
-                                                {conNegritas(sol.texto)}
+                                                {conNegritas(sinOInicial(sol.texto))}
                                                 {otras > 0 && !activo && (
                                                     <span className="ml-1 font-normal text-gray-400">
                                                         +{otras} {otras === 1 ? "opción" : "opciones"}
@@ -1640,7 +1757,10 @@ export function DiagnosticosPlan({
                                                 opuestas serían el mismo problema de nuevo, solo que en
                                                 gris. De las tres acciones de una tarjeta Media esta es
                                                 la que menos hace, y el peso visual lo dice. */}
-                                            {!sol?.accion && (
+                                            {/* Solo con la tarjeta cerrada: abierta está el «Listo,
+                                                no lo muestres más» de abajo, y eran dos botones
+                                                para lo mismo a la vista a la vez. */}
+                                            {!sol?.accion && !activo && (
                                                 <button
                                                     type="button"
                                                     onClick={() => marcar(d)}
@@ -1652,16 +1772,8 @@ export function DiagnosticosPlan({
                                                     Listo
                                                 </button>
                                             )}
-                                            <button
-                                                type="button"
-                                                aria-expanded={activo}
-                                                onClick={() => toggle(d.id)}
-                                                title={activo ? "Ocultar detalles" : "Ver detalles"}
-                                                aria-label={activo ? "Ocultar detalles" : "Ver detalles"}
-                                                className="grid h-7 w-7 shrink-0 place-items-center rounded text-gray-400 hover:bg-slate-100 hover:text-gray-600 transition-colors"
-                                            >
-                                                <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", activo && "rotate-180")} />
-                                            </button>
+                                            {/* Acá había un segundo chevron: la cabecera entera ya
+                                                abre y cierra, y tiene el suyo. */}
                                     </div>
                                 </div>
 
@@ -1674,17 +1786,38 @@ export function DiagnosticosPlan({
                                             sería decir dos veces lo mismo. */}
                                         {d.resumen && (
                                             <p className="text-[11.5px] leading-[1.4] text-gray-600">
-                                                {conNegritas(d.detalle)}
+                                                {conNegritas(sinLoQueYaDijo(d.detalle, d.resumen))}
                                             </p>
+                                        )}
+                                        {/* Un proceso y su preparación trabados por lo mismo
+                                            vienen en un solo aviso (lib/unificarAvisos): acá se
+                                            dice qué junta y por qué alcanza con un arreglo. */}
+                                        {d.pasos && d.pasos.length > 1 && (
+                                            <div className="text-[11.5px] leading-[1.4] text-gray-600">
+                                                <span className="font-semibold text-gray-700">Pasos: </span>
+                                                {d.pasos.map((p, k) => (
+                                                    <span key={`${p.nombre}-${k}`}>
+                                                        {k > 0 && <span className="text-gray-400"> + </span>}
+                                                        <span className="font-medium text-gray-800">{p.nombre}</span>
+                                                        {" · "}{p.procesos} {p.procesos === 1 ? "proceso" : "procesos"}, {p.ots.length} OT
+                                                    </span>
+                                                ))}
+                                                <span className="block text-[10.5px] text-gray-500">
+                                                    {d.pasos.length > 2
+                                                        ? <>Las preparaciones usan el rango de {d.pasos[0].nombre}: se arreglan con el mismo cambio.</>
+                                                        : <>La preparación usa el rango de {d.pasos[0].nombre}: se arregla con el mismo cambio.</>}
+                                                </span>
+                                            </div>
                                         )}
                                         {/* Las OTRAS opciones, no todas: la que se ve en la
                                             franja de arriba se saltea. Estaba dos veces, una
                                             arriba y otra acá, palabra por palabra — se ve en la
                                             captura que mandó Julián el 17/09/2026. */}
-                                        {d.soluciones.some((_, idx) => idx !== iSol) && (
+                                        {d.soluciones.some((s, idx) => idx !== iSol && !esNota(s)) && (
                                             <ul className="space-y-1">
                                                 {d.soluciones.map((s, idx) => {
-                                                    if (idx === iSol) return null;
+                                                    // Las notas van aparte, abajo y en gris.
+                                                    if (idx === iSol || esNota(s)) return null;
                                                     const clave = `${d.id}-${idx}`;
                                                     const hechaEsta = aplicadas.has(clave);
                                                     const linkEste = enlace(d, s);
@@ -1835,35 +1968,30 @@ export function DiagnosticosPlan({
                                                 })}
                                             </ul>
                                         )}
-                                        {/* El chip «hoy → hace falta» de la tarjeta vive en un
-                                            `lg:inline-flex`, o sea que abajo de 1024px NO EXISTE — y en
-                                            un notebook de 1366 con la barra de navegación abierta el
-                                            panel ronda los 700px. Justo ahí desaparecía la respuesta a
-                                            la pregunta que hizo Lucas mirando la soldadora ("¿cuál es el
-                                            rango que tiene?"). Acá se escribe con los dos lados
-                                            rotulados, y solo en los anchos donde el chip no está. */}
-                                        {d.tiene && (
-                                            <p className="text-[10.5px] leading-snug text-gray-500 lg:hidden">
-                                                <span className="font-semibold text-gray-600">Hoy: </span>{d.tiene}
-                                                {d.pide && (
-                                                    <>
-                                                        {" · "}
-                                                        <span className="font-semibold text-gray-600">Hace falta: </span>{d.pide}
-                                                    </>
-                                                )}
-                                            </p>
+                                        {/* Consejos que no se tocan desde acá («planificá menos
+                                            OTs juntas»): en gris y con la ⓘ, no con la llave de
+                                            las soluciones. */}
+                                        {notas.length > 0 && (
+                                            <ul className="space-y-0.5">
+                                                {notas.map((s, k) => (
+                                                    <li key={k} className="flex items-start gap-1.5 text-[11px] leading-[1.4] text-gray-500">
+                                                        <Info className="w-3 h-3 mt-[2px] shrink-0 text-gray-400" />
+                                                        <span>
+                                                            {conNegritas(sinOInicial(s.texto))}
+                                                            {s.donde && <span className="text-gray-400"> · {s.donde}</span>}
+                                                        </span>
+                                                    </li>
+                                                ))}
+                                            </ul>
                                         )}
                                         <div className="flex items-end justify-between gap-3">
                                             <p className="text-[10.5px] text-gray-500">
-                                                {/* Abajo de md los chips del impacto no entran en la
-                                                    tarjeta, así que acá es el único lugar donde se ven. */}
-                                                <span className="md:hidden">
-                                                    {d.impacto.resumen}
-                                                    {otsDelAviso.length > 0 ? " — " : ""}
-                                                </span>
+                                                {/* Acá antes iba también el impacto «abajo de md»,
+                                                    pero los chips de arriba ya se ven en todos los
+                                                    anchos: era el mismo dato dos veces. */}
                                                 {otsDelAviso.length > 0 && (
                                                     <>
-                                                        OTs:{" "}
+                                                        OTs ({otsDelAviso.length}):{" "}
                                                         {otsDelAviso.map((o, k) => (
                                                             <span key={o.id}>
                                                                 {k > 0 && ", "}

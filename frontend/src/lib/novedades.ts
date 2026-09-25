@@ -66,6 +66,16 @@ export const NOVEDADES: Novedad[] = [
             "Abajo en el menú de la izquierda, al lado de tu nombre, hay un megáfono: lo tocás y se abre de nuevo el último aviso, con su botón para ir a Novedades. Mientras tenga un puntito rojo es que hay un aviso que todavía no leíste. El puntito se apaga cuando tocás «Entendido» o «Ver todas las novedades», o cuando lo tuviste abierto un rato; si lo cerrás enseguida, sigue prendido. Con el menú achicado, el megáfono está arriba de tu inicial, y en el teléfono el puntito se ve también en el botón redondo del menú. Antes el aviso salía una sola vez: si lo cerrabas sin leerlo, no había cómo volver a verlo.",
     },
     {
+        id: "avisos-preparacion-unificada",
+        fecha: "2026-09-25",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "En la vista previa del plan, un proceso y su preparación trabados por lo mismo son un solo aviso, y las tarjetas no repiten lo que ya dijeron",
+        detalle:
+            "Salían dos avisos para la misma traba, por ejemplo «Prensa: sus 3 máquinas no aceptan el rango que pide» y «Preparación de prensa: …». La preparación usa el rango de su proceso, así que se arreglaban con el mismo cambio, y al arreglar uno aparecían dos «Se arregló». Ahora es uno solo, «Prensa y su preparación: …», y al abrirlo la fila «Pasos» dice qué junta. Cada tarjeta dice las cosas una vez: sin datos que repiten la frase de arriba, las OT una sola vez, un solo «Listo» y una sola flecha. Los consejos que no se tocan desde acá, como «Planificá menos OTs juntas», van en gris como nota. Y un aviso que desaparece sin que le hayas aplicado nada ya no dice que lo arreglaste en Recursos: dice que ya no aparece en este cálculo.",
+        href: "/operaciones",
+    },
+    {
         id: "vista-previa-numeros-de-ot-y-periodo",
         fecha: "2026-09-25",
         tipo: "arreglo",

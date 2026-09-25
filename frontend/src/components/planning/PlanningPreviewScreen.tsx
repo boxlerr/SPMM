@@ -27,6 +27,7 @@ import {
     numeroEs, type CapacidadEnElPeriodo,
 } from "@/lib/diasHabiles";
 import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/DiagnosticosPlan";
+import { unificarPreparaciones } from "@/lib/unificarAvisos";
 import { huellaRecursos } from "@/lib/huellaRecursos";
 import type { TandaManual } from "@/lib/borradorPlan";
 import {
@@ -199,6 +200,16 @@ interface PlanningPreviewScreenProps {
 const PASO_MAXIMO_A_MANO = 2;
 
 /**
+ * La lista vacía por defecto, UNA sola para siempre.
+ *
+ * Con `diagnosticos = []` en la firma cada render estrenaba un array, el `useMemo`
+ * que une las preparaciones se recalculaba y el panel de avisos —que limpia la
+ * confirmación de «Guardar en Recursos» cada vez que cambia la identidad de la
+ * lista— la borraba en el render siguiente.
+ */
+const SIN_AVISOS: Diagnostico[] = [];
+
+/**
  * Las pasadas de una OT en orden de trabajo, cada una con su paso y si se puede
  * elegir a mano.
  *
@@ -279,7 +290,7 @@ export function PlanningPreviewScreen({
     planningRange = {},
     onRecalculate,
     isCalculating = false,
-    diagnosticos = [],
+    diagnosticos: diagnosticosCrudos = SIN_AVISOS,
     onEdicionesChange,
     calculadoEn,
     inicioBase,
@@ -295,6 +306,17 @@ export function PlanningPreviewScreen({
 
     // Zoom compartido (key 'plan_zoom' en localStorage).
     const [zoom, setZoom] = usePersistedZoom('plan_zoom', 100);
+
+    /**
+     * Los avisos con cada preparación adentro del de su producción, cuando son la
+     * misma traba (ver `lib/unificarAvisos`). Se unen ACÁ y no en el panel porque la
+     * cifra «Trabas sin resolver» de arriba tiene que contar lo mismo que se ve abajo.
+     *
+     * El `useMemo` no es optimización: el panel limpia la confirmación de «Guardar en
+     * Recursos» cada vez que cambia la identidad de la lista, y sin memo la lista es
+     * nueva en cada render y el botón nunca pasa de «Mirá y confirmá».
+     */
+    const diagnosticos = React.useMemo(() => unificarPreparaciones(diagnosticosCrudos), [diagnosticosCrudos]);
 
     // Local state for edits
     const [editedResults, setEditedResults] = React.useState<Record<string, PlanificacionResult>>({});
