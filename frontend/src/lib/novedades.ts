@@ -76,6 +76,16 @@ export const NOVEDADES: Novedad[] = [
             "Abajo en el menú de la izquierda, al lado de tu nombre, hay un megáfono: lo tocás y se abre de nuevo el último aviso, con su botón para ir a Novedades. Mientras tenga un puntito rojo es que hay un aviso que todavía no leíste. El puntito se apaga cuando tocás «Entendido» o «Ver todas las novedades», o cuando lo tuviste abierto un rato; si lo cerrás enseguida, sigue prendido. Con el menú achicado, el megáfono está arriba de tu inicial, y en el teléfono el puntito se ve también en el botón redondo del menú. Antes el aviso salía una sola vez: si lo cerrabas sin leerlo, no había cómo volver a verlo.",
     },
     {
+        id: "plan-dias-reales-y-unidades",
+        fecha: "2026-09-26",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "El planificador arma planes más cortos y parejos, y cuenta solo las unidades que faltan",
+        detalle:
+            "Las 48 OT del piloto daban un plan hasta el 26/10; con los mismos datos ahora termina el 13/10 y casi sin pasos sin persona. Leía mal la fecha prometida, se cortaba antes de terminar de ordenar y no apuraba lo que podía salir antes. Además, si una OT tiene unidades entregadas o terminadas, cada paso de producción se planifica por las que faltan (las preparaciones van enteras): la 13348, con 199 de 200 entregadas, dejó de ocupar 79 h. En la vista previa el paso lo dice: «faltan 1 de 200 u. · lote 2.400m». Y los pasos ya terminados no se vuelven a planificar.",
+        href: "/operaciones",
+    },
+    {
         id: "planificar-elegir-fechas",
         fecha: "2026-09-25",
         tipo: "nuevo",
