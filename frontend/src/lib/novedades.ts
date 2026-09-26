@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "vista-previa-pantalla-completa",
+        fecha: "2026-09-26",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "La vista previa ocupa toda la pantalla y los avisos están más ordenados",
+        detalle:
+            "En la computadora, la vista previa dejó de ser una tarjeta que flota y se mueve al scrollear: ahora ocupa la pantalla entera, la cabecera y el pie quedan quietos y lo único que corre es la lista (el panel de carga tiene su propio scroll). Arriba, dos pastillas llevan directo a los avisos y a los «Ajustes del plan». Los ajustes ya no son chips verdes: van en una lista numerada que dice qué toca cada uno y qué aviso destraba, cada uno con su «Deshacer», y con «Guardar en Recursos» para dejarlos cargados de verdad: primero te muestra qué va a cambiar. Cada aviso es una tarjeta con su estado («Listo», «Terceros», «Media», «Alta»), sus datos y el consejo abajo; también los que no piden nada, que a la mañana eran un renglón verde. Se sacó el cartel naranja de arriba: el botón naranja del pie ya dice que falta recalcular.",
+        href: "/operaciones",
+    },
+    {
         id: "avisos-compactos-en-verde",
         fecha: "2026-09-26",
         tipo: "mejora",

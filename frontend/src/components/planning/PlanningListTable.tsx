@@ -1655,10 +1655,13 @@ function _PlanningListTable({
             {/* B1 (feedback 06/07): barra flotante de cambios pendientes de operario/máquina.
                 Aparece solo cuando hay reasignaciones sin guardar; el avance y las fechas siguen al toque. */}
             {planifica && Object.keys(pendingRes).length > 0 && (
-                /* `bottom-24` y no `bottom-5`: el pie del planificador es sticky y vive
-                   en esa misma banda, así que la barra le caía justo encima y tapaba
-                   "Planificar". Y con `max-w`/`flex-wrap` no se sale de una pantalla
-                   angosta, donde los tres textos más los dos botones no entran. */
+                /* `bottom-24` y no `bottom-5`: el pie del planificador (Planificar, Volver)
+                   está siempre en la franja de abajo de la ventana —abajo de `lg` porque es
+                   `sticky`; desde `lg`, a pantalla completa (26/09/2026), porque es la
+                   última fila de un marco que mide exacto el alto de la ventana— y la
+                   barra, que es `fixed`, le caía justo encima y tapaba "Planificar". Y con
+                   `max-w`/`flex-wrap` no se sale de una pantalla angosta, donde los tres
+                   textos más los dos botones no entran. */
                 <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 flex flex-wrap justify-center items-center gap-2 max-w-[calc(100vw-2rem)] bg-white border border-amber-300 shadow-lg rounded-full pl-4 pr-2 py-2">
                     <span className="text-xs font-medium text-gray-700">
                         {Object.keys(pendingRes).length} proceso{Object.keys(pendingRes).length === 1 ? "" : "s"} con cambios sin guardar

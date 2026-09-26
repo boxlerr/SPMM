@@ -551,8 +551,18 @@ export function PlanningSelectionScreen({
     }
 
     return (
+        /* `pantallaCompleta`: el mismo formato que la vista previa, que es el paso que
+           sigue. Julián, 26/09/2026: «podrias reacomodar toda la seccion visualmente y
+           que deje de ser un modal y aprovechar correctamente todo el espacio de la
+           pantalla? me incomodo scrollear y que se mueva todo tipo modal flotante».
+           Si sólo la vista previa pasaba a pantalla completa, «Volver a elegir OTs»
+           caía otra vez en la tarjeta flotante con margen gris: dos formatos para un
+           mismo flujo. Desde `lg` la cabecera y el pie quedan quietos y lo que corre
+           es la lista (ver el contenedor del cuerpo, abajo); más angosto, igual que
+           siempre. */
         <PantallaPlanificador
             visible={isOpen}
+            pantallaCompleta
             cabecera={
                 <>
                     {/* `px-3` en el teléfono y `px-6` desde `sm` (RF-27): los 24px de cada
@@ -560,9 +570,16 @@ export function PlanningSelectionScreen({
                         en los filtros y en el pie.
                         `pr-14` abajo de `lg`: la campana de avisos flota arriba a la derecha
                         y, con la cabecera en dos renglones, se sentaba encima del «Paso 1
-                        de 2». Desde `lg` los botones bajan a su renglón y la esquina queda
-                        libre, como siempre. */}
-                    <div className="px-3 sm:px-6 pr-14 sm:pr-14 lg:pr-6 pt-2 pb-2 flex items-center justify-between gap-x-4 gap-y-1 flex-wrap">
+                        de 2».
+                        `lg:pr-16` desde `lg`, el mismo que usa la vista previa. Acá decía
+                        `lg:pr-6` con la idea de que en `lg` los botones bajaban de renglón
+                        y la esquina quedaba libre, pero sin OT tildadas la barra entra en
+                        un renglón y la X de cerrar termina justo en esa esquina: la
+                        campana (fija a 16px del borde, 44px de ancho) ya le tapaba 11
+                        de sus 32px, lo mismo que se midió en la vista previa. A pantalla
+                        completa la pantalla llega al borde de la ventana, sin los 24px
+                        del layout, y la X habría quedado entera debajo de la campana. */}
+                    <div className="px-3 sm:px-6 pr-14 sm:pr-14 lg:pr-16 pt-2 pb-2 flex items-center justify-between gap-x-4 gap-y-1 flex-wrap">
                         <div className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                             <h1 className="text-xl font-bold text-gray-900 flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-1 min-w-0 sm:shrink-0">
                                 <ListChecks className="w-5 h-5 text-blue-600 shrink-0" />
@@ -891,16 +908,35 @@ export function PlanningSelectionScreen({
             }
         >
             {/* Content Area */}
-            <div className="flex-1 min-w-0 bg-gray-50 flex flex-col">
-                    <div className="flex-1 p-2 flex flex-col gap-3">
+            {/* Desde `lg` ESTE es el que scrollea, no la página. A pantalla completa el
+                marco mide exacto el alto de la ventana y le da al cuerpo lo que sobra
+                entre la cabecera y el pie; si esto no tuviera alto propio y scroll, la
+                lista se saldría por abajo del pie. `lg:h-full` toma ese alto y
+                `lg:overflow-auto` hace correr la lista adentro, con los filtros y
+                «Planificar» quietos. Abajo de `lg` no tiene ni alto ni scroll: la
+                página scrollea como siempre (RF-27).
+                Ir a la vista previa y «Volver» no pierde por dónde ibas: esta pantalla
+                queda montada con `display:none` y el navegador le guarda el scroll a lo
+                que se esconde así (medido en Chrome, 26/09/2026: 1234px antes de
+                esconder, 1234 al volver a mostrar). */}
+            <div className="flex-1 min-w-0 bg-gray-50 flex flex-col lg:h-full lg:overflow-auto">
+                    {/* `lg:p-0`: a pantalla completa la lista va de borde a borde, como la de
+                        la vista previa. El `p-2` gris más el borde de la tarjeta blanca eran
+                        un marco adentro de otro (la tabla ya trae su propia tarjeta) y le
+                        comían 16px de ancho y 16 de alto a la lista; con la pantalla sin
+                        borde ni sombra, ese marco ya no enmarca nada. Abajo de `lg` queda
+                        como estaba. */}
+                    <div className="flex-1 p-2 lg:p-0 flex flex-col gap-3 lg:gap-0">
                         {/* El umbral estaba en 30 y saltaba en la semana normal del taller
                             —Lucas planifica 35 a 40 OTs de una— recomendando justo lo
                             contrario de lo que hay que hacer: partir el lote hace que el
                             segundo cálculo no vea las máquinas que reservó el primero y
                             salgan dos planes que se pisan. Ahora avisa recién a las 50, y
-                            avisa de lo único cierto: que va a tardar. */}
+                            avisa de lo único cierto: que va a tardar.
+                            `lg:m-2`: sin el `p-2` del contenedor en `lg`, el cartel se
+                            pegaría a los bordes; el margen le devuelve el aire que tenía. */}
                         {selectedIds.length > 50 && (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-5 flex gap-4 items-start shrink-0 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-5 lg:m-2 flex gap-4 items-start shrink-0 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
                                 <div className="bg-amber-100 p-2 rounded-full shrink-0">
                                     <AlertTriangle className="w-6 h-6 text-amber-600" />
                                 </div>
@@ -918,9 +954,13 @@ export function PlanningSelectionScreen({
                             </div>
                         )}
                         {/* Sin `absolute inset-0 overflow-auto`: la tarjeta crece con la
-                            lista y el scroll es el de la página, uno solo. Antes eran tres
-                            scrolls metidos uno adentro del otro. */}
-                        <div className="bg-white border rounded-lg shadow-sm flex-1">
+                            lista y hay un solo scroll vertical. Antes eran tres scrolls
+                            metidos uno adentro del otro. Abajo de `lg` ese scroll es el de
+                            la página; desde `lg`, el del contenedor de arriba — sigue
+                            siendo uno solo, sólo que ya no arrastra la cabecera ni el pie.
+                            Desde `lg`, sin borde, redondeo ni sombra: es la tabla de
+                            borde a borde (ver el `lg:p-0` de arriba). */}
+                        <div className="bg-white border rounded-lg shadow-sm flex-1 lg:border-0 lg:rounded-none lg:shadow-none">
                             <div>
                                 <PlanningListTable
                                     tableZoom={zoom}

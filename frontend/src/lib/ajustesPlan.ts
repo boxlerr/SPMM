@@ -35,7 +35,9 @@
  *
  * `suma` y `tenia` vienen con los NOMBRES de los rangos, no con ids: son lo que se
  * muestra antes de aplicar, porque un conjunto final no se puede leer —no dice si
- * agrega uno o tres—. `rangos` sí es el conjunto final, que es lo que se manda.
+ * agrega uno o tres—. `rangos` sí es el conjunto final, que es lo que viaja a
+ * `/planificar`. A Recursos, desde el 26/09/2026, va lo que la cosa tiene HOY más
+ * `suma_ids` cuando viene (ver `guardarAccionEnRecursos` en el panel de avisos).
  *
  * Tiene nombre propio (y no queda escrito adentro de la acción) porque el fallback de
  * `objetivosDe` arma uno a mano: sin un tipo común, TypeScript ve dos arrays distintos
@@ -49,8 +51,11 @@ export type ObjetivoDeAccion = {
     tenia?: string[];
     /**
      * Lo mismo que `suma`, en ids: lo que el aviso le AGREGA a este objetivo. Es lo que
-     * viaja en el link «Ir a arreglarlo» (ver `lib/avisoEnRecursos`). Los avisos
-     * calculados antes del 23/09/2026 no lo traen.
+     * viaja en el link «Ir a arreglarlo» (ver `lib/avisoEnRecursos`), y desde el
+     * 26/09/2026 lo que se le SUMA a lo que Recursos tiene hoy al guardar desde el panel
+     * de avisos: el conjunto final se arma al calcular y, mandado tal cual, borraba lo que
+     * se hubiera cargado después. Los avisos calculados antes del 23/09/2026 no lo traen,
+     * y sin esto un ajuste no se guarda desde la tarjeta de ajustes.
      */
     suma_ids?: number[];
 };
@@ -62,8 +67,9 @@ export type ObjetivoDeAccion = {
  * la re-exporta, para que no haya dos definiciones que se puedan ir separando.
  *
  * `rangos` es el conjunto FINAL (los que ya tenía más los nuevos), no un agregado:
- * así lo manda el backend y así lo esperan tanto los endpoints de Recursos como el
- * `ajustes_del_plan` de `/planificar`.
+ * así lo manda el backend y así lo espera el `ajustes_del_plan` de `/planificar`. Los
+ * endpoints de Recursos también reemplazan, pero a ésos ya no va `rangos` tal cual
+ * cuando la acción trae `suma_ids` (ver `ObjetivoDeAccion`).
  */
 export type AccionDeSolucion = {
     tipo: "proceso" | "maquinaria" | "skill_nativa";

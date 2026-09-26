@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ZoomIn, ZoomOut } from "lucide-react";
+import { Minus, Plus, ZoomIn, ZoomOut } from "lucide-react";
 
 /**
  * Control de zoom estilo Word/Excel reutilizable.
  *
  * Cómo funciona:
  *  - Renderiza un slider (50% → 150%, step 10) con botones -, + y un display %.
+ *    Con `compacto`, sólo los botones y el % (sin slider).
  *  - El valor se persiste en localStorage bajo `storageKey` (default 'plan_zoom').
  *  - El componente NO aplica el zoom por sí mismo: emite el valor por `onChange`
  *    (y queda guardado en localStorage). Quien lo usa decide a qué wrapper se lo
@@ -28,6 +29,14 @@ interface ZoomControlProps {
   max?: number;
   step?: number;
   className?: string;
+  /**
+   * Sólo «− 100% +», sin el deslizador. Para las cabeceras que ya van llenas de
+   * botones (la vista previa del plan): el deslizador son ~120px que en una barra
+   * de acciones de una sola fila deciden si todo entra o si baja un renglón, y
+   * el zoom se toca poco — una vez por pantalla, y de a un paso. Por defecto
+   * sigue siendo el de siempre para las demás pantallas.
+   */
+  compacto?: boolean;
 }
 
 export function ZoomControl({
@@ -37,8 +46,48 @@ export function ZoomControl({
   max = 150,
   step = 10,
   className = "",
+  compacto = false,
 }: ZoomControlProps) {
   const clamp = (n: number) => Math.min(max, Math.max(min, n));
+  if (compacto) {
+    // Mide lo mismo que un botón `size="sm"` (h-8) para que la barra de acciones
+    // quede pareja, y el porcentaje va en el medio —como en Word/Excel— porque
+    // entre los dos botones se lee como «esto es lo que cambian».
+    return (
+      <div
+        className={`flex h-8 items-center gap-0.5 bg-white border border-gray-200 rounded-md px-1 shadow-sm ${className}`}
+        title="Zoom de la vista"
+      >
+        <button
+          type="button"
+          onClick={() => onChange(clamp(value - step))}
+          disabled={value <= min}
+          className="h-6 w-6 flex items-center justify-center rounded text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label="Reducir zoom"
+        >
+          <Minus className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(100)}
+          className="text-[11px] font-medium text-gray-700 hover:text-red-600 hover:underline w-9 text-center tabular-nums"
+          title="Restablecer al 100%"
+          aria-label={`Zoom ${value}%. Restablecer al 100%`}
+        >
+          {value}%
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(clamp(value + step))}
+          disabled={value >= max}
+          className="h-6 w-6 flex items-center justify-center rounded text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label="Aumentar zoom"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    );
+  }
   return (
     <div
       className={`flex items-center gap-1 bg-white border border-gray-200 rounded-md px-1.5 py-1 shadow-sm ${className}`}

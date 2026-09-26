@@ -12,12 +12,12 @@ import {
     Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw,
     ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
     HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
-    Columns3, Layers, ListFilter, ListChecks, LogOut, Printer, ArrowLeft, Pencil} from "lucide-react";
+    Columns3, Layers, ListFilter, ListChecks, LogOut, Printer, ArrowLeft, Pencil, Loader2} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipPortal, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
@@ -33,7 +33,8 @@ import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/Diagno
 import { PanelCargaRecursoHumano } from "@/components/planning/PanelCargaRecursoHumano";
 import { unificarPreparaciones } from "@/lib/unificarAvisos";
 import { huellaRecursos } from "@/lib/huellaRecursos";
-import type { TandaManual } from "@/lib/borradorPlan";
+import { antiguedadTexto, type TandaManual } from "@/lib/borradorPlan";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
     payloadDeAjustes, descripcionDeAccion, claveDeAjuste, objetivosDeAjuste,
     ajustesParaElProximo, ajustesDelPlanMostrado, estadoDeAjuste,
@@ -372,7 +373,7 @@ export function PlanningPreviewScreen({
      *
      * El `useMemo` no es optimización: el panel limpia la confirmación de «Guardar en
      * Recursos» cada vez que cambia la identidad de la lista, y sin memo la lista es
-     * nueva en cada render y el botón nunca pasa de «Mirá y confirmá».
+     * nueva en cada render: el cartel se cerraría solo y nunca se llegaría al «Sí».
      */
     const diagnosticos = React.useMemo(() => unificarPreparaciones(diagnosticosCrudos), [diagnosticosCrudos]);
 
@@ -1059,23 +1060,42 @@ export function PlanningPreviewScreen({
      * NO recalcula (25/09/2026): queda «por agregar» y entra en el próximo recálculo,
      * que se pide una sola vez con el botón del pie cuando se terminó de revisar.
      */
+    /**
+     * El guardado en Recursos (todavía sin recalcular) que un ajuste pisaría, si hay uno.
+     *
+     * Sobre algo que se acaba de guardar en Recursos y todavía no se recalculó, el ajuste
+     * REEMPLAZA en memoria el conjunto de la base: el plan saldría sin lo recién
+     * guardado, y la tanda de la tarjeta de ajustes lo podía volver a mandar a Recursos
+     * después del recálculo. La regla es una sola —nada vuelve a entrar al plan sobre algo
+     * guardado y sin recalcular— y vale para las tres puertas: un ajuste nuevo, volver a
+     * poner uno que se estaba sacando y el «Dejarlo» de la tarjeta (26/09/2026: esas dos
+     * últimas no la tenían). El panel ya deja los botones apagados con el motivo; esto es
+     * la red por si llega igual.
+     */
+    const guardadoQuePisa = (accion: AccionDeSolucion) => {
+        const tocados = new Set(objetivosDeAjuste(accion));
+        return guardadosSinRecalcular.find(g => objetivosDeAjuste(g.accion).some(o => tocados.has(o)));
+    };
+
     const aplicarAjusteDelPlan = (ajuste: AjusteDelPlan) => {
         const existente = ajustesDelPlan.find(a => a.clave === ajuste.clave);
         if (existente) {
-            // Se estaba sacando y se vuelve a poner: queda como estaba, calculado.
+            // Se estaba sacando y se vuelve a poner: queda como estaba, calculado. Con la
+            // misma red que uno nuevo (ver `guardadoQuePisa`): el que se estaba sacando
+            // puede estar saliendo justamente porque se guardó algo encima.
             if (estadoDeAjuste(existente) === "por-quitar") {
+                const pisa = guardadoQuePisa(existente.accion);
+                if (pisa) {
+                    toast.error(`Ya guardaste un cambio en ${pisa.accion.nombre}: recalculá primero`);
+                    return;
+                }
                 setAjustesDelPlan(ajustesDelPlan.map(a => a.clave === ajuste.clave ? { ...a, estado: "calculado" } : a));
             }
             // Dos veces el mismo ajuste no suma nada —los rangos son un conjunto final,
             // no una suma— y dejaría dos líneas iguales en la tira.
             return;
         }
-        // Sobre algo que se acaba de guardar en Recursos y todavía no se recalculó, el
-        // ajuste REEMPLAZA en memoria el conjunto de la base: el plan saldría sin lo
-        // recién guardado. El panel ya deja el botón apagado con el motivo; esto es la
-        // red por si llega igual.
-        const tocados = new Set(objetivosDeAjuste(ajuste.accion));
-        const pisa = guardadosSinRecalcular.find(g => objetivosDeAjuste(g.accion).some(o => tocados.has(o)));
+        const pisa = guardadoQuePisa(ajuste.accion);
         if (pisa) {
             toast.error(`Ya guardaste un cambio en ${pisa.accion.nombre}: recalculá primero`);
             return;
@@ -1128,6 +1148,18 @@ export function PlanningPreviewScreen({
             setAjustesDelPlan(ajustesDelPlan.filter(x => x.clave !== clave));
             return;
         }
+        // «Dejarlo» (de por-quitar a calculado) vuelve a meter al plan un conjunto armado
+        // antes; sobre algo guardado y sin recalcular, no (ver `guardadoQuePisa`). Hasta
+        // el 26/09/2026 pasaba: después del recálculo ese ajuste viejo entraba en la tanda
+        // de la tarjeta y su PUT borraba en producción lo recién guardado. Deshacer y
+        // desmarcar quedan libres: sacan, no ponen.
+        if (estado === "por-quitar") {
+            const pisa = guardadoQuePisa(a.accion);
+            if (pisa) {
+                toast.error(`Ya guardaste un cambio en ${pisa.accion.nombre}: recalculá primero`);
+                return;
+            }
+        }
         setAjustesDelPlan(ajustesDelPlan.map(x => x.clave === clave
             ? { ...x, estado: estado === "por-quitar" ? "calculado" : "por-quitar" }
             : x));
@@ -1146,25 +1178,68 @@ export function PlanningPreviewScreen({
      *
      * `accion` es opcional porque el panel puede no mandarla (versión anterior del
      * componente): sin ella no hay forma de saber qué se tocó.
+     *
+     * Con updater (26/09/2026): el «Guardar en Recursos» de la tarjeta de ajustes avisa
+     * todos sus guardados seguidos, sin un render en el medio, y con la lista del render
+     * cada llamada partía de la misma lista vieja y deshacía la anterior. La cuenta y el
+     * toast van AFUERA del updater, con la lista de este render: un updater tiene que ser
+     * puro (React lo puede correr dos veces) y no puede tirar toasts.
+     *
+     * `avisar` en falso es la tanda: su toast ya cuenta lo guardado y lo dado de baja, y
+     * con uno por ajuste quedaban N+1 carteles apilados. Lo dado de baja de rebote lo
+     * cuenta el panel de su lado, con la tanda entera a la vista: sumado de a una llamada,
+     * dos ajustes de la tanda sobre la misma máquina se contarían uno al otro.
+     *
+     * `conservar` son claves de ajustes que NO se dan de baja aunque toquen lo mismo
+     * (26/09/2026): los que quedaron a medias al guardar. Lo que les falló no está en
+     * Recursos, y si se daban de baja esa máquina se quedaba sin el dato en los dos lados
+     * —ni en Recursos ni en el plan— con la tarjeta diciendo que estaba guardado. Se
+     * quedan como estaban y se vuelven a guardar; su conjunto congelado puede pisar en
+     * memoria lo recién guardado en una máquina compartida, pero eso es sólo el plan, no
+     * Recursos (ver `guardarAjustesEnRecursos` en el panel).
      */
-    const olvidarAjustesPisadosPor = (accion?: AccionDeSolucion) => {
+    const olvidarAjustesPisadosPor = (accion?: AccionDeSolucion, avisar = true, conservar: readonly string[] = []) => {
         if (!accion) return;
         const tocados = new Set(objetivosDeAjuste(accion));
+        const quedan = new Set(conservar);
         const pisa = (a: AjusteDelPlan) =>
-            estadoDeAjuste(a) !== "por-quitar" && objetivosDeAjuste(a.accion).some(o => tocados.has(o));
-        const sacados = ajustesDelPlan.filter(pisa).length;
-        if (sacados === 0) return;
-        setAjustesDelPlan(ajustesDelPlan
+            !quedan.has(a.clave)
+            && estadoDeAjuste(a) !== "por-quitar"
+            && objetivosDeAjuste(a.accion).some(o => tocados.has(o));
+        const afectados = ajustesDelPlan.filter(pisa);
+        setAjustesDelPlan(prev => prev
             .filter(a => !(pisa(a) && estadoDeAjuste(a) === "por-agregar"))
             .map(a => pisa(a) ? { ...a, estado: "por-quitar" as const } : a));
-        toast.info("Se da de baja el ajuste temporal", {
-            description: `Lo acabás de dejar cargado en Recursos, así que ${sacados === 1 ? "el ajuste que tenías" : `los ${sacados} ajustes que tenías`} sobre eso ${sacados === 1 ? "sale" : "salen"} al recalcular: si ${sacados === 1 ? "se quedaba" : "se quedaban"}, el próximo cálculo te pisaba lo que guardaste.`,
-        });
+        if (avisar && afectados.length > 0) {
+            // Según en qué estaba cada uno: el recién marcado se desmarca en el acto (nunca
+            // entró al plan) y el que ya estaba en el plan sale al recalcular. Antes decía
+            // «sale al recalcular» para los dos, y el recién marcado ya no estaba.
+            const desmarcados = afectados.filter(a => estadoDeAjuste(a) === "por-agregar").length;
+            const salen = afectados.length - desmarcados;
+            const partes = [
+                salen > 0 && (salen === 1
+                    ? "el ajuste temporal que tenías sobre eso sale al recalcular"
+                    : `los ${salen} ajustes temporales que tenías sobre eso salen al recalcular`),
+                desmarcados > 0 && (desmarcados === 1
+                    ? "el que habías marcado sin recalcular ya se desmarcó"
+                    : `los ${desmarcados} que habías marcado sin recalcular ya se desmarcaron`),
+            ].filter(Boolean).join(", y ");
+            toast.info(afectados.length === 1 ? "Se da de baja el ajuste temporal" : "Se dan de baja los ajustes temporales", {
+                description: `Lo acabás de dejar cargado en Recursos, así que ${partes}: si ${afectados.length === 1 ? "se quedaba" : "se quedaban"}, el próximo cálculo te pisaba lo que guardaste.`,
+            });
+        }
     };
 
-    /** «Guardar en Recursos» del panel: anota el cambio para el próximo recálculo. */
-    const anotarGuardado = (accion?: AccionDeSolucion, titulo?: string) => {
-        olvidarAjustesPisadosPor(accion);
+    /**
+     * «Guardar en Recursos» del panel: anota el cambio para el próximo recálculo.
+     *
+     * `enLote` es el guardado de la tarjeta de ajustes, que tira su propio toast (ver
+     * `olvidarAjustesPisadosPor`); el botón de un aviso no lo manda y sigue avisando acá,
+     * porque ahí el usuario puede no saber que tenía un ajuste encima. `conservar` son los
+     * ajustes que quedaron a medias y no se dan de baja (ídem).
+     */
+    const anotarGuardado = (accion?: AccionDeSolucion, titulo?: string, opciones?: { enLote?: boolean; conservar?: string[] }) => {
+        olvidarAjustesPisadosPor(accion, !opciones?.enLote, opciones?.conservar);
         if (!accion) return;
         idGuardado.current += 1;
         const nuevo: GuardadoSinRecalcular = {
@@ -2021,8 +2096,8 @@ export function PlanningPreviewScreen({
     >(null);
     const revisionEnCurso = React.useRef(false);
 
-    // Cada plan nuevo (o recalculado) limpia el estado del cartel: la foto que se
-    // está mirando pasó a ser la de recién.
+    // Cada plan nuevo (o recalculado) limpia el estado del renglón de la revisión
+    // (`RenglonDeLaRevision`): la foto que se está mirando pasó a ser la de recién.
     //
     // Con las marcas de procesos editados pasa lo mismo, y por eso se limpian acá: el
     // cálculo que acaba de volver ya salió con los minutos, el orden y los pasos nuevos
@@ -2067,7 +2142,9 @@ export function PlanningPreviewScreen({
         if (ahora === null) { setRevisionAuto("no-disponible"); return; }
         if (ahora === huellaAlCalcular) { setRevisionAuto(null); return; }
 
-        // Nunca recalcula solo: queda como un pendiente más, en la franja y en el pie.
+        // Nunca recalcula solo: queda como un pendiente más. Lo dice el renglón gris de la
+        // cabecera (`RenglonDeLaRevision`) y lo cuenta el botón naranja del pie (salvo que
+        // ya haya un guardado en Recursos que lo explique: ver `pendientes`).
         setRevisionAuto("cambios-en-recursos");
     };
 
@@ -2383,10 +2460,17 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
      */
     const pendientes = React.useMemo(() => {
         const lista: { clave: string; texto: string }[] = [];
+        // Un ajuste que sale porque se guardó ÉL en Recursos ya lo cuenta su renglón
+        // «Guardado en Recursos» (26/09/2026): es la misma identidad que `yaGuardado` en el
+        // panel. Con la tanda de la tarjeta de ajustes cada guardado contaba doble, y uno
+        // de los dos decía «Se saca de este plan» sobre lo que la tarjeta mostraba en
+        // verde. Los que salen porque otro guardado les pisó la máquina, o porque alguien
+        // los sacó, se siguen contando: en la tarjeta son los tachados.
+        const guardadas = new Set(guardadosSinRecalcular.map(g => claveDeAjuste(g.accion)));
         for (const a of ajustesDelPlan) {
             const estado = estadoDeAjuste(a);
             if (estado === "por-agregar") lista.push({ clave: `a-${a.clave}`, texto: `Solo en este plan: ${a.descripcion || a.titulo}` });
-            if (estado === "por-quitar") lista.push({ clave: `q-${a.clave}`, texto: `Se saca de este plan: ${a.descripcion || a.titulo}` });
+            if (estado === "por-quitar" && !guardadas.has(a.clave)) lista.push({ clave: `q-${a.clave}`, texto: `Se saca de este plan: ${a.descripcion || a.titulo}` });
         }
         for (const g of guardadosSinRecalcular) {
             lista.push({ clave: `g-${g.id}`, texto: `Guardado en Recursos: ${g.descripcion || g.titulo}` });
@@ -2768,45 +2852,102 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
      *  Despliega ANTES de scrollear: llevar a un panel plegado sería mandar a la
      *  nada, el consejo muerto de siempre. El rAF espera al re-render para que el
      *  scroll apunte al panel ya abierto. */
+    //
+    // Desde `lg` la pantalla ocupa la ventana y lo que scrollea es la columna de la
+    // lista, no la página (26/09/2026). `scrollIntoView` mueve el contenedor de scroll
+    // más cercano, así que sigue andando igual sin tocar nada acá: lo único que
+    // cambia es el margen de arriba (`scroll-mt` del contenedor del panel), que ya no
+    // tiene que esquivar una cabecera pegada encima de la lista.
     const panelAvisos = React.useRef<HTMLDivElement | null>(null);
     const irAAvisos = () => {
         setAvisosColapsados(false);
         requestAnimationFrame(() => panelAvisos.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
     };
 
+    /**
+     * La pastilla «Ajustes del plan» de la cabecera (mockup de Julián, 26/09/2026):
+     * lleva a la tarjeta de los ajustes que valen sólo para este plan. Misma receta
+     * que `irAAvisos`: primero se despliega el panel —la tarjeta vive adentro y
+     * plegado no está—, y en el cuadro siguiente, con el panel ya dibujado, se trae.
+     * El id lo pone `DiagnosticosPlan` en la tarjeta; si no está (no hay ajustes o el
+     * panel cambió), el click sólo despliega, que igual deja los ajustes a la vista.
+     */
+    const irAAjustes = () => {
+        setAvisosColapsados(false);
+        requestAnimationFrame(() => document.getElementById("ajustes-del-plan")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    };
+
+    /** Los avisos que todavía nadie marcó como listos: el número de la pastilla
+     *  ámbar de la cabecera. Los marcados a mano ya se miraron; contarlos sería
+     *  volver a llamar la atención sobre algo resuelto. */
+    const avisosSinMarcar = React.useMemo(
+        () => diagnosticos.filter(d => !avisosMarcados.has(d.id)).length,
+        [diagnosticos, avisosMarcados]
+    );
+
+    /**
+     * Quién scrollea de costado, para el Ctrl+rueda de LayoutWrapper (busca el
+     * `.scrollbar-horizontal-visible` más cercano y le mueve el `scrollLeft`).
+     * Abajo de `lg` es el contenedor de la tabla, como siempre. Desde `lg` es la
+     * columna entera de la lista: la tabla ya no tiene scroll propio (ver el
+     * contenedor de la tabla), y si la marca quedara en ella el Ctrl+rueda le movería
+     * el `scrollLeft` a algo que no scrollea — no haría nada. `useIsMobile` corta en
+     * 1024, que es exactamente `lg`.
+     */
+    const { isMobile: sinColumnasFijas } = useIsMobile();
+
     return (
         <>
+        {/* Pantalla completa desde `lg` (26/09/2026): «que deje de ser un modal y
+            aprovechar correctamente todo el espacio de la pantalla… me incomodó
+            scrollear y que se mueva todo tipo modal flotante» (Julián). Cabecera y pie
+            quietos, la lista con su scroll y el panel de carga con el suyo. Ver
+            PantallaPlanificador. */}
         <PantallaPlanificador
             visible={isOpen}
+            pantallaCompleta
             cabecera={
                 <>
-                    {/* Una sola línea. El alto de esta fila ya lo fija el h-8 de los
-                        botones de la derecha, así que el título se achica gratis:
-                        text-xl (28px de línea) → text-[17px] (24px) no cambia nada de
-                        lo que se ve y el `items-center` deja de reservar alto para una
-                        bajada que ya no existe. */}
+                    {/* Dos renglones, como el mockup de Julián (26/09/2026): arriba el título
+                        y las acciones en una sola fila —el alto lo fija el h-8 de los
+                        botones, así que el título en 17px no suma nada—, y abajo un renglón
+                        gris que dice en qué anda la revisión. Ese renglón lo dibujaba el
+                        panel de avisos adentro de la lista, donde se iba con el scroll y le
+                        comía alto; acá está siempre a la vista y mide 18px. Va debajo de
+                        TODA la fila y no sólo del título: así tiene el ancho entero. Aun así la
+                        frase sólo entra entera en 1440 con el menú plegado: desde `lg` se corta
+                        con «…» (el resto en el `title`) y abajo de `lg` envuelve, ver
+                        `RenglonDeLaRevision`. */}
                     {/* Las acciones bajan a un segundo renglón cuando no entran al lado del
                         título, y adentro de ese renglón van de a varias filas si hace falta
-                        (RF-27). Por ANCHO y no por breakpoint: Hoja del pañol, Agregar OTs,
-                        el zoom, Volver y Salir piden ~780px, y en 1024 con el menú
-                        abierto hay ~620 — la fila fija se salía de la tarjeta y la página
-                        entera scrolleaba de costado (en el teléfono, con Salir afuera).
-                        Donde entran (una pantalla ancha) es la misma fila de siempre.
+                        (RF-27). Por ANCHO y no por breakpoint: Exportar, Hoja del pañol, las
+                        dos pastillas, Agregar OTs, el zoom y Salir piden ~800px, y en 1024
+                        con el menú abierto hay ~620 — una fila fija se salía de la pantalla
+                        y la página entera scrolleaba de costado (en el teléfono, con Salir
+                        afuera). Donde entran (1440 con el menú plegado) es una sola fila.
                         La campana de avisos flota arriba a la derecha: abajo de `lg` le
                         deja lugar el `pr-11` del título; desde `lg`, el `lg:pr-16` de acá,
                         porque ahí la que queda en esa esquina es el último botón de la
                         barra (hoy «Salir») y la campana le tapaba un tercio (medido en
-                        1440, con la X que había antes: 11px de 32). */}
-                    <div className="px-3 sm:px-6 lg:pr-16 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                        1440, con la X que había antes: 11px de 32). Vale para los dos
+                        renglones: la campana baja hasta los 60px de arriba. */}
+                    <div className="px-3 sm:px-6 lg:pr-16 pt-2 pb-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                         {/* El título nunca baja de 12rem: es lo que decide si las acciones
                             le entran al lado o se van al renglón de abajo. Con `min-w-0`
                             solo, las acciones se quedaban en la fila y el título quedaba
-                            aplastado a cero. */}
-                        <div className="min-w-[12rem] grow basis-0 pr-11 lg:pr-0">
+                            aplastado a cero.
+                            Desde `lg`, además, no se corta nunca (`lg:min-w-max`): el 26/09,
+                            en 1440, se leía «Vista previa de planifica…» y el mockup lo pide
+                            entero. En la computadora es preferible que las acciones bajen
+                            prolijas al renglón de abajo antes que mochar el título; en 1440
+                            con el menú plegado entran las dos cosas en la misma fila. */}
+                        <div className="min-w-[12rem] grow basis-0 pr-11 lg:pr-0 lg:min-w-max">
                             {/* `min-w-0 overflow-hidden` en vez de `whitespace-nowrap` a secas:
                                 con el título entero sin poder achicarse, en 1024 empujaba a
                                 los botones de la derecha fuera de la tarjeta. Ahora el que
-                                cede es el texto y "Salir" queda siempre alcanzable. */}
+                                cede es el texto y "Salir" queda siempre alcanzable (abajo de
+                                `lg`; desde `lg` ceden las acciones, ver arriba). */}
                             <h1 className="text-[17px] font-bold text-gray-900 flex items-center gap-2 min-w-0 overflow-hidden">
                                 <CalendarClock className="w-4 h-4 text-blue-600 shrink-0" />
                                 <span className="truncate">Vista previa de planificación</span>
@@ -2817,9 +2958,127 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     En revisión
                                 </span>
                             </h1>
-
                         </div>
+                        {/* El orden es el del mockup: primero lo que sale del plan (Exportar,
+                            Hoja del pañol), después los dos atajos a lo que hay que revisar,
+                            después lo que aparece a veces (lo que quedó afuera, lo agregado
+                            a mano), Agregar OTs, el zoom y Salir, que es la esquina. */}
                         <div className="flex flex-wrap items-center gap-2 max-w-full">
+                            {/* RF-22: el plan que se está mirando —con los retoques a mano y
+                                los filtros de la tabla—, un renglón por proceso. Todavía no
+                                está confirmado, y el archivo lo dice. */}
+                            {results.length > 0 && (() => {
+                                const nombreOperario = (i: PlanificacionResult) => {
+                                    if (i.tercerizado) return "Tercerizado";
+                                    const op = availableOperators.find((o: any) => o.id === i.id_operario);
+                                    return op ? `${op.nombre ?? ""} ${op.apellido ?? ""}`.trim() : (i.operario_nombre || "Sin asignar");
+                                };
+                                const nombreMaquina = (i: PlanificacionResult) => {
+                                    if (i.tercerizado) return "Tercerizado";
+                                    const m = availableMachines.find((x: any) => x.id === i.id_maquinaria);
+                                    if (m) return m.nombre;
+                                    if (i.maquinaria_nombre) return i.maquinaria_nombre;
+                                    return i.usa_maquina === false ? "No necesita" : "Sin asignar";
+                                };
+                                const columnas: ColumnaExport<PlanificacionResult>[] = [
+                                    { titulo: "OT", tipo: "id", valor: (i) => i.id_otvieja ?? i.orden_id },
+                                    { titulo: "Cliente", valor: (i) => i.cliente ?? "" },
+                                    { titulo: "Código", valor: (i) => i.codigo ?? "" },
+                                    { titulo: "Artículo", valor: (i) => i.articulo ?? "" },
+                                    { titulo: "Proceso", valor: (i) => i.nombre_proceso },
+                                    { titulo: "Inicio", tipo: "fechaHora", valor: (i) => i.fecha_inicio_estimada },
+                                    { titulo: "Fin", tipo: "fechaHora", valor: (i) => i.fecha_fin_estimada },
+                                    { titulo: "Minutos", tipo: "entero", valor: (i) => i.duracion_min },
+                                    { titulo: "Recurso humano", valor: nombreOperario },
+                                    { titulo: "Recurso maquinaria", valor: nombreMaquina },
+                                    { titulo: "Prometida", tipo: "fecha", valor: (i) => i.fecha_prometida },
+                                    {
+                                        titulo: "Termina tarde",
+                                        tipo: "booleano",
+                                        // La misma cuenta que la alerta de la fila: terminar el día prometido no es tarde.
+                                        valor: (i) => diasDeAtraso(i.fecha_fin_estimada, i.fecha_prometida) > 0,
+                                    },
+                                ];
+                                // En el mismo orden que la tabla: se exporta lo que se está mirando.
+                                const filas = otsEnOrden.flatMap(({ items }) => items.map(i => getEffectiveItem(i)));
+                                return (
+                                    <ExportarMenu
+                                        titulo="Vista previa del plan (sin confirmar)"
+                                        archivo="plan_vista_previa"
+                                        filas={filas}
+                                        columnas={columnas}
+                                        filtros={() => [
+                                            ...filtroBusqueda(filtroTexto),
+                                            ...(filtros.atrasadas ? ["Sólo las que llegan tarde"] : []),
+                                            ...(filtros.forzadas ? ["Sólo las forzadas"] : []),
+                                            ...(filtros.sinOperario ? ["Sólo con procesos sin recurso humano"] : []),
+                                            ...(filtros.sinMaquina ? ["Sólo con procesos sin recurso maquinaria"] : []),
+                                        ]}
+                                        disabled={isCalculating}
+                                    />
+                                );
+                            })()}
+                            {/* La hoja del pañol. Va acá arriba y no en el pie porque se
+                                imprime ANTES de confirmar: el pañol prepara con el plan que
+                                se está mirando, no con uno que ya se guardó. */}
+                            {results.length > 0 && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={imprimirParaPanol}
+                                    className="h-8 gap-1.5"
+                                    title="Imprime el plan día por día, para que el pañol prepare el material"
+                                >
+                                    <Printer className="w-3.5 h-3.5" />
+                                    Hoja del pañol
+                                </Button>
+                            )}
+
+                            {/* Las dos pastillas del mockup (26/09/2026): atajos a lo que hay
+                                que mirar antes de confirmar, con el número a la vista desde la
+                                fila que nunca se va. No son acciones nuevas —«Ver detalles» del
+                                riel y la tarjeta de ajustes ya estaban—: son la forma de llegar
+                                sin ir a buscarlas.
+
+                                Ámbar: los avisos que nadie marcó como listos. Pasa a rosa si
+                                entre ellos hay una traba, que es lo único que puede cambiar la
+                                decisión de guardar (mismo rosa que la cifra de trabas). Sin
+                                avisos pendientes no aparece: un «0 avisos» sería un botón que
+                                no lleva a nada. */}
+                            {avisosSinMarcar > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={irAAvisos}
+                                    title={trabasSinResolver > 0
+                                        ? `${trabasSinResolver} ${trabasSinResolver === 1 ? "traba" : "trabas"} sin resolver. Ir a los avisos del plan`
+                                        : "Ir a los avisos del plan"}
+                                    className={cn(
+                                        "inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-3 text-xs font-semibold tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2",
+                                        trabasSinResolver > 0
+                                            ? "bg-rose-50 text-rose-700 hover:bg-rose-100 focus-visible:ring-rose-400"
+                                            : "bg-amber-50 text-amber-800 hover:bg-amber-100 focus-visible:ring-amber-400",
+                                    )}
+                                >
+                                    {avisosSinMarcar} {avisosSinMarcar === 1 ? "aviso" : "avisos"}
+                                    <ChevronRight className="h-3.5 w-3.5 opacity-70" />
+                                </button>
+                            )}
+                            {/* Índigo: los ajustes que valen sólo para este plan. El número es
+                                cuántos hay en la tarjeta —contando los que entran o salen al
+                                recalcular—, para que coincida con lo que se ve al llegar. */}
+                            {ajustesDelPlan.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={irAAjustes}
+                                    title="Ir a los ajustes que valen sólo para este plan"
+                                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-indigo-50 px-3 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                                >
+                                    Ajustes del plan
+                                    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-600 px-1 text-[10px] font-bold leading-none text-white tabular-nums">
+                                        {ajustesDelPlan.length}
+                                    </span>
+                                </button>
+                            )}
                             {/* Lo que quedó afuera, y el botón para arreglarlo, compartiendo
                                 fila con las acciones. Antes eran una TERCERA fila de chips de
                                 11px bajo el título: 30px de alto reservados siempre para dos
@@ -2979,76 +3238,6 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     )}
                                 </div>
                             )}
-                            {/* RF-22: el plan que se está mirando —con los retoques a mano y
-                                los filtros de la tabla—, un renglón por proceso. Todavía no
-                                está confirmado, y el archivo lo dice. */}
-                            {results.length > 0 && (() => {
-                                const nombreOperario = (i: PlanificacionResult) => {
-                                    if (i.tercerizado) return "Tercerizado";
-                                    const op = availableOperators.find((o: any) => o.id === i.id_operario);
-                                    return op ? `${op.nombre ?? ""} ${op.apellido ?? ""}`.trim() : (i.operario_nombre || "Sin asignar");
-                                };
-                                const nombreMaquina = (i: PlanificacionResult) => {
-                                    if (i.tercerizado) return "Tercerizado";
-                                    const m = availableMachines.find((x: any) => x.id === i.id_maquinaria);
-                                    if (m) return m.nombre;
-                                    if (i.maquinaria_nombre) return i.maquinaria_nombre;
-                                    return i.usa_maquina === false ? "No necesita" : "Sin asignar";
-                                };
-                                const columnas: ColumnaExport<PlanificacionResult>[] = [
-                                    { titulo: "OT", tipo: "id", valor: (i) => i.id_otvieja ?? i.orden_id },
-                                    { titulo: "Cliente", valor: (i) => i.cliente ?? "" },
-                                    { titulo: "Código", valor: (i) => i.codigo ?? "" },
-                                    { titulo: "Artículo", valor: (i) => i.articulo ?? "" },
-                                    { titulo: "Proceso", valor: (i) => i.nombre_proceso },
-                                    { titulo: "Inicio", tipo: "fechaHora", valor: (i) => i.fecha_inicio_estimada },
-                                    { titulo: "Fin", tipo: "fechaHora", valor: (i) => i.fecha_fin_estimada },
-                                    { titulo: "Minutos", tipo: "entero", valor: (i) => i.duracion_min },
-                                    { titulo: "Recurso humano", valor: nombreOperario },
-                                    { titulo: "Recurso maquinaria", valor: nombreMaquina },
-                                    { titulo: "Prometida", tipo: "fecha", valor: (i) => i.fecha_prometida },
-                                    {
-                                        titulo: "Termina tarde",
-                                        tipo: "booleano",
-                                        // La misma cuenta que la alerta de la fila: terminar el día prometido no es tarde.
-                                        valor: (i) => diasDeAtraso(i.fecha_fin_estimada, i.fecha_prometida) > 0,
-                                    },
-                                ];
-                                // En el mismo orden que la tabla: se exporta lo que se está mirando.
-                                const filas = otsEnOrden.flatMap(({ items }) => items.map(i => getEffectiveItem(i)));
-                                return (
-                                    <ExportarMenu
-                                        titulo="Vista previa del plan (sin confirmar)"
-                                        archivo="plan_vista_previa"
-                                        filas={filas}
-                                        columnas={columnas}
-                                        filtros={() => [
-                                            ...filtroBusqueda(filtroTexto),
-                                            ...(filtros.atrasadas ? ["Sólo las que llegan tarde"] : []),
-                                            ...(filtros.forzadas ? ["Sólo las forzadas"] : []),
-                                            ...(filtros.sinOperario ? ["Sólo con procesos sin recurso humano"] : []),
-                                            ...(filtros.sinMaquina ? ["Sólo con procesos sin recurso maquinaria"] : []),
-                                        ]}
-                                        disabled={isCalculating}
-                                    />
-                                );
-                            })()}
-                            {/* La hoja del pañol. Va acá arriba y no en el pie porque se
-                                imprime ANTES de confirmar: el pañol prepara con el plan que
-                                se está mirando, no con uno que ya se guardó. */}
-                            {results.length > 0 && (
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={imprimirParaPanol}
-                                    className="h-8 gap-1.5"
-                                    title="Imprime el plan día por día, para que el pañol prepare el material"
-                                >
-                                    <Printer className="w-3.5 h-3.5" />
-                                    Hoja del pañol
-                                </Button>
-                            )}
-
                             {/* Botón Agregar OTs (abre popover con OTs disponibles) */}
 
                             {unplannedOrders.length > 0 && onRecalculate && (
@@ -3242,27 +3431,18 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     </PopoverContent>
                                 </Popover>
                             )}
-                            <ZoomControl value={zoom} onChange={setZoom} />
+                            {/* Sin el deslizador: en esta barra son ~120px que deciden si todo
+                                entra en una fila, y el zoom se toca poco (ver `compacto`). */}
+                            <ZoomControl value={zoom} onChange={setZoom} compacto />
                             {/* Salida del planificador. Ya no cierra un modal: deja la
                                 pantalla y vuelve a Operaciones. El borrador se guarda,
                                 así que no es un "descartar" y no tiene por qué asustar. */}
-                            {/* Volver AL PASO ANTERIOR, arriba y no sólo escondido en el
-                                pie: son dos salidas distintas —una vuelve a elegir OTs y la
-                                otra se va del planificador— y tenerlas juntas es lo que hace
-                                obvio cuál es cuál. */}
-                            {onBack && (
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 gap-1.5 text-gray-500 hover:text-gray-800"
-                                    onClick={onBack}
-                                    disabled={isConfirming || isCalculating}
-                                    title="Volver al paso anterior para cambiar qué OTs entran en el plan"
-                                >
-                                    <ArrowLeft className="w-3.5 h-3.5" />
-                                    <span className="hidden sm:inline">Volver a elegir OTs</span>
-                                </Button>
-                            )}
+                            {/* «Volver a elegir OTs» ya no va acá (26/09/2026): llamaba al
+                                mismo `onBack` que el «Volver» del pie, así que eran dos botones
+                                para lo mismo —el mismo error que la X y «Salir», abajo—. Quedó
+                                uno solo, en el pie, con el nombre entero: el pie es «qué hago
+                                con este paso» (volver o confirmar) y la cabecera, «qué hago con
+                                el plan». */}
                             {/* «Salir» es la única salida. Hubo además una X de cerrar
                                 (Julián, 16/09: «falta un botón de x para cerrar»), pero
                                 hacía exactamente lo mismo que «Salir», y dos botones
@@ -3281,6 +3461,16 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 <span className="hidden sm:inline">Salir</span>
                             </Button>
                         </div>
+                    </div>
+                    {/* El renglón de la revisión. `pr-11` abajo de `lg` por la campana, como
+                        el título (desde `lg` ya la esquiva el `lg:pr-16` del contenedor). */}
+                    <RenglonDeLaRevision
+                        className="mt-0.5 pr-11 lg:pr-0"
+                        activo={isOpen}
+                        revisionAuto={revisionAuto}
+                        calculadoEn={calculadoEn}
+                        vigilaRecursos={!!onRecalculate && diagnosticos.length > 0}
+                    />
                     </div>
 
                     {/* El riel de cifras: el tamaño del plan de un vistazo.
@@ -3428,11 +3618,37 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                 </>
             }
             pie={
-                <div className="px-3 py-3 sm:px-6 sm:py-4 flex items-center justify-between gap-3">
+                /* `py-2` y no `py-3 sm:py-4` (26/09/2026): el pie no dice nada, sólo
+                   lleva botones, y los 16px que sobraban son de la lista.
+
+                   `flex-wrap` (26/09/2026): desde el 25/09, con «Recalcular» en el pie, los
+                   tres botones no entran en un renglón abajo de `lg` —en el teléfono el
+                   pie medía 441px contra 375 y la página scrolleaba de costado, con
+                   «Confirmar plan» afuera; de 640 a 820 no entra el «Volver a elegir OTs»
+                   entero al lado de los otros dos—. Ahora el pie crece un renglón (~44px)
+                   en vez de empujar la página. Desde `lg` entra siempre en uno. */
+                <div className="px-3 py-2 sm:px-6 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
                     {/* Lado izquierdo: contexto + Volver */}
                     <div className="flex items-center gap-3 text-xs text-gray-500">
-                        <Button variant="outline" onClick={onBack} disabled={isConfirming || isCalculating} title={isCalculating ? "Esperá a que termine el recálculo" : undefined} className="border-gray-300 text-gray-700 hover:bg-gray-50">
-                            Volver
+                        {/* La única vuelta al paso anterior: la de la cabecera hacía lo mismo
+                            (`onBack`) y se sacó. Por eso acá dice adónde vuelve, con todas
+                            las letras; en el teléfono no entra al lado de Confirmar y queda
+                            «Volver», que en el pie se entiende solo. */}
+                        <Button
+                            variant="outline"
+                            onClick={onBack}
+                            disabled={isConfirming || isCalculating}
+                            title={isCalculating ? "Esperá a que termine el recálculo" : "Volver al paso anterior para cambiar qué OTs entran en el plan"}
+                            aria-label="Volver a elegir OTs"
+                            className="border-gray-300 px-2.5 text-gray-700 hover:bg-gray-50 sm:px-4"
+                        >
+                            {/* En el teléfono, sólo la flecha: con «Volver» escrito, «Recalcular»
+                                y «Confirmar» el pie se partía en tres renglones y se comía
+                                ~145px de la lista (medido a 375px, 26/09/2026). La flecha a la
+                                izquierda del pie se entiende sola y el nombre queda para el
+                                lector de pantalla. */}
+                            <ArrowLeft className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                            <span className="hidden sm:inline">Volver a elegir OTs</span>
                         </Button>
                         {forzarOrdenIds.size > 0 && (
                             <span className="text-amber-700">
@@ -3443,10 +3659,18 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                     {/* Lado derecho: recalcular lo marcado (si hay) y confirmar.
                         El botón de recalcular vive acá, fijo en el pie, porque los
                         arreglos se marcan de a varios y se recalcula una sola vez
-                        (25/09/2026): tiene que estar a la vista mientras se revisa, no
-                        sólo arriba del panel. Con pendientes, Confirmar pasa a segundo
-                        plano: guardar así se puede, pero no es lo que se recomienda. */}
-                    <div className="flex items-center gap-2">
+                        (25/09/2026): tiene que estar a la vista mientras se revisa.
+                        Desde el 26/09/2026 es EL llamado a recalcular: el cartel naranja
+                        que lo repetía arriba de los avisos se sacó («ya con el botón
+                        naranja de abajo se sobreentiende», Julián). Con pendientes,
+                        Confirmar pasa a segundo plano: guardar así se puede, pero no es
+                        lo que se recomienda.
+
+                        `ml-auto`: cuando baja a su propio renglón, `justify-between` con un
+                        solo item lo dejaría a la izquierda. `flex-wrap justify-end`: en
+                        360px con 10 cambios o más, «Confirmar plan» baja abajo de
+                        «Recalcular» en vez de salirse. */}
+                    <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                     {cantidadPendientes > 0 && onRecalculate && (
                         <Button
                             onClick={() => handleRecalculate()}
@@ -3463,7 +3687,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     Recalcular con {cantidadPendientes} {cantidadPendientes === 1 ? "cambio" : "cambios"}
                                 </span>
                             </span>
-                            <span className="text-[10.5px] font-normal leading-tight text-white/85">tarda {tardaElRecalculo}</span>
+                            {/* El «tarda» sólo desde `sm`: en el teléfono el botón mide un renglón
+                                y el tiempo sigue en el `title` y en el cartel de progreso. */}
+                            <span className="hidden sm:block text-[10.5px] font-normal leading-tight text-white/85">tarda {tardaElRecalculo}</span>
                         </Button>
                     )}
                     <Button
@@ -3484,9 +3710,10 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             </span>
                         ) : (
                             // En el teléfono la frase entera (270px) no entraba al lado de
-                            // «Volver» y el botón se salía del pie. Dice lo mismo, más corto.
+                            // «Volver» y el botón se salía del pie. Dice lo mismo, más corto:
+                            // «Confirmar» a secas deja a «Recalcular (N)» en el mismo renglón.
                             <>
-                                <span className="sm:hidden">Confirmar plan</span>
+                                <span className="sm:hidden">Confirmar</span>
                                 <span className="hidden sm:inline">Confirmar y guardar planificación</span>
                             </>
                         )}
@@ -3500,17 +3727,55 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                     la mitad de los 327px y la tabla quedaba en una tira. Apilados, cada uno
                     usa el ancho entero y el panel queda después del plan, que es lo primero
                     que se revisa. `items-stretch` abajo de `lg` porque en columna el
-                    `items-start` los dejaba del ancho de su contenido. */}
-                <div className="flex flex-col lg:flex-row flex-1 min-w-0 items-stretch lg:items-start">
-                    <div className="flex-1 flex flex-col min-w-0 bg-white">
+                    `items-start` los dejaba del ancho de su contenido.
+
+                    Desde `lg` (pantalla completa, 26/09/2026) la fila mide el alto entero del
+                    cuerpo y estira a sus dos columnas: cada una scrollea la suya. Antes era
+                    `lg:items-start` porque el panel de carga iba `sticky` y tenía que poder
+                    quedarse arriba; ahora no se mueve nada que no sea la lista. */}
+                <div className="flex flex-col lg:flex-row flex-1 min-w-0 items-stretch lg:min-h-0">
+                    {/* La columna de la lista es EL contenedor de scroll desde `lg`, en los dos
+                        ejes: avisos, carteles, la barra de «OTs planificadas» y la tabla
+                        corren juntos, y la cabecera y el pie quedan quietos alrededor. Un
+                        scroll y no dos: la tabla ya no scrollea de costado por su cuenta (ver
+                        su contenedor), así que su encabezado se puede pegar arriba de esta
+                        columna al bajar, que con el scroll propio de la tabla no pasaba nunca.
+
+                        El `@container` (`container-type: inline-size`) es para que lo que tiene
+                        que quedarse quieto al scrollear de costado —avisos, carteles, la barra
+                        con Filtros y Columnas— mida exactamente lo que se ve de la columna
+                        (`100cqw`) y no lo que mide la tabla. Va en un envoltorio de adentro que
+                        NO scrollea, y no en esta columna: en Chrome el `100cqw` de un
+                        contenedor de scroll cuenta también los 12px de la barra vertical que
+                        fuerza `globals.css`, y las tiras medían 12px más de lo que se ve —una
+                        barra horizontal fija aunque la tabla entrara, la lista que se corría
+                        sola de costado y el borde derecho de los avisos abajo de la barra—. El
+                        envoltorio se estira al ancho de adentro de la columna, sin la barra.
+
+                        Abajo de `lg` no hay nada de eso: sin overflow propio, el scroll es el
+                        de la página, como siempre (RF-27). */}
+                    <div className={cn(
+                        "flex-1 flex flex-col min-w-0 bg-white lg:min-h-0 lg:overflow-auto",
+                        !sinColumnasFijas && "scrollbar-horizontal-visible",
+                    )}>
+                        {/* El que mide lo que se ve (`100cqw`): ver arriba. */}
+                        <div className="flex-1 min-w-0 lg:@container">
                         {/* Scroll nativo en lugar de Radix ScrollArea: la versión Radix no rendea
                             scrollbar horizontal por default y la tabla (min-w 1000px) quedaba pisada
                             por el sidebar de Carga de Operarios. Con overflow-auto el navegador
                             maneja ambos ejes y muestra scrollbar cuando hace falta. */}
-                        {/* Sin overflow propio: el scroll es el de la página. Antes esta
-                            columna scrolleaba adentro del shell y el shell adentro del layout,
-                            y revisar 11 OTs era pelear con tres barras. */}
-                        <div className="flex-1 min-w-0">
+                        {/* Abajo de `lg`, sin overflow propio: el scroll es el de la página.
+                            Antes esta columna scrolleaba adentro del shell y el shell adentro
+                            del layout, y revisar 11 OTs era pelear con tres barras. Desde `lg`
+                            scrollea ella sola, que es el único scroll de la lista (arriba). */}
+                        {/* `lg:min-w-min`: desde `lg` este contenedor es tan ancho como la tabla
+                            cuando la tabla no entra (y tan ancho como la columna cuando sí).
+                            Hace falta para el `sticky left-0` de los de arriba: un sticky sólo
+                            se puede correr dentro de su contenedor, y si éste midiera lo mismo
+                            que la columna, al scrollear de costado se irían con la tabla.
+                            Puede ser más ancho que el envoltorio del `@container` (que mide lo
+                            que se ve): se sale de él y el que scrollea es la columna. */}
+                        <div className="min-w-0 lg:min-w-min">
                             {/* Qué traba el plan y cómo se destraba. Va primero de todo: es lo que
                                 puede cambiar la decisión de guardar o de ir a arreglar un dato antes
                                 de planificar.
@@ -3519,53 +3784,35 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 min-w 1000px para las columnas, y adentro los párrafos se estiraban
                                 hasta ahí y quedaban cortados por el panel de Carga de Operarios.
                                 `sticky left-0` lo mantiene a la vista cuando la tabla se scrollea
-                                en horizontal. */}
-                            {/* `scroll-mt`: «Ver detalles» de la cifra de trabas trae el panel
-                                arriba de todo, y sin margen el encabezado —con «Recalcular»—
-                                quedaba abajo de la cabecera fija. La cabecera sólo es fija
-                                desde md. */}
-                            <div ref={panelAvisos} className="sticky left-0 w-full md:scroll-mt-[calc(var(--alto-cabecera)+8px)]">
-                                {/* Lo marcado que el plan de abajo todavía no tiene. Arriba de
-                                    los avisos, porque es lo que cambia cómo se leen: el aviso
-                                    que se ve rojo puede estar ya arreglado y sin recalcular. */}
-                                {cantidadPendientes > 0 && (
-                                    <div className="mx-3 sm:mx-4 mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5">
-                                        <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-                                            <Clock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                                            <div className="min-w-0 flex-1 basis-60">
-                                                <p className="text-[13px] font-semibold leading-snug text-amber-950">
-                                                    El plan de abajo todavía no tiene {textoCambios(cantidadPendientes)}
-                                                </p>
-                                                <p className="text-[12px] leading-snug text-amber-900/80">
-                                                    Seguí revisando y recalculá una sola vez al terminar (tarda {tardaElRecalculo}).
-                                                </p>
-                                                <ul className="mt-1 space-y-0.5 text-[11.5px] leading-snug text-amber-950">
-                                                    {pendientes.slice(0, 6).map(p => (
-                                                        <li key={p.clave} className="flex gap-1.5">
-                                                            <span className="text-amber-500">•</span>
-                                                            <span className="min-w-0">{p.texto}</span>
-                                                        </li>
-                                                    ))}
-                                                    {pendientes.length > 6 && (
-                                                        <li className="text-amber-800/80">y {pendientes.length - 6} más</li>
-                                                    )}
-                                                </ul>
-                                            </div>
-                                            {onRecalculate && (
-                                                <Button
-                                                    size="sm"
-                                                    onClick={() => handleRecalculate()}
-                                                    disabled={isCalculating || isConfirming}
-                                                    title={isCalculating ? "Esperá a que termine el recálculo" : `Recalcular el plan con estos cambios (${tardaElRecalculo})`}
-                                                    className="h-8 shrink-0 gap-1.5 bg-amber-500 text-white hover:bg-amber-600"
-                                                >
-                                                    <RefreshCw className={cn("h-3.5 w-3.5", isCalculating && "animate-spin")} />
-                                                    Recalcular ahora
-                                                </Button>
-                                            )}
-                                        </div>
-                                    </div>
+                                en horizontal; desde `lg`, con el ancho de lo que se ve de la
+                                columna (`100cqw`) y no el de la tabla. */}
+                            {/* `scroll-mt`: «Ver detalles» de la cifra de trabas y la pastilla de
+                                avisos traen el panel arriba de todo, y sin margen el encabezado
+                                quedaba abajo de la cabecera fija. La cabecera es fija (sticky)
+                                entre md y lg; desde `lg` la que scrollea es esta columna y la
+                                cabecera no la tapa, así que el margen es de respiro nomás.
+                                Lo mismo para la tarjeta de ajustes (`#ajustes-del-plan`, la pone
+                                DiagnosticosPlan con su `scroll-mt-2`), adonde lleva la pastilla
+                                «Ajustes del plan»: entre md y lg tiene que esquivar la cabecera
+                                pegada, y eso lo sabe la pantalla, no el panel. Desde `lg` queda
+                                en los mismos 8px que pone el panel. */}
+                            {/* El cartel naranja que iba acá arriba («El plan de abajo todavía no
+                                tiene N cambios que marcaste», con la lista y «Recalcular ahora»)
+                                se sacó (26/09/2026). Julián: «si deshago algo que no aparezca el
+                                cartel de arriba… ya con el botón naranja de abajo se sobreentiende
+                                … que no invada tanto». Repetía, en grande y encima de la lista, lo
+                                mismo que dice el botón naranja del pie («Recalcular con N cambios ·
+                                tarda ~3 min»), que está siempre a la vista; y deshacer un ajuste
+                                lo hacía aparecer, justo cuando uno está volviendo atrás. La lista
+                                de qué falta recalcular sigue en el aviso de Confirmar. */}
+                            <div
+                                ref={panelAvisos}
+                                className={cn(
+                                    "sticky left-0 w-full lg:w-[100cqw]",
+                                    "md:scroll-mt-[calc(var(--alto-cabecera)+8px)] lg:scroll-mt-3",
+                                    "md:[&_#ajustes-del-plan]:scroll-mt-[calc(var(--alto-cabecera)+8px)] lg:[&_#ajustes-del-plan]:scroll-mt-2",
                                 )}
+                            >
                                 <DiagnosticosPlan
                                     diagnosticos={diagnosticos}
                                     /* El plegado lo maneja la pantalla, no la tira: la cifra
@@ -3614,11 +3861,18 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     onVerOT={verOTDelAviso}
                                     onRevisar={onRecalculate ? () => handleRecalculate() : undefined}
                                     revisando={isCalculating}
-                                    calculadoEn={calculadoEn}
-                                    revisionAuto={revisionAuto}
+                                    /* De cuándo es la revisión y si cambió algo en Recursos ya no
+                                       lo dice el panel: pasó al renglón gris de la cabecera
+                                       (`RenglonDeLaRevision`), que no se va con el scroll. */
                                 />
                             </div>
 
+                            {/* Desde `lg` quedan quietos al scrollear la tabla de costado, igual que
+                                el panel de avisos: si no, con el contenedor tan ancho como la tabla
+                                se estirarían hasta ahí y la mitad del texto quedaría a la derecha,
+                                fuera de la vista. El zoom va adentro: un `100cqw` con zoom encima
+                                se achicaría con el zoom. */}
+                            <div className="lg:sticky lg:left-0 lg:w-[100cqw]">
                             <div className="p-0 pr-2" style={{ zoom: zoom / 100 }}>
                                 {/* RF-03: una OT del plan se pausó DESPUÉS de calcularlo (una vista
                                     previa abierta, un borrador de ayer). Al confirmar no se guarda;
@@ -3794,6 +4048,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 )}
 
                             </div>
+                            </div>
 
                             {/* Encabezado de la tabla de planificados: estas OTs SÍ entraron en el
                                 plan y es exactamente esto lo que se guarda al confirmar.
@@ -3801,9 +4056,14 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 `sticky left-0` y fuera del contenedor de 1000px, igual que el panel
                                 de avisos: si va adentro, al scrollear la tabla en horizontal los
                                 botones de Filtros y Columnas se van de pantalla — y Columnas existe
-                                justamente para no tener que scrollear. */}
-                            <div className="sticky left-0 w-full bg-white z-20" style={{ zoom: zoom / 100 }}>
-                                <div className="mx-4 mt-3 mb-1.5 flex items-center gap-2.5 flex-wrap">
+                                justamente para no tener que scrollear.
+
+                                Desde `lg` mide lo que se ve de la columna (`100cqw`), no lo que mide
+                                la tabla. Por eso el zoom se pasó al renglón de adentro: sobre el
+                                mismo elemento, el zoom achicaría también ese ancho y la barra
+                                quedaría más corta que la columna. Se ve igual que antes. */}
+                            <div className="sticky left-0 w-full lg:w-[100cqw] bg-white z-20">
+                                <div className="mx-4 mt-3 mb-1.5 flex items-center gap-2.5 flex-wrap" style={{ zoom: zoom / 100 }}>
                                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
                                     <span className="text-[15px] font-bold text-gray-900">
                                         OTs planificadas ({filtrosActivos > 0 ? `${otsFiltradas} de ${uniqueOrdersInPlan}` : uniqueOrdersInPlan})
@@ -3950,18 +4210,27 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 puestas la tabla no entra y se scrollea, que para eso está; pero si
                                 alguien apagó la mitad no tiene sentido seguir forzando 1000px y
                                 hacerlo scrollear igual. */}
-                            <div className="w-full overflow-x-auto scrollbar-horizontal-visible">
+                            {/* Abajo de `lg`, la tabla scrollea de costado ella sola, como siempre.
+                                Desde `lg`, NO (`lg:overflow-visible`): con `overflow-x-auto` este
+                                contenedor es un contenedor de scroll en los dos ejes —el
+                                navegador no deja uno solo—, y el encabezado `sticky top-0` de la
+                                tabla se pegaba a ÉL, que nunca scrollea para abajo: no se pegaba
+                                nunca. Sin overflow, el scroll de costado es el de la columna y el
+                                encabezado queda arriba de la columna al bajar.
+                                La marca del Ctrl+rueda va con el que scrollea (ver
+                                `sinColumnasFijas`). */}
+                            <div className={cn("w-full overflow-x-auto lg:overflow-visible", sinColumnasFijas && "scrollbar-horizontal-visible")}>
                             <div
                                 className="p-0 pr-2"
                                 style={{ zoom: zoom / 100, minWidth: `${200 + COLUMNAS.filter(c => ve(c.clave)).length * 76}px` }}
                             >
-                                <table className="w-full text-sm text-left border-collapse [&_td]:py-2">
+                                <table className="w-full text-sm text-left border-collapse [&_td]:py-2 [&_td]:px-3 [&_th]:px-3">
                                     <thead className="bg-gray-50 text-gray-500 font-medium uppercase text-xs sticky top-0 z-10 shadow-sm [&_th]:py-2">
                                         <tr>
                                             <th className="px-4 py-3 w-10"></th>
                                             <th className="px-4 py-3">ID</th>
                                             {ve("entrada") && <th className="px-4 py-3">Entrada</th>}
-                                            {ve("cliente") && <th className="px-4 py-3 min-w-[190px]">Cliente</th>}
+                                            {ve("cliente") && <th className="px-4 py-3">Cliente</th>}
                                             {ve("codigo") && <th className="px-4 py-3">Código</th>}
                                             {ve("articulo") && <th className="px-4 py-3 min-w-[300px]">Artículo</th>}
                                             {ve("progreso") && <th className="px-4 py-3 text-center">Cantidad</th>}
@@ -4099,9 +4368,19 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                             </div>
                                                         </td>
                                                         {ve("entrada") && <td className="px-4 py-3 text-inherit opacity-90">{formatDate(firstItem.fecha_entrada)}</td>}
+                                                        {/* Un renglón y sin itálica (26/09/2026): en dos
+                                                            renglones y en cursiva cada fila medía el doble
+                                                            por un dato que se reconoce con la primera
+                                                            palabra, y la cursiva gris se leía como «dato
+                                                            de relleno». Cortado con «…» y entero en el
+                                                            globito. El `max-w` va en el texto y no en la
+                                                            celda: una tabla automática no respeta el
+                                                            ancho máximo de una celda. 12rem y no 15: con la
+                                                            pantalla completa la tabla ya pedía 1.678px para
+                                                            1.018 visibles; el nombre se reconoce igual. */}
                                                         {ve("cliente") && (
-                                                            <td className="px-4 py-2 text-gray-500 italic">
-                                                                <span className="line-clamp-2 leading-snug" title={firstItem.cliente || ""}>
+                                                            <td className="px-4 py-2 text-gray-600">
+                                                                <span className="block max-w-[12rem] truncate" title={nombreLindo(firstItem.cliente) || firstItem.cliente || ""}>
                                                                     {nombreLindo(firstItem.cliente) || "-"}
                                                                 </span>
                                                             </td>
@@ -4166,6 +4445,13 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                 <span>+{maxDelayDays.toLocaleString("es-AR")} {maxDelayDays === 1 ? "día" : "días"}</span>
                                                                             </button>
                                                                         </TooltipTrigger>
+                                                                        {/* En portal (26/09/2026): desde lg la tabla vive adentro
+                                                                            del `@container` de la columna, y floating-ui toma a
+                                                                            ese envoltorio como bloque contenedor del globito
+                                                                            (`position: fixed`) mientras Chrome no: salía corrido
+                                                                            lo que la columna estuviera bajada, fuera de la
+                                                                            pantalla. Los demás overlays ya iban en portal. */}
+                                                                        <TooltipPortal>
                                                                         <TooltipContent side="left" className="max-w-[320px] p-0 bg-white border border-red-200 shadow-xl text-gray-800">
                                                                             <div className="px-3 py-2 bg-red-50 border-b border-red-200 flex items-center gap-2">
                                                                                 <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
@@ -4199,6 +4485,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                 )}
                                                                             </div>
                                                                         </TooltipContent>
+                                                                        </TooltipPortal>
                                                                     </Tooltip>
                                                                 </TooltipProvider>
                                                             ) : null}
@@ -4828,6 +5115,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             </div>
 
                         </div>
+                        </div>
                     </div >
 
                     {/* Carga de operarios: cómo queda cada uno SI se confirma este plan.
@@ -4845,19 +5133,21 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                         // Borde arriba cuando va apilado abajo de la tabla, a la izquierda
                         // cuando va al costado.
                         "bg-gray-50 border-t lg:border-t-0 lg:border-l border-gray-200 flex flex-col shrink-0 transition-[width] duration-200",
-                        // Sticky con alto propio: la carga de operarios queda a la vista
-                        // mientras la lista corre al lado, en vez de irse para arriba a los
-                        // dos scrolls. `top-[136px]` la deja justo abajo de la cabecera
-                        // sticky (título + riel de cifras).
-                        // `max-h` y no `h`: con alto fijo, cuando la lista de avisos es corta
-                        // la fila mide menos que el panel y el panel se desborda por abajo,
-                        // pisando el pie. Con max-h se estira hasta donde hay lugar y no más.
-                        // `flex flex-col` para que la lista de adentro pueda tomar el resto
-                        // y ser la única que scrollea.
-                        // Todo eso sólo desde `lg`, que es cuando va al costado: apilado
-                        // abajo de la tabla no hay nada que acompañar, y pegado se habría
-                        // montado encima de la lista.
-                        "lg:sticky lg:top-[var(--alto-cabecera)] lg:max-h-[calc(100svh-var(--alto-cabecera)-5rem)] lg:self-start overflow-hidden flex flex-col",
+                        // Al costado (`lg`), el alto entero de la fila: arriba hasta la
+                        // cabecera, abajo hasta el pie, quieto. Lo estira la fila
+                        // (`items-stretch`), y `min-h-0` deja que mida menos que su
+                        // contenido: así el que scrollea es la lista de personas de adentro
+                        // (`flex-1 min-h-0 overflow-y-auto` en PanelCargaRecursoHumano), no
+                        // el panel ni la página. `flex flex-col` para que esa lista tome el
+                        // resto entre el encabezado y el pie del panel.
+                        // Hasta el 26/09/2026 era `sticky` con `top` y `max-h` calculados con
+                        // `--alto-cabecera`, porque la que scrolleaba era la página y el panel
+                        // tenía que acompañar a la lista; con la pantalla completa ya no se
+                        // mueve nada alrededor y no hay nada que acompañar. Plegado, el riel
+                        // de 44px ocupa también el alto entero.
+                        // Apilado abajo de la tabla (abajo de `lg`), como siempre: sin alto
+                        // propio, crece con lo que tiene.
+                        "lg:min-h-0 overflow-hidden flex flex-col",
                         // Apilado (abajo de `lg`) ocupa el ancho entero; al costado, los
                         // anchos de siempre. El piso de 300px es sólo de `lg` para arriba:
                         // en un teléfono se llevaba 301 de los 327 de la fila.
@@ -5030,5 +5320,103 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
             variant="destructive"
         />
         </>
+    );
+}
+
+/**
+ * El renglón gris debajo del título: en qué anda la revisión del plan.
+ *
+ * Lo dibujaba `DiagnosticosPlan` como una franja gris adentro del panel de avisos,
+ * entre el encabezado y la lista: con el panel plegado no se veía, y desplegado se
+ * iba con el scroll. En el mockup de Julián (26/09/2026) es la bajada del título, en
+ * 12.5px y siempre a la vista: desde `lg`, un renglón que se corta con «…» para no
+ * comerle alto a la lista; abajo de `lg`, los renglones que haga falta.
+ *
+ * Dice lo mismo que decía allá, que es lo que hace `revisarSiCambioAlgo` al volver a
+ * la pestaña: mirar si cambió algo en Recursos y, si cambió, anotarlo como pendiente
+ * —nunca recalcula solo (25/09/2026), cada vuelta son ~4 minutos con 48 OT—.
+ *
+ * `vigilaRecursos` es si esa revisión corre de verdad: sin avisos (o sin poder
+ * recalcular) no corre, y prometer «al volver lo marco como pendiente» sería mentir.
+ */
+function RenglonDeLaRevision({
+    revisionAuto,
+    calculadoEn,
+    vigilaRecursos,
+    activo,
+    className,
+}: {
+    revisionAuto: "mirando" | "cambios-en-recursos" | "no-disponible" | null;
+    calculadoEn?: string;
+    vigilaRecursos: boolean;
+    /** La pantalla está a la vista. Oculta no hace falta el tic del reloj. */
+    activo: boolean;
+    className?: string;
+}) {
+    // Un tic por minuto para que «calculado hace 3 min» no quede clavado en lo que
+    // decía al abrir. Vive acá y no en la pantalla: redibujar este renglón es gratis;
+    // redibujar la tabla de 48 OT cada minuto, no.
+    const [, setTic] = React.useState(0);
+    React.useEffect(() => {
+        if (!activo || !calculadoEn) return;
+        const t = setInterval(() => setTic(n => n + 1), 60_000);
+        return () => clearInterval(t);
+    }, [activo, calculadoEn]);
+
+    // «recién», «hace 5 min», «hace 2 horas»: se lee bien tanto en «calculado hace
+    // 5 min» como en «esta revisión es de hace 5 min». Vacío si la fecha no se entiende.
+    const antiguedad = calculadoEn ? antiguedadTexto(calculadoEn) : "";
+
+    let icono: React.ReactNode = null;
+    let texto: React.ReactNode;
+    let textoPlano: string;
+    // Lo que se anuncia solo al lector de pantalla: el cambio de ESTADO de la revisión
+    // (al volver de Recursos), sin la antigüedad. Ver el `aria-live` de abajo.
+    let anuncio = "";
+    if (revisionAuto === "mirando") {
+        icono = <Loader2 className="h-3 w-3 shrink-0 animate-spin text-gray-400" />;
+        textoPlano = "Fijándose si cambió algo en Recursos…";
+        texto = textoPlano;
+        anuncio = textoPlano;
+    } else if (revisionAuto === "cambios-en-recursos") {
+        icono = <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />;
+        textoPlano = "Cambió algo en Recursos (puede haber sido otra persona). Recalculá cuando termines.";
+        texto = <>Cambió algo en Recursos (puede haber sido otra persona). <span className="font-medium text-gray-700">Recalculá cuando termines.</span></>;
+        anuncio = textoPlano;
+    } else if (revisionAuto === "no-disponible") {
+        textoPlano = `No se pudo consultar Recursos${antiguedad ? ` (esta revisión es de ${antiguedad})` : ""}. Si arreglaste algo, recalculá cuando termines.`;
+        texto = textoPlano;
+        anuncio = "No se pudo consultar Recursos. Si arreglaste algo, recalculá cuando termines.";
+    } else {
+        const base = vigilaRecursos
+            ? "Revisá los avisos y ajustes del plan. Si hacés cambios en Recursos, al volver lo marco como pendiente."
+            : "Revisá el plan antes de confirmarlo.";
+        textoPlano = antiguedad ? `${base} · calculado ${antiguedad}` : base;
+        texto = <>{base}{antiguedad && <span className="text-gray-400"> · calculado {antiguedad}</span>}</>;
+    }
+
+    return (
+        // Un renglón con «…» sólo desde `lg`, donde hay mouse para el `title` y lo que
+        // falta es alto. En el teléfono y la tableta le quedan unos 280–640px, la frase
+        // pide unos 650–750 y el `title` no se abre con el dedo: cortada se perdía justo
+        // la instrucción («Si arreglaste algo, recalculá…»), que no está en otro lado. Ahí
+        // envuelve; abajo de `md` la cabecera no es sticky, así que los renglones de más no
+        // le comen alto a la lista. `items-start` para que el ícono quede con el primer
+        // renglón y no en el medio del bloque: va en una caja del alto de la línea, así
+        // queda derecho sea el Loader2 de 12px o el triángulo de 14px.
+        <p
+            title={textoPlano}
+            className={cn("flex min-w-0 items-start gap-1.5 text-[12.5px] leading-[18px] text-gray-500 lg:items-center", className)}
+        >
+            {/* `aria-live` sólo en el estado y no en todo el renglón: la antigüedad
+                («calculado hace 5 min») cambia con el tic de cada minuto y, adentro de la
+                región, el lector la repetía minuto a minuto mientras se trabaja en la
+                tabla. Esta región no depende del reloj: al abrir está vacía (no anuncia
+                nada) y habla cuando la revisión cambia sola, al volver de Recursos. Es
+                `sr-only` —posición absoluta—, así que no toca el flex ni el corte. */}
+            <span role="status" aria-live="polite" className="sr-only">{anuncio}</span>
+            {icono && <span className="flex h-[18px] shrink-0 items-center">{icono}</span>}
+            <span className="min-w-0 lg:truncate">{texto}</span>
+        </p>
     );
 }

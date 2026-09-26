@@ -38,9 +38,9 @@ const cabeceras = (): Record<string, string> => {
 /** Desenvuelve el ResponseDTO del backend, que a veces viene crudo y a veces no. */
 const datos = (json: any) => (json && typeof json === "object" && "data" in json ? json.data : json);
 
-async function traer(ruta: string): Promise<any | null> {
+async function traer(ruta: string, signal?: AbortSignal): Promise<any | null> {
     try {
-        const res = await fetch(`${API_URL.replace(/\/$/, "")}${ruta}`, { headers: cabeceras() });
+        const res = await fetch(`${API_URL.replace(/\/$/, "")}${ruta}`, { headers: cabeceras(), signal });
         if (!res.ok) return null;
         return datos(await res.json());
     } catch {
@@ -88,6 +88,65 @@ function operariosAtexto(operarios: any): string {
         })
         .sort()
         .join("\n");
+}
+
+/** Lo que tiene HOY cada máquina y cada proceso: `id → rangos`. Ver `rangosActuales`. */
+export type RangosActuales = {
+    maquinarias: Map<number, Set<number>>;
+    procesos: Map<number, Set<number>>;
+};
+
+/** `{id_rango: [ids]}` → `id → Set de rangos`, o null si lo que llegó no es un mapa. */
+function porCadaUno(mapa: any): Map<number, Set<number>> | null {
+    if (!mapa || typeof mapa !== "object" || Array.isArray(mapa)) return null;
+    const salida = new Map<number, Set<number>>();
+    for (const rango of Object.keys(mapa)) {
+        if (!Array.isArray(mapa[rango])) continue;
+        for (const id of mapa[rango]) {
+            const clave = Number(id);
+            if (!salida.has(clave)) salida.set(clave, new Set());
+            salida.get(clave)!.add(Number(rango));
+        }
+    }
+    return salida;
+}
+
+/**
+ * Los rangos que tiene HOY cada máquina y cada proceso en Recursos, o `null` si no se
+ * pudo leer alguno de los dos.
+ *
+ * La usa el «Guardar en Recursos» del panel de avisos (26/09/2026). Los endpoints de
+ * rangos REEMPLAZAN el conjunto, y el conjunto que trae una acción se armó cuando salió
+ * su aviso —a veces en un borrador de ayer, y un ajuste «solo en este plan» lo guarda
+ * tal cual hasta que se deshace, porque recalcular no se lo rearma—. Mandado así,
+ * borraba en producción lo que alguien hubiera cargado después en esa máquina (desde
+ * otra pestaña, otra persona) sin que ningún cartel dijera que algo se sacaba. Con
+ * esto el guardado parte de lo que hay ahora y sólo le SUMA lo que propone el aviso.
+ *
+ * Son los mismos dos GET de la huella, dados vuelta: el backend contesta por rango y
+ * acá hace falta por máquina. Lo que no aparece en ningún rango tiene el conjunto
+ * vacío (el que lee usa `?? new Set()`). Con tope de 20 segundos, como los PUT que
+ * vienen después: sin tope, un GET colgado dejaba el botón en «Guardando…» hasta
+ * recargar. `null` si falla cualquiera de los dos: con la mitad no se sabe qué hay, y
+ * adivinar es justo lo que esto viene a evitar —el que llama no guarda nada—.
+ */
+export async function rangosActuales(): Promise<RangosActuales | null> {
+    // Nunca tira: el que llama espera `null` para decir «no pude leer», y con un error
+    // suelto (un navegador viejo sin `AbortSignal.timeout`) el cartel de la tanda se
+    // quedaría en «Fijándome…» para siempre.
+    try {
+        const tope = AbortSignal.timeout(20000);
+        const [porMaquina, porProceso] = await Promise.all([
+            traer("/rangos/maquinarias", tope),
+            traer("/rangos/procesos", tope),
+        ]);
+        const maquinarias = porCadaUno(porMaquina);
+        const procesos = porCadaUno(porProceso);
+        if (!maquinarias || !procesos) return null;
+        return { maquinarias, procesos };
+    } catch {
+        return null;
+    }
 }
 
 /**
