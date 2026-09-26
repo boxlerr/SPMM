@@ -146,9 +146,27 @@ export function PanelCargaRecursoHumano(props: PanelCargaRecursoHumanoProps) {
         onVerSinNadie, onIrAAvisos, cargaTotalMin,
     } = props;
 
+    // Lo que pide el rango TERCERIZADO y quedó sin persona es trabajo que se manda afuera,
+    // no un hueco del taller. La marca `tercerizado` del backend sale del NOMBRE del proceso
+    // y no ve el rango, así que el cilindrado de chapa (rango TERCERIZADO) caía en «Sin
+    // nadie asignado · Piden TERCERIZADO», mientras el aviso del plan decía lo contrario:
+    // «salen del taller, nada que corregir». Mismo criterio que el backend para decidir si
+    // un paso lleva máquina (cruce con el rango TERCERIZADO).
+    const idsTercerizado = React.useMemo(
+        () => new Set(rangos.filter(r => (r.nombre || "").toUpperCase().includes("TERCERIZ")).map(r => r.id)),
+        [rangos]
+    );
+    const filasConTerceros = React.useMemo(
+        () => idsTercerizado.size === 0 ? filas : filas.map(f =>
+            !f.id_operario && !f.tercerizado && (f.rangos_permitidos_proceso || []).some(id => idsTercerizado.has(id))
+                ? { ...f, tercerizado: true }
+                : f),
+        [filas, idsTercerizado]
+    );
+
     const carga = React.useMemo(
         () => armarCargaDelPlan({
-            filas,
+            filas: filasConTerceros,
             operarios: (operarios || []) as OperarioDeCarga[],
             cargaPrevia,
             feriados,
@@ -157,7 +175,7 @@ export function PanelCargaRecursoHumano(props: PanelCargaRecursoHumanoProps) {
             diasDelTaller,
             excedentesMin,
         }),
-        [filas, operarios, cargaPrevia, feriados, span, periodoSinFechas, diasDelTaller, excedentesMin]
+        [filasConTerceros, operarios, cargaPrevia, feriados, span, periodoSinFechas, diasDelTaller, excedentesMin]
     );
 
     // Siempre abre en la primera semana: la del piloto. No se guarda a propósito.
@@ -221,10 +239,6 @@ export function PanelCargaRecursoHumano(props: PanelCargaRecursoHumanoProps) {
         });
 
     const sinNadieMin = resumen.desglose.sinNadieMin + resumen.desglose.vacantesMin;
-    const abrirSinNadie = () => {
-        setVerSinNadie(true);
-        requestAnimationFrame(() => sinNadieRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
-    };
     const sinTrabajoAbierto = verSinTrabajo ?? resumen.conTrabajo.length === 0;
     const pasados = resumen.conteo.pasado;
 
@@ -270,22 +284,15 @@ export function PanelCargaRecursoHumano(props: PanelCargaRecursoHumanoProps) {
                     </p>
                 ) : (
                     <>
-                        {/* a) Ayuda: una sola vez, escrita, no en un cartelito. */}
-                        <div className="flex gap-2 rounded-lg border border-sky-100 bg-sky-50 p-2.5 text-[12px] leading-snug text-sky-900">
-                            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                            <p>
-                                Cada tarjeta dice cuántas horas le toca a esa persona y cuántas puede trabajar.
-                                Un día de trabajo son 8,25 h: de 07:00 a 16:00, menos 15 min de desayuno y 30 de almuerzo.
-                                {resumen.hayOtroHorario && " Quien tiene otro horario lo dice en su tarjeta."}
-                            </p>
-                        </div>
+                        {/* La caja de ayuda que iba acá («Cada tarjeta dice cuántas horas…
+                            un día de trabajo son 8,25 h…») se sacó: Julián, 26/9, «no suma».
+                            Cada tarjeta ya escribe su cuenta («= 5 días × 8,25 h de jornada») y
+                            el ⓘ de «que puede» abre el detalle del horario. */}
 
-                        {/* b) Todo el equipo */}
+                        {/* Todo el equipo */}
                         <TarjetaEquipo
                             carga={carga}
                             resumen={resumen}
-                            sinNadieMin={sinNadieMin}
-                            onAbrirSinNadie={abrirSinNadie}
                             onElegirSemana={clave => { setPeriodo(clave); setFiltroEstado(null); }}
                             verDesglose={verDesglose}
                             onAlternarDesglose={() => setVerDesglose(v => !v)}
@@ -565,11 +572,9 @@ function PorQueHasta({ carga, onVerOT, onIrAAvisos }: {
 
 // ─── Equipo ───────────────────────────────────────────────────────────────────
 
-function TarjetaEquipo({ carga, resumen, sinNadieMin, onAbrirSinNadie, onElegirSemana, verDesglose, onAlternarDesglose, cargaTotalMin }: {
+function TarjetaEquipo({ carga, resumen, onElegirSemana, verDesglose, onAlternarDesglose, cargaTotalMin }: {
     carga: CargaDelPlan;
     resumen: ResumenDelPeriodo;
-    sinNadieMin: number;
-    onAbrirSinNadie: () => void;
     onElegirSemana: (clave: string) => void;
     verDesglose: boolean;
     onAlternarDesglose: () => void;
@@ -611,16 +616,11 @@ function TarjetaEquipo({ carga, resumen, sinNadieMin, onAbrirSinNadie, onElegirS
                     Esta semana {nConTrabajo === 1 ? "trabaja 1 persona" : `trabajan ${nConTrabajo} personas`}: {listaDeNombres(eq.conTrabajo)}.
                 </p>
             )}
-            {(sinNadieMin > 0 || dz.tercerosMin > 0) && (
+            {/* Lo que no hace nadie del taller va en el bloque «Sin nadie asignado» de
+                abajo, con sus OT: repetirlo acá era decirlo dos veces (Julián, 26/9). */}
+            {dz.tercerosMin > 0 && (
                 <p className="text-[12px] text-gray-700 tabular-nums">
-                    Además:{" "}
-                    {sinNadieMin > 0 && (
-                        <button type="button" onClick={onAbrirSinNadie} className={cn("font-semibold text-amber-800 underline decoration-dotted underline-offset-2", FOCO)}>
-                            {horas(sinNadieMin)} sin nadie asignado
-                        </button>
-                    )}
-                    {sinNadieMin > 0 && dz.tercerosMin > 0 && " · "}
-                    {dz.tercerosMin > 0 && `${horas(dz.tercerosMin)} de terceros`}
+                    Además: {horas(dz.tercerosMin)} de terceros (trabajo que se manda afuera)
                 </p>
             )}
             {resumen.esTodo && (

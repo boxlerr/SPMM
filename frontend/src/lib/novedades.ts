@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "vista-previa-cantidad-y-carga-mas-limpia",
+        fecha: "2026-09-26",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "En la vista previa, una sola columna «Cantidad» y el panel de carga más limpio",
+        detalle:
+            "«Cant.» y «Progreso» decían lo mismo: queda una sola columna, «Cantidad», con lo entregado sobre lo pedido (por ejemplo «199 / 200») y su barrita. En «Carga de recurso humano» se sacó el cartel de ayuda (cada tarjeta ya dice su cuenta) y el «sin nadie asignado» repetido; lo que pide el rango TERCERIZADO ahora cuenta como trabajo de terceros y no como falta de gente. «Ver carga completa» abre el panel más ancho.",
+        href: "/operaciones",
+    },
+    {
         id: "materia-prima-modo-practica",
         fecha: "2026-09-25",
         tipo: "mejora",

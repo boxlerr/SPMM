@@ -2502,9 +2502,12 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         { clave: "cliente", titulo: "Cliente" },
         { clave: "codigo", titulo: "Código" },
         { clave: "articulo", titulo: "Artículo" },
-        { clave: "cantidad", titulo: "Cant." },
+        // «Cant.» y «Progreso» decían lo mismo (4 y «0 / 4»): Julián, 26/9, pidió una
+        // sola columna. Queda la de «entregadas / pedidas» con su barrita, con el nombre
+        // «Cantidad» y en el lugar de «Cant.». La clave sigue siendo "progreso" para no
+        // perder lo que cada uno ya tenía guardado como visible u oculto.
+        { clave: "progreso", titulo: "Cantidad" },
         { clave: "material", titulo: "Mat." },
-        { clave: "progreso", titulo: "Progreso" },
         { clave: "prioridad", titulo: "Prioridad" },
         { clave: "prometida", titulo: "Prometida" },
         { clave: "trabajo", titulo: "Trabajo" },
@@ -3961,9 +3964,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                             {ve("cliente") && <th className="px-4 py-3 min-w-[190px]">Cliente</th>}
                                             {ve("codigo") && <th className="px-4 py-3">Código</th>}
                                             {ve("articulo") && <th className="px-4 py-3 min-w-[300px]">Artículo</th>}
-                                            {ve("cantidad") && <th className="px-4 py-3 text-center">Cant.</th>}
+                                            {ve("progreso") && <th className="px-4 py-3 text-center">Cantidad</th>}
                                             {ve("material") && <th className="px-4 py-3 text-center">Mat.</th>}
-                                            {ve("progreso") && <th className="px-4 py-3 text-center">Progreso</th>}
                                             {ve("prioridad") && <th className="px-4 py-3 text-center">Prioridad</th>}
                                             {ve("prometida") && <th className="px-4 py-3 text-center">Prometida</th>}
                                             {ve("trabajo") && <th className="px-4 py-3 text-center">Trabajo</th>}
@@ -4115,16 +4117,6 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                 </span>
                                                             </td>
                                                         )}
-                                                        {ve("cantidad") && (
-                                                        <td className="px-4 py-3 text-center">
-                                                            {firstItem.unidades ? <Badge variant="secondary" className="bg-white/50 text-inherit border-current/20">{firstItem.unidades}</Badge> : "-"}
-                                                        </td>
-                                                        )}
-                                                        {ve("material") && (
-                                                        <td className="px-4 py-3 text-center">
-                                                            <MaterialChip estado={firstItem.estado_material} noLleva={(firstItem as any).no_lleva_materia_prima} />
-                                                        </td>
-                                                        )}
                                                         {ve("progreso") && (
                                                         <td className="px-4 py-3 text-center">
                                                             {firstItem.unidades ? (
@@ -4135,6 +4127,11 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                     </div>
                                                                 </div>
                                                             ) : "-"}
+                                                        </td>
+                                                        )}
+                                                        {ve("material") && (
+                                                        <td className="px-4 py-3 text-center">
+                                                            <MaterialChip estado={firstItem.estado_material} noLleva={(firstItem as any).no_lleva_materia_prima} />
                                                         </td>
                                                         )}
                                                         {ve("prioridad") && (
@@ -4865,7 +4862,10 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                         // anchos de siempre. El piso de 300px es sólo de `lg` para arriba:
                         // en un teléfono se llevaba 301 de los 327 de la fila.
                         !cargaAbierta ? "w-full lg:w-11"
-                            : cargaCompleta ? "w-full lg:w-[min(34vw,520px)]"
+                            // «Ver carga completa» ensancha el panel aunque tape las columnas de
+                            // la derecha (Cantidad y Mat.): las tarjetas de a dos entraban
+                            // apretadas y el «que puede» se partía en dos renglones (Julián, 26/9).
+                            : cargaCompleta ? "w-full lg:w-[min(50vw,780px)]"
                                 : "w-full lg:w-[min(24vw,380px)] lg:min-w-[300px]"
                     )}>
                         {!cargaAbierta ? (
