@@ -66,6 +66,10 @@ interface PlanificacionResult {
     inicio_min: number;
     fin_min: number;
     duracion_min: number;
+    /** Paso achicado a las unidades que faltan: minutos del lote entero y unidades. */
+    minutos_lote?: number;
+    unidades_lote?: number;
+    unidades_faltan?: number;
     prioridad_peso: number;
     id_operario?: number;
     id_rango_operario?: number;
@@ -4411,7 +4415,11 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                     onCambiar={(id, nombre) => void procesosEnPlan.cambiarProceso(
                                                                                                         ordenId, lineaId!, id, nombre, effectiveItem.nombre_proceso, idProcesoActual)}
                                                                                                 />
-                                                                                                <MinutosDelProceso minutos={effectiveItem.duracion_min} />
+                                                                                                <MinutosDelProceso
+                                                                                                    minutos={effectiveItem.duracion_min}
+                                                                                                    minutosLote={effectiveItem.minutos_lote}
+                                                                                                    unidades={effectiveItem.unidades_lote}
+                                                                                                    unidadesFaltan={effectiveItem.unidades_faltan} />
                                                                                                 {/* Lo agregado a mano se distingue de lo que trajo la OT.
                                                                                                     La X saca esta pasada sola: sin ella, corregir "elegí
                                                                                                     la fresadora de otra OT" era tirar la OT entera y

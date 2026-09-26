@@ -168,13 +168,30 @@ export function NombreDeProcesoEditable({
  * agujero por donde entró mal. El globito dice DÓNDE se corrige y no sólo que acá no
  * se puede: si no, el que encuentra el error igual se queda sin saber adónde ir.
  */
-export function MinutosDelProceso({ minutos }: { minutos: number }) {
+export function MinutosDelProceso({ minutos, minutosLote, unidades, unidadesFaltan }: {
+    minutos: number;
+    /** Si vienen, el paso se achicó a las unidades que faltan (entrega parcial). */
+    minutosLote?: number;
+    unidades?: number;
+    unidadesFaltan?: number;
+}) {
+    const achicado = !!minutosLote && !!unidades && unidadesFaltan != null && minutosLote !== minutos;
     return (
-        <span
-            className="shrink-0 rounded bg-gray-100 px-1.5 text-xs tabular-nums text-gray-500"
-            title={`${minutos} minutos estimados. Es un dato de la orden: si está mal, se corrige en la ficha de la OT (o en el catálogo de procesos) y se vuelve a planificar. Desde acá no se cambia.`}
-        >
-            {minutos}m
+        <span className="shrink-0 inline-flex items-center gap-1">
+            <span
+                className="rounded bg-gray-100 px-1.5 text-xs tabular-nums text-gray-500"
+                title={`${minutos} minutos estimados. Es un dato de la orden: si está mal, se corrige en la ficha de la OT (o en el catálogo de procesos) y se vuelve a planificar. Desde acá no se cambia.`}
+            >
+                {minutos}m
+            </span>
+            {/* El tiempo cargado es el del lote entero; con una entrega parcial se
+                planifica solo lo que falta. Escrito a la vista, sin tooltip: si no,
+                «12m» en un paso que en la OT dice 2.400 parece un error de carga. */}
+            {achicado && (
+                <span className="rounded bg-sky-50 border border-sky-200 px-1.5 text-[11px] text-sky-800 tabular-nums">
+                    faltan {unidadesFaltan!.toLocaleString("es-AR")} de {unidades!.toLocaleString("es-AR")} u. · lote {minutosLote!.toLocaleString("es-AR")}m
+                </span>
+            )}
         </span>
     );
 }
