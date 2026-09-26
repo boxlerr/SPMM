@@ -3387,11 +3387,11 @@ async def planificar(
 
             # Duración: solo lo que falta fabricar (ver minutos_de_lo_que_falta).
             dur_min = minutos_de_lo_que_falta(
-                rel.tiempo_proceso, nombre_proceso, orden.unidades, _hechas)
+                rel.tiempo_proceso, nombre_proceso, getattr(orden, "unidades", None), _hechas)
             if dur_min != (rel.tiempo_proceso or 1):
                 lote_por_clave[(orden.id, secuencia)] = (
-                    int(rel.tiempo_proceso or 0), int(orden.unidades or 0),
-                    int(orden.unidades or 0) - _hechas)
+                    int(rel.tiempo_proceso or 0), int(getattr(orden, "unidades", 0) or 0),
+                    int(getattr(orden, "unidades", 0) or 0) - _hechas)
 
             # Rangos válidos del proceso. Se leen antes que nada porque de acá sale
             # también si el trabajo se manda afuera.
@@ -3719,7 +3719,7 @@ async def planificar_pendientes(
                 nombre_proceso = rel.proceso.nombre.strip() if rel.proceso else ""
                 # Solo lo que falta fabricar, igual que en planificar().
                 dur_min = minutos_de_lo_que_falta(
-                    rel.tiempo_proceso, nombre_proceso, orden.unidades, unidades_hechas(orden))
+                    rel.tiempo_proceso, nombre_proceso, getattr(orden, "unidades", None), unidades_hechas(orden))
                 usa_maquina = proceso_usa_maquina(nombre_proceso)
                 rangos_validos = [rp.id_rango for rp in getattr(rel.proceso, "rangos", [])]
                 familia_req = familia_requerida_from_proceso(nombre_proceso) if usa_maquina else ""
