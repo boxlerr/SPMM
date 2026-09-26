@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "avisos-compactos-en-verde",
+        fecha: "2026-09-26",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Los ajustes de este plan y los avisos que no piden nada ocupan un renglón, en verde",
+        detalle:
+            "En la vista previa, los «Ajustes de este plan» son chips verdes con ✓ (por ejemplo «FRESADORA CNC + OFICIAL») y una × para deshacerlos; el aviso de que no se guardaron en Recursos se abre con un toque. Los avisos que no piden hacer nada —«entra todo, pero por turnos» o «sale del taller, nada que corregir»— van en verde y en un renglón, y se despliegan si querés ver el detalle y las OT. La tarjeta grande queda para lo que sí hay que arreglar.",
+        href: "/operaciones",
+    },
+    {
         id: "vista-previa-cantidad-y-carga-mas-limpia",
         fecha: "2026-09-26",
         tipo: "mejora",

@@ -332,6 +332,27 @@ function enumerar(nombres: string[]): string {
  * traen acción— y ahí lo único que hay son ids. Sin el traductor la tira diría
  * «rangos 3, 7», que es justo la jerga que se pidió sacar.
  */
+/**
+ * El ajuste en pocas palabras, para el chip de la tira: «FRESADORA CNC + OFICIAL».
+ *
+ * La tira de ajustes ocupaba cinco renglones para dos ajustes —la frase entera, el
+ * aviso que destrababa debajo y un párrafo al pie— y Julián la pidió «en un solo
+ * renglón» (26/09/2026). La frase entera (`descripcionDeAccion`) sigue siendo la del
+ * botón de aplicar y queda en el `title` del chip. Devuelve "" cuando no hay un
+ * agregado que contar en corto; ahí el chip usa la frase entera.
+ */
+export function etiquetaCortaDeAccion(accion: AccionDeSolucion): string {
+    if (!accion) return "";
+    const objetivos = objetivosDe(accion);
+    const listado = enumerar(objetivos.map((o) => o.nombre));
+    if (!listado) return "";
+    if (accion.tipo === "skill_nativa") {
+        return `${listado}: ${accion.nombre} ${accion.habilitado === false ? "apagado" : "encendido"}`;
+    }
+    const suma = Array.from(new Set(objetivos.flatMap((o) => o.suma ?? [])));
+    return suma.length > 0 ? `${listado} + ${enumerar(suma)}` : "";
+}
+
 export function descripcionDeAccion(
     accion: AccionDeSolucion,
     nombreDeRango?: (id: number) => string,

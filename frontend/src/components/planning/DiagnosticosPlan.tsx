@@ -37,15 +37,16 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Clock, Cog, Info, Layers, ListChecks, Loader2, PauseCircle, RefreshCw, RotateCcw, Save, SlidersHorizontal, Users, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Clock, Cog, Info, Layers, ListChecks, Loader2, PauseCircle, RefreshCw, RotateCcw, Save, SlidersHorizontal, Users, Wrench, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { API_URL } from "@/config";
 import { antiguedadTexto } from "@/lib/borradorPlan";
 import {
-    claveDeAjuste, descripcionDeAccion, estadoDeAjuste, objetivosConNombre, objetivosDeAjuste,
+    claveDeAjuste, descripcionDeAccion, estadoDeAjuste, etiquetaCortaDeAccion, objetivosConNombre, objetivosDeAjuste,
     type AccionDeSolucion, type AjusteDelPlan, type EstadoDeAjuste, type GuardadoSinRecalcular,
 } from "@/lib/ajustesPlan";
 import { enlaceARecursos, enlaceDeLoHecho, pestaniaDe } from "@/lib/avisoEnRecursos";
@@ -295,6 +296,19 @@ const esNota = (sol: DiagnosticoSolucion) =>
  * (`_como_alternativa`, y a mano en «O planificá menos OTs juntas»). Leída sola —la
  * primera de la franja, o una nota— era una alternativa a nada. Respeta los `**`.
  */
+/**
+ * Un aviso que no pide hacer nada: no es Alta, no es una pausa y ninguna de sus
+ * soluciones se puede aplicar (ni guardar en Recursos ni probar en este plan). Son el
+ * cuello que «entra todo, pero por turnos» y el trabajo que «sale del taller, nada que
+ * corregir». Se dibujan en verde y en un renglón (Julián, 26/09/2026: «más sencillo, en
+ * menos renglones, ocupando menos espacio»): la tarjeta grande y amarilla es para lo que
+ * hay que tocar.
+ */
+const esInformativo = (d: Diagnostico) =>
+    d.severidad !== "bloqueante"
+    && !esPausa(d)
+    && !d.soluciones.some((s) => s.accion || accionAjustable(s));
+
 const sinOInicial = (texto: string) =>
     texto.replace(/^O\s+(\**)(\S)/, (_, negrita: string, c: string) => negrita + c.toUpperCase());
 
@@ -1177,72 +1191,85 @@ export function DiagnosticosPlan({
             )}
 
             {/* ── Lo que se está probando sin guardar ──
-                Tiene que estar arriba de todo y ser imposible de no ver: mientras esta
-                tira exista, el plan de abajo NO es el plan que sale de los datos
-                cargados. Índigo y punteado, el mismo par que el botón que los crea:
-                sin leer una palabra se ata un ajuste de la tira con el botón del aviso. */}
+                Tiene que verse siempre: mientras esta tira exista, el plan de abajo NO es el
+                plan que sale de los datos cargados. Pero en UN renglón: ocupaba cinco para
+                dos ajustes —la frase entera, el aviso que destrababa y un párrafo al pie— y
+                Julián la pidió «en un solo renglón, como listo en verde» (26/09/2026).
+                Cada ajuste es un chip: verde con ✓ si ya está en el plan, punteado con reloj
+                si entra al recalcular, tachado si sale al recalcular. La frase entera y el
+                aviso que destraba quedan en el `title`; el «no se guardó en Recursos», en un
+                ⓘ que se abre con un toque. */}
             {!colapsado && ajustes.length > 0 && (
-                <div className="border-t border-indigo-200 bg-indigo-50/60 px-3 py-2">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-indigo-900">
-                        Ajustes solo para este plan ({ajustes.length})
-                    </p>
-                    <ul className="mt-1 space-y-1">
+                <div className="border-t border-emerald-200/80 bg-emerald-50/50 px-3 py-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="mr-0.5 inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-emerald-900">
+                            <SlidersHorizontal className="h-3.5 w-3.5" />
+                            Ajustes de este plan
+                        </span>
                         {ajustes.map((a) => {
                             // Marcado sin recalcular, en el plan, o saliendo al recalcular
                             // (25/09/2026: los ajustes ya no recalculan en el click).
                             const estado = estadoDeAjuste(a);
+                            const corto = etiquetaCortaDeAccion(a.accion) || a.descripcion;
                             return (
-                            <li key={a.clave} className="flex items-start gap-2">
-                                {estado === "por-agregar"
-                                    ? <Clock className="mt-[3px] w-3 h-3 shrink-0 text-indigo-500" />
-                                    : <SlidersHorizontal className="mt-[3px] w-3 h-3 shrink-0 text-indigo-500" />}
-                                <span className={cn(
-                                    "min-w-0 flex-1 text-[11.5px] leading-snug text-indigo-950",
-                                    estado === "por-quitar" && "line-through decoration-indigo-400/70 text-indigo-950/60",
-                                )}>
-                                    {a.descripcion}
-                                    {estado === "por-agregar" && (
-                                        <span className="ml-1.5 inline-block rounded border border-amber-300 bg-amber-50 px-1 text-[10px] font-semibold leading-[15px] text-amber-800 no-underline">
-                                            pendiente
-                                        </span>
+                                <span
+                                    key={a.clave}
+                                    title={`${a.descripcion}. Destraba: ${a.titulo}`}
+                                    className={cn(
+                                        "inline-flex max-w-full items-center gap-1 rounded-full border py-0.5 pl-2 pr-0.5 text-[11.5px] leading-5",
+                                        estado === "calculado" && "border-emerald-300 bg-white text-emerald-900",
+                                        estado === "por-agregar" && "border-dashed border-indigo-300 bg-indigo-50 text-indigo-900",
+                                        estado === "por-quitar" && "border-gray-300 bg-gray-50 text-gray-500",
                                     )}
-                                    {estado === "por-quitar" && (
-                                        <span className="ml-1.5 inline-block rounded border border-amber-300 bg-amber-50 px-1 text-[10px] font-semibold leading-[15px] text-amber-800">
-                                            se saca al recalcular
-                                        </span>
+                                >
+                                    {estado === "por-agregar"
+                                        ? <Clock className="h-3 w-3 shrink-0" />
+                                        : <Check className={cn("h-3 w-3 shrink-0", estado === "calculado" && "text-emerald-600")} />}
+                                    <span className={cn("min-w-0 truncate", estado === "por-quitar" && "line-through")}>{corto}</span>
+                                    {estado === "por-agregar" && <span className="shrink-0 text-[10.5px] text-indigo-700">· al recalcular</span>}
+                                    {estado === "por-quitar" && <span className="shrink-0 text-[10.5px]">· sale al recalcular</span>}
+                                    {onQuitarAjuste && (
+                                        <button
+                                            type="button"
+                                            onClick={() => onQuitarAjuste(a.clave)}
+                                            aria-label={estado === "por-quitar" ? `Dejar: ${a.descripcion}` : `Deshacer: ${a.descripcion}`}
+                                            title={estado === "por-quitar"
+                                                ? "Dejarlo: sigue en el plan y no se saca al recalcular"
+                                                : estado === "por-agregar"
+                                                    ? "Desmarcarlo: todavía no entró al plan"
+                                                    : "Deshacer: se saca del plan en el próximo recálculo"}
+                                            className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-current/70 hover:bg-black/5 hover:text-current transition-colors"
+                                        >
+                                            {estado === "por-quitar" ? <RotateCcw className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                                        </button>
                                     )}
-                                    <span className="block text-[10.5px] text-indigo-800/70">{a.titulo}</span>
                                 </span>
-                                {onQuitarAjuste && (
-                                    <button
-                                        type="button"
-                                        onClick={() => onQuitarAjuste(a.clave)}
-                                        className="shrink-0 inline-flex items-center gap-1 rounded border border-indigo-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 hover:bg-indigo-50 transition-colors"
-                                        title={estado === "por-quitar"
-                                            ? "Dejarlo: sigue en el plan y no se saca al recalcular"
-                                            : estado === "por-agregar"
-                                                ? "Desmarcarlo: todavía no entró al plan"
-                                                : "Sacarlo del plan en el próximo recálculo"}
-                                    >
-                                        <RotateCcw className="w-3 h-3" />
-                                        {estado === "por-quitar" ? "Dejarlo" : "Deshacer"}
-                                    </button>
-                                )}
-                            </li>
                             );
                         })}
-                    </ul>
-                    {/* La frase más importante del panel entero: alguien puede mirar este
-                        plan mañana, ver que entra todo y salir a prometer fechas que se
-                        apoyan en un rango que nadie cargó nunca. */}
-                    <p className="mt-1.5 text-[10.5px] leading-snug text-indigo-900/80">
-                        Esto <strong>no quedó guardado en Recursos</strong>: el plan se calcula como si el
-                        dato estuviera, pero en el sistema sigue como antes. Se pierde si descartás el
-                        borrador. Para dejarlo cargado de verdad, usá <strong>Guardar en Recursos</strong>.
-                        {ajustes.some((a) => estadoDeAjuste(a) !== "calculado") && (
-                            <> Lo <strong>pendiente</strong> entra al plan recién cuando recalcules.</>
-                        )}
-                    </p>
+                        {/* La frase más importante de la tira: alguien puede mirar este plan
+                            mañana y prometer fechas que se apoyan en un rango que nadie cargó.
+                            Queda escrita (corta) y el porqué entero a un toque. */}
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <button
+                                    type="button"
+                                    className="ml-auto inline-flex shrink-0 items-center gap-1 rounded text-[11px] font-medium text-emerald-800 underline decoration-dotted underline-offset-2 hover:text-emerald-950"
+                                >
+                                    <Info className="h-3 w-3" />
+                                    no se guardaron en Recursos
+                                </button>
+                            </PopoverTrigger>
+                            <PopoverContent align="end" collisionPadding={16} className="w-[min(340px,calc(100vw-2rem))] p-3 text-[12px] leading-snug text-gray-700">
+                                El plan se calcula como si estos datos estuvieran cargados, pero en
+                                Recursos siguen como antes. Se pierden si descartás el borrador.
+                                Para dejarlos cargados de verdad, usá <strong>Guardar en Recursos</strong> en
+                                el aviso.
+                                {ajustes.some((a) => estadoDeAjuste(a) !== "calculado") && (
+                                    <> Lo <strong>marcado con reloj</strong> entra al plan recién cuando recalcules.</>
+                                )}
+                            </PopoverContent>
+                        </Popover>
+                    </div>
                 </div>
             )}
 
@@ -1404,6 +1431,85 @@ export function DiagnosticosPlan({
                 <ul className="border-t bg-slate-50/60 p-2 space-y-1">
                     {visibles.map((d) => {
                         const activo = abiertos.has(d.id);
+
+                        if (esInformativo(d)) {
+                            // Sin la tabla al lado (sin `numeroDeOT`/`onVerOT`) los chips no
+                            // tendrían adónde llevar: no se muestran, igual que en la tarjeta.
+                            const otsInfo = numeroDeOT && onVerOT
+                                ? d.impacto.ots.map((n) => ({ id: n, numero: numeroDeOT(n) }))
+                                : [];
+                            const conLink = d.soluciones.find((s) => enlace(d, s));
+                            const linkInfo = conLink ? enlace(d, conLink) : null;
+                            return (
+                                <li key={d.id} className="overflow-hidden rounded-lg border border-emerald-200 bg-emerald-50/60">
+                                    <button
+                                        type="button"
+                                        aria-expanded={activo}
+                                        onClick={() => toggle(d.id)}
+                                        title="No hace falta tocar nada: es para tener en cuenta."
+                                        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left"
+                                    >
+                                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                                        <span className={cn("min-w-0 flex-1 text-[13px] font-medium text-emerald-950", !activo && "truncate")}>
+                                            {d.titulo}
+                                        </span>
+                                        <span className="hidden shrink-0 text-[11.5px] tabular-nums text-emerald-800/80 sm:inline">
+                                            {d.impacto.resumen}
+                                        </span>
+                                        <ChevronDown className={cn("h-4 w-4 shrink-0 text-emerald-700/60 transition-transform", activo && "rotate-180")} />
+                                    </button>
+                                    {activo && (
+                                        <div className="space-y-1.5 border-t border-emerald-200/70 px-3 py-2 text-[12px] leading-snug text-emerald-950/90">
+                                            <p className="font-medium">
+                                                {d.resumen}
+                                                <span className="font-normal text-emerald-800/80 sm:hidden"> · {d.impacto.resumen}</span>
+                                            </p>
+                                            {d.detalle && <p className="text-emerald-900/80">{conNegritas(sinLoQueYaDijo(d.detalle, d.resumen))}</p>}
+                                            {d.soluciones.map((sol, i) => (
+                                                <p key={i} className="flex gap-1.5 text-gray-600">
+                                                    <Info className="mt-0.5 h-3 w-3 shrink-0" />
+                                                    <span>{conNegritas(sinOInicial(sol.texto))}</span>
+                                                </p>
+                                            ))}
+                                            <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                                                {otsInfo.slice(0, 12).map((o) => (
+                                                    <button
+                                                        key={o.id}
+                                                        type="button"
+                                                        onClick={() => onVerOT?.(o.id)}
+                                                        className="rounded border border-emerald-200 bg-white px-1.5 text-[11px] leading-5 tabular-nums text-emerald-900 hover:border-emerald-400"
+                                                        title={`Ir a la OT #${o.numero} en el plan`}
+                                                    >
+                                                        #{o.numero}
+                                                    </button>
+                                                ))}
+                                                {otsInfo.length > 12 && (
+                                                    <span className="text-[11px] text-emerald-800/70">+{otsInfo.length - 12} más</span>
+                                                )}
+                                                <span className="flex-1" />
+                                                {linkInfo && (
+                                                    <a
+                                                        href={linkInfo}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="inline-flex items-center gap-0.5 text-[11px] font-medium text-emerald-800 hover:text-emerald-950"
+                                                    >
+                                                        Ver en Recursos <ArrowUpRight className="h-3 w-3" />
+                                                    </a>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => marcar(d)}
+                                                    className="inline-flex items-center gap-1 rounded px-1.5 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100"
+                                                >
+                                                    <Check className="h-3 w-3" /> Listo, no lo muestres más
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </li>
+                            );
+                        }
                         const esBloq = d.severidad === "bloqueante";
                         const recurso = recursoDe(d);
                         const Icono = recurso?.icono ?? Info;
