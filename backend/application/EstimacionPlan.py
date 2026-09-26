@@ -214,12 +214,24 @@ def estimar_plan(
         grupos[raiz(k)].append(k)
     trabajos = []   # (minutos × gente, operarios posibles, pares posibles)
     sin_asignar_min = 0
+    # Los pares (persona, máquina) que sirven para TODO el grupo: la preparación y su
+    # producción, o las partes de un paso largo, van con la misma persona y la misma
+    # máquina. Sin esto el reparto elegía el par de cada paso por separado y, si el que
+    # tomó la preparación no podía hacer la producción, la producción se iba con otro: la
+    # preparación de TIG a una persona y las 40 h de soldadura TIG de la OT 13348 a Nahuel,
+    # que el solver nunca acepta (Lucas, 25/9/2026). Ese reparto no servía de punto de
+    # partida y además estimaba de menos.
+    pares_grupo: dict = {}
     for g_raiz, miembros in grupos.items():
         dur = sum(dur_map[k] * max(1, int(cant2.get(k, 1) or 1)) for k in miembros)
         pr = None
+        comunes = None
         for k in miembros:
             s_k = set(reales_de[k])
             pr = s_k if pr is None else (pr & s_k if (pr & s_k) else pr)
+            comunes = s_k if comunes is None else comunes & s_k
+        if comunes:
+            pares_grupo[g_raiz] = comunes
         pr = pr or set()
         ops = {o for o, _m in pr}
         if not ops:
@@ -296,6 +308,10 @@ def estimar_plan(
         agenda = defaultdict(_Agenda)
         ocupado = defaultdict(int)
         fin_de = {}
+        # Quién, con qué máquina y cuándo arranca cada paso. Además de contar días, este
+        # reparto es un plan de verdad: el solver lo usa de punto de partida (ver
+        # _resolver_planificacion), así no arranca de cero.
+        asignado = {}
         par_del_grupo = {}
         listo = {}
         sin_lugar = [0]
@@ -319,7 +335,11 @@ def estimar_plan(
                     # restringe. Exigir que termine adentro partía cada torneado en dos
                     # tardes distintas y duplicaba lo que tarda una OT.
                     ini = max(t, v.ini)
-                    if ini >= v.fin or any(prohibida(o, w) for o in ops_con_horario):
+                    # Antes de un hueco (sábado sin gente) lo que arranca tiene que
+                    # terminar ese día, igual que en el solver (ver `tope` en
+                    # construir_ventanas_semanales).
+                    limite = v.fin if v.tope is None else min(v.fin, v.tope - dur + 1)
+                    if ini >= limite or any(prohibida(o, w) for o in ops_con_horario):
                         w += 1
                         continue
                     libre = None
@@ -359,6 +379,11 @@ def estimar_plan(
             desde = listo[k]
             g = raiz(k)
             candidatos = reales_de[k]
+            if g in pares_grupo:
+                # Sólo pares que sirven para todo el grupo (ver pares_grupo). Si no queda
+                # ninguno —una persona elegida a mano para uno solo de los pasos, que el
+                # solver tampoco ata—, cada paso con los suyos.
+                candidatos = [c for c in candidatos if tuple(c) in pares_grupo[g]] or candidatos
             if g in par_del_grupo and par_del_grupo[g] in candidatos:
                 candidatos = [par_del_grupo[g]]
             elif guia != "libre" and g in guia_lp:
@@ -421,6 +446,7 @@ def estimar_plan(
                     agenda[("maq", maq)].ocupar(ini, fin)
                     ocupado[("maq", maq)] += dur
             fin_de[k] = fin
+            asignado[k] = (ini, o, maq, list(extra))
             if k in unico_de:
                 exclusivas_pendientes[unico_de[k]] -= dur
             lista = por_ot[k[0]]
@@ -429,7 +455,7 @@ def estimar_plan(
                 sig = lista[i + 1]
                 listo[sig] = fin
                 heapq.heappush(cola, (prioridad(sig), sig))
-        return ventanas, fin_de, agenda, ocupado, sin_lugar[0]
+        return ventanas, fin_de, agenda, ocupado, sin_lugar[0], asignado
 
     # Varias reglas de reparto y se queda con la que termina antes. Cada una es un plan
     # posible de verdad (respeta todo lo que respeta el solver), así que quedarse con la
@@ -459,7 +485,7 @@ def estimar_plan(
     if salida is None:
         raise RuntimeError("no entró en el horizonte ni duplicándolo")
     semanas = semanas_ok
-    ventanas, fin_de, agenda, ocupado, sin_lugar_min = salida
+    ventanas, fin_de, agenda, ocupado, sin_lugar_min, asignado = salida
     sin_asignar_min += sin_lugar_min
     fin_min = max(fin_de.values()) if fin_de else 0
 
@@ -612,6 +638,7 @@ def estimar_plan(
         resultado["_recursos"] = todos_los_recursos
         resultado["_fin_min"] = fin_min
         resultado["_fin_de"] = dict(fin_de)
+        resultado["_asignacion"] = dict(asignado)
     logger.info(
         f"ESTIMACION: {len(por_ot)} OT, {len(pn)} tramos, carga {carga_min} min -> "
         f"cota {resultado['jornadas_minimas']} / reparto {resultado['jornadas_estimadas']} jornadas, "

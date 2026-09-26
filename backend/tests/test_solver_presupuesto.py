@@ -195,9 +195,26 @@ def test_el_solver_usa_el_presupuesto_calculado():
     assert "presupuesto_solver(" in cuerpo, (
         "_resolver_planificacion dejó de calcular el presupuesto con presupuesto_solver"
     )
-    assert "max_time_in_seconds = max_seg" in cuerpo, (
+    # Desde el 25/9 el presupuesto se reparte entre los intentos (calendario corto y,
+    # si algo no entra, el de respaldo): cada intento recibe su parte.
+    assert "_presupuesto_del_intento(" in cuerpo, (
+        "el presupuesto se calcula pero ya no se reparte entre los intentos"
+    )
+    assert "max_time_in_seconds = seg_intento" in cuerpo, (
         "el presupuesto se calcula pero ya no se le pasa al solver"
     )
+
     assert "stop_search" in inspect.getsource(PlanificacionService), (
         "desapareció el corte por estancamiento"
     )
+
+
+def test_el_presupuesto_se_reparte_entre_los_intentos():
+    from backend.application.PlanificacionService import _presupuesto_del_intento
+
+    # Un solo intento: el presupuesto entero, como antes.
+    assert _presupuesto_del_intento(240, 40, 0, 1)[0] == 240
+    # Con respaldo: el primero más corto y el segundo la mitad; nunca 0.
+    primero, _ = _presupuesto_del_intento(240, 40, 0, 2)
+    segundo, _ = _presupuesto_del_intento(240, 40, 1, 2)
+    assert 0 < primero < 240 and 0 < segundo <= 120

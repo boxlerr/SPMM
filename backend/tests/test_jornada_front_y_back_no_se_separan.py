@@ -43,6 +43,7 @@ from backend.application.PlanificacionService import (
     MIN_LABORAL_DIA,
     MIN_LABORAL_SABADO,
     _convertir_minutos_a_fecha,
+    construir_ventanas_semanales,
     inicio_del_plan,
 )
 
@@ -95,11 +96,25 @@ def _hay_node() -> bool:
     return bool(shutil.which("node")) and TSC.exists()
 
 
-def _correr_el_front(tmp: str, feriados: list[str]) -> dict:
+def _correr_el_front(tmp: str, feriados: list[str], minutos=None, bases=None) -> dict:
     return json.loads(subprocess.run(
-        ["node", "driver.js", json.dumps(BASES), json.dumps(MINUTOS), json.dumps(feriados)],
+        ["node", "driver.js", json.dumps(bases or BASES), json.dumps(minutos or MINUTOS),
+         json.dumps(feriados)],
         cwd=tmp, capture_output=True, text=True, timeout=120, check=True,
     ).stdout)
+
+
+# Los minutos donde arranca y cierra cada tramo que arma el SOLVER, con y sin sábados
+# trabajados. Es el caso que se escapaba: los minutos de arriba son números sueltos, y el
+# bug del domingo (sumaba 300 minutos que la vuelta a fecha no cuenta) sólo aparecía con
+# los minutos que de verdad elige el solver. Ver construir_ventanas_semanales.
+SABADOS = {"sin_sabado": False, "con_sabado": True}
+
+
+def _minutos_de_las_ventanas(base_iso: str, sabado: bool) -> list[int]:
+    base = datetime.fromisoformat(base_iso).date()
+    ventanas = construir_ventanas_semanales(3, base, [], incluir_sabado=sabado)
+    return sorted({v.ini for v in ventanas} | {v.fin for v in ventanas})
 
 
 @pytest.fixture(scope="module")
@@ -124,8 +139,14 @@ def jornada_del_front():
             f"plan-fechas.ts no compila:\n{compilado.stdout}\n{compilado.stderr}")
 
         (Path(tmp) / "driver.js").write_text(DRIVER)
-        return {"sin": _correr_el_front(tmp, []),
-                "con": _correr_el_front(tmp, FERIADOS)}
+        salida = {"sin": _correr_el_front(tmp, []),
+                  "con": _correr_el_front(tmp, FERIADOS)}
+        for clave, sabado in SABADOS.items():
+            salida[clave] = {}
+            for iso in BASES:
+                salida[clave].update(_correr_el_front(
+                    tmp, [], _minutos_de_las_ventanas(iso, sabado), [iso]))
+        return salida
 
 
 def test_las_dos_jornadas_dan_la_misma_fecha(jornada_del_front):
@@ -285,3 +306,36 @@ def test_una_fecha_pedida_a_futuro_manda_en_los_dos_lados():
     assert "fechaLocalDesdeIso" in espejo, (
         "la fecha pedida se tiene que leer como día LOCAL: new Date('2026-10-05') es UTC "
         "y en Argentina daría el 4")
+
+
+@pytest.mark.parametrize("clave", list(SABADOS))
+def test_los_tramos_del_solver_caen_en_su_dia_de_los_dos_lados(jornada_del_front, clave):
+    """Cada tramo que arma el solver se muestra en SU día, en el front y en el back.
+
+    Con y sin sábados trabajados. Hasta el 25/09/2026 el calendario del solver le sumaba
+    300 minutos a cada DOMINGO y la vuelta a fecha no: con un sábado trabajado, todo lo
+    que venía después del primer fin de semana se mostraba corrido (lo del lunes 07:00,
+    el lunes a las 12:15). Sin gente los sábados se tapaba solo, y por eso no se veía.
+    """
+    sabado = SABADOS[clave]
+    for iso, filas in jornada_del_front[clave].items():
+        base = datetime.fromisoformat(iso)
+        ventanas = construir_ventanas_semanales(3, base.date(), [], incluir_sabado=sabado)
+        dia_de_inicio = {}
+        dia_de_cierre = {}
+        for v in ventanas:
+            dia_de_inicio.setdefault(v.ini, v.fecha)
+            dia_de_cierre[v.fin] = v.fecha
+        for fila in filas:
+            back = _convertir_minutos_a_fecha(fila["min"], base)[:16]
+            back_fin = _convertir_minutos_a_fecha(fila["min"], base, es_fin=True)[:16]
+            assert fila["fecha"] == back, (
+                f"{clave}, minuto {fila['min']} desde {iso}: front {fila['fecha']} / back {back}")
+            assert fila["fin"] == back_fin
+            assert fila["vuelta"] == fila["min"]
+            if fila["min"] in dia_de_inicio:
+                assert fila["fecha"][:10] == dia_de_inicio[fila["min"]].isoformat(), (
+                    f"{clave}: el tramo del {dia_de_inicio[fila['min']]} se muestra el {fila['fecha']}")
+            if fila["min"] in dia_de_cierre:
+                assert fila["fin"][:10] == dia_de_cierre[fila["min"]].isoformat(), (
+                    f"{clave}: el cierre del {dia_de_cierre[fila['min']]} se muestra el {fila['fin']}")
