@@ -1377,7 +1377,11 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 proceso_id: it.id_proceso != null ? it.id_proceso.toString() : "",
                 tiempo: it.tiempo_proceso != null ? it.tiempo_proceso.toString() : "",
                 cant_operarios: it.cant_operarios != null ? it.cant_operarios.toString() : "1",
-                maquina_id: it.id_maquinaria ? it.id_maquinaria.toString() : "",
+                // «Va a mano» se trae también: es lo que se decidió para este producto la
+                // vez pasada (memoria por artículo, reunión con Lucas del 29/9/2026).
+                maquina_id: it.no_lleva_maquina
+                    ? SIN_MAQUINA
+                    : (it.id_maquinaria ? it.id_maquinaria.toString() : ""),
                 operario_id: it.id_operario ? it.id_operario.toString() : "",
                 incluido: true,
             }));

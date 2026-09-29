@@ -281,9 +281,16 @@ def claves_a_mano(catalogo, ids_a_mano):
     return {clave_proceso(p["nombre"]) for p in catalogo if p["id"] in ids_a_mano}
 
 
-def filas_a_insertar(id_ot, lista, id_por_nombre, a_mano):
-    """[(paso, clave, minutos)] -> parámetros del INSERT de orden_trabajo_proceso."""
-    return [(id_ot, id_por_nombre[clave], paso, minutos, 1 if clave in a_mano else 0)
+def filas_a_insertar(id_ot, lista, id_por_nombre, a_mano, memoria=None):
+    """[(paso, clave, minutos)] -> parámetros del INSERT de orden_trabajo_proceso.
+
+    `memoria` ({id_proceso: 0/1}) es lo último que se decidió para cada proceso en el
+    MISMO producto: si en otra OT de este artículo el roscado se marcó «va a mano», acá
+    también (memoria por artículo, reunión con Lucas del 29/9/2026). Un 0 ahí no le gana
+    a `a_mano`, que es lo que va a mano siempre."""
+    memoria = memoria or {}
+    return [(id_ot, id_por_nombre[clave], paso, minutos,
+             1 if (clave in a_mano or memoria.get(id_por_nombre[clave])) else 0)
             for paso, clave, minutos in lista]
 
 
@@ -421,9 +428,33 @@ _INSERT_PROCESO = """
     VALUES ($1, $2, $3, $4, 1, 1, $5)"""
 
 
+async def _memoria_de_mano(c, ids_ot) -> dict:
+    """{id de OT: {id_proceso: 0/1}}: lo último que se decidió para cada proceso en el
+    producto de esa OT —va a mano o no—, mirando la OT más nueva del artículo que lo
+    tenga. Ver filas_a_insertar."""
+    if not ids_ot:
+        return {}
+    filas = await c.fetch("""
+        WITH arts AS (
+            SELECT id, id_articulo FROM orden_trabajo
+            WHERE id = ANY($1::int[]) AND id_articulo IS NOT NULL)
+        SELECT DISTINCT ON (a.id, otp.id_proceso) a.id AS id_ot, otp.id_proceso, otp.no_lleva_maquina
+        FROM arts a
+        JOIN orden_trabajo ot ON ot.id_articulo = a.id_articulo
+        JOIN orden_trabajo_proceso otp ON otp.id_orden_trabajo = ot.id
+        ORDER BY a.id, otp.id_proceso, ot.fecha_orden DESC NULLS LAST, ot.id DESC, otp.id DESC""",
+                          list(ids_ot))
+    salida = defaultdict(dict)
+    for f in filas:
+        salida[f["id_ot"]][f["id_proceso"]] = int(f["no_lleva_maquina"] or 0)
+    return salida
+
+
 async def _insertar_procesos(c, id_ot, lista, id_por_nombre, a_mano):
     if lista:
-        await c.executemany(_INSERT_PROCESO, filas_a_insertar(id_ot, lista, id_por_nombre, a_mano))
+        memoria = (await _memoria_de_mano(c, [id_ot])).get(id_ot, {})
+        await c.executemany(_INSERT_PROCESO,
+                            filas_a_insertar(id_ot, lista, id_por_nombre, a_mano, memoria))
 
 
 def _foto(filas) -> str:
@@ -479,10 +510,15 @@ async def _escribir_recarga(c, sello, cabeceras_cambian, plan_procesos, spmm_ots
         await c.execute("DELETE FROM orden_trabajo_proceso WHERE id = ANY($1::bigint[])", borrar)
     await c.executemany("UPDATE orden_trabajo_proceso SET orden = $2, tiempo_proceso = $3 WHERE id = $1",
                         [fila for a, _, _ in plan_procesos.values() for fila in a])
+    # Lo que va a mano en el producto (memoria por artículo): se lee DESPUÉS de borrar y
+    # actualizar, así cuenta lo que quedó de esta misma OT y de las otras del artículo.
+    memoria = await _memoria_de_mano(
+        c, [spmm_ots[otv]["id"] for otv, (_, _, insertar) in plan_procesos.items() if insertar])
     await c.executemany(_INSERT_PROCESO,
                         [fila for otv, (_, _, insertar) in plan_procesos.items()
                          for fila in filas_a_insertar(spmm_ots[otv]["id"], insertar,
-                                                      id_por_nombre, a_mano)])
+                                                      id_por_nombre, a_mano,
+                                                      memoria.get(spmm_ots[otv]["id"], {}))])
 
 
 async def _escribir_cierres(c, sello, a_cerrar, cabeceras):

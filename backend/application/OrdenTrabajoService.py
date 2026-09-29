@@ -892,7 +892,10 @@ class OrdenTrabajoService:
             raise NotFoundException(
                 f"No se encontró el proceso {id_otp} en la orden de trabajo {id_orden}"
             )
-        return ResponseDTO(status=True, data=jsonable_encoder(linea))
+        data = jsonable_encoder(linea)
+        # Con «para el artículo»: cuántas pasadas de otras OT cambiaron con esta.
+        data["otras_del_articulo"] = getattr(linea, "otras_del_articulo", 0)
+        return ResponseDTO(status=True, data=data)
 
     async def obtenerHistorialProcesos(self, id_articulo: int, excluir_orden_id: int | None = None):
         """
@@ -910,6 +913,10 @@ class OrdenTrabajoService:
                 "cant_operarios": p.cant_operarios,
                 "id_maquinaria": p.id_maquinaria,
                 "id_operario": p.id_operario,
+                # «Va a mano»: lo que se decidió para este producto la vez pasada (la
+                # memoria por artículo, reunión con Lucas del 29/9/2026). La pantalla de
+                # alta ya lo lee.
+                "no_lleva_maquina": bool(getattr(p, "no_lleva_maquina", 0)),
                 "orden": p.orden,
             }
             for p in procs

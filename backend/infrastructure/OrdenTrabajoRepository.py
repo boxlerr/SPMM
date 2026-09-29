@@ -624,6 +624,31 @@ class OrdenTrabajoRepository:
             raise InfrastructureException("Error al obtener timeline de próximas entregas.") from e
 
 
+    async def _mismo_paso_del_articulo(self, id_orden: int, linea) -> list:
+        """Las otras pasadas del MISMO proceso en las OT abiertas del mismo artículo.
+
+        Es la memoria por artículo (ver editarProceso): lo que se decide en un paso vale
+        para ese paso en todas las OT del producto. Las pasadas terminadas no se tocan: ahí
+        ya no se planifica nada, y su dato es historia. Se traen como objetos del ORM y no
+        con un UPDATE suelto para que el cambio quede en la auditoría de cada OT.
+        """
+        id_articulo = (await self.db.execute(
+            select(OrdenTrabajo.id_articulo).where(OrdenTrabajo.id == id_orden))).scalar()
+        if id_articulo is None:
+            return []
+        query = (
+            select(OrdenTrabajoProceso)
+            .join(OrdenTrabajo, OrdenTrabajo.id == OrdenTrabajoProceso.id_orden_trabajo)
+            .where(
+                OrdenTrabajo.id_articulo == id_articulo,
+                OrdenTrabajoProceso.id_proceso == linea.id_proceso,
+                OrdenTrabajoProceso.id != linea.id,
+                func.coalesce(OrdenTrabajo.finalizadototal, 0) == 0,
+                func.coalesce(OrdenTrabajoProceso.id_estado, 1) != 3,
+            )
+        )
+        return list((await self.db.execute(query)).scalars().all())
+
     async def _buscar_linea(self, id_orden: int, id_proceso: int | None, id_otp: int | None):
         """
         Resuelve UNA pasada de proceso dentro de la OT.
@@ -1390,10 +1415,28 @@ class OrdenTrabajoRepository:
                 if k in editables:
                     setattr(linea, k, v)
 
+            # «No necesita máquina»: va a mano, y entonces tampoco lleva máquina elegida.
+            otras_del_articulo = []
+            if cambios.get("no_lleva_maquina") is not None:
+                va_a_mano = 1 if cambios["no_lleva_maquina"] else 0
+                linea.no_lleva_maquina = va_a_mano
+                if va_a_mano:
+                    linea.id_maquinaria = None
+                if cambios.get("para_el_articulo"):
+                    otras_del_articulo = await self._mismo_paso_del_articulo(id_orden, linea)
+                    for otra in otras_del_articulo:
+                        otra.no_lleva_maquina = va_a_mano
+                        if va_a_mano:
+                            otra.id_maquinaria = None
+
             await self._sellar_modificacion(id_orden, usuario)
+            for id_otra_ot in sorted({o.id_orden_trabajo for o in otras_del_articulo}):
+                await self._sellar_modificacion(id_otra_ot, usuario)
 
             await self.db.commit()
             await self.db.refresh(linea)
+            # Cuántas pasadas de otras OT cambiaron con esta (para contarlo en pantalla).
+            linea.otras_del_articulo = len(otras_del_articulo)
             logger.info("Repository - Pasada editada correctamente.")
             return linea
         except Exception as e:

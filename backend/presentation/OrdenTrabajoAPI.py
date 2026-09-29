@@ -336,6 +336,13 @@ class EditarProcesoRequest(BaseModel):
     cant_operarios: int | None = None
     id_maquinaria: int | None = None
     id_operario: int | None = None
+    # «No necesita máquina» (va a mano). True le saca además la máquina elegida.
+    no_lleva_maquina: bool | None = None
+    # Con `no_lleva_maquina`: la misma decisión para ese proceso en las otras OT abiertas
+    # del mismo artículo. Es la memoria por artículo que pidió Lucas el 29/9/2026: si el
+    # roscado de este eje va a mano, va a mano en todas sus OT, y el importador la copia
+    # a las que lleguen del sistema viejo (ver importar_ot_legacy).
+    para_el_articulo: bool | None = None
 
 
 @router.put("/ordenes/{id_orden}/procesos/linea/{id_otp}")
