@@ -29,6 +29,7 @@ import { SharedOperatorsList } from "@/components/resources/SharedOperatorsList"
 import { useCoberturaRangos, problemaDelProceso } from "@/hooks/useCoberturaRangos";
 import EditorRangosDe from "./_components/EditorRangosDe";
 import EditorMaquinasDe from "./_components/EditorMaquinasDe";
+import MaquinasDelProceso from "./_components/MaquinasDelProceso";
 import DesdeAviso from "./_components/DesdeAviso";
 import SinResultados, { type FiltroPuesto } from "./_components/SinResultados";
 import { BibliotecaPlanos } from "@/components/planos/BibliotecaPlanos";
@@ -89,6 +90,7 @@ interface LlegadaDesdeAviso {
 }
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
+import { maquinasEnPalabras, origenEnPalabras, resumenDeMaquinas } from "@/lib/maquinasDelProceso";
 import { etiquetaTipo } from "./_maquinaOpciones";
 import { rangoDePeriodo } from "@/lib/asistencia";
 import { type ResumenMaquinas, chipDeLaTabla, fmtHorasUso } from "@/lib/usoMaquina";
@@ -778,7 +780,22 @@ export default function RecursosPage() {
     },
     { titulo: "Recurso humano habilitado", tipo: "entero", valor: (p) => porProceso.get(p.id)?.habilitados ?? null },
     { titulo: "Habilitados a mano", tipo: "entero", valor: (p) => porProceso.get(p.id)?.por_habilidad_manual ?? null },
-    { titulo: "Recurso maquinaria", valor: (p) => (porProceso.get(p.id)?.maquinas ?? []).map((m) => m.nombre).join(", ") },
+    {
+      // Lo mismo que muestra la fila: las cargadas o, si nadie las cargó, las que el
+      // planificador deduce del nombre. Antes salían sólo las cargadas (8 de 415).
+      titulo: "Recurso maquinaria",
+      valor: (p) => {
+        const cob = porProceso.get(p.id);
+        return coberturaListo && cob ? maquinasEnPalabras(resumenDeMaquinas(cob)) : "";
+      },
+    },
+    {
+      titulo: "De dónde sale el recurso maquinaria",
+      valor: (p) => {
+        const cob = porProceso.get(p.id);
+        return coberturaListo && cob ? origenEnPalabras(resumenDeMaquinas(cob)) : "";
+      },
+    },
     { titulo: "Líneas en OT abiertas", tipo: "entero", valor: (p) => porProceso.get(p.id)?.lineas_abiertas ?? null },
     { titulo: "Descripción", valor: (p) => p.descripcion ?? "" },
   ];
@@ -1453,6 +1470,12 @@ export default function RecursosPage() {
                       >
                         Quién puede hacerlo
                       </th>
+                      <th
+                        className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground"
+                        title="En qué recurso maquinaria se hace. Con línea punteada y «por el nombre» está el que nadie cargó: es el que el planificador deduce del nombre del proceso."
+                      >
+                        Recurso maquinaria
+                      </th>
                       <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Descripción</th>
                       <th className="px-4 py-2.5 text-right text-sm font-medium text-muted-foreground">Acciones</th>
                     </tr>
@@ -1466,6 +1489,11 @@ export default function RecursosPage() {
                       const enUso = (cob?.lineas_abiertas ?? 0) > 0;
                       const sinRango = problema === "sin_rango";
                       const sinNadie = problema === "nadie";
+                      // Tocar la celda de la máquina abre el mismo panel que la de «Quién
+                      // puede hacerlo»; sin permiso para cambiar nada, la celda es de lectura.
+                      const abrirPanel = editaRangos || editaProcesos
+                        ? () => setProcesoAbierto(procesoAbierto === proceso.id ? null : proceso.id)
+                        : undefined;
                       return (
                       <React.Fragment key={proceso.id}>
                       <tr
@@ -1541,6 +1569,13 @@ export default function RecursosPage() {
                             </button>
                           )}
                         </td>
+                        {/* En qué máquina se hace. Sin esta columna la fila decía quién
+                            puede hacerlo pero no dónde, y de 415 procesos sólo 8 la tienen
+                            cargada: el resto el planificador lo deduce del nombre y no se
+                            veía. */}
+                        <td className="px-4 py-2 text-sm">
+                          <MaquinasDelProceso cob={cob} listo={coberturaListo} enUso={enUso} onAbrir={abrirPanel} />
+                        </td>
                         <td className="px-4 py-2 text-sm">{proceso.descripcion || "-"}</td>
                         <td className="px-4 py-2">
                           <div className="flex justify-end gap-2">
@@ -1567,7 +1602,7 @@ export default function RecursosPage() {
                       </tr>
                       {procesoAbierto === proceso.id && coberturaListo && (editaRangos || editaProcesos) && (
                         <tr>
-                          <td colSpan={4} className="p-0">
+                          <td colSpan={5} className="p-0">
                             {editoresDeProceso(proceso)}
                           </td>
                         </tr>
@@ -1595,6 +1630,24 @@ export default function RecursosPage() {
                         </div>
                       )}
                     </div>
+
+                    {/* En qué máquina se hace, también en el teléfono (ver la columna de la
+                        tabla de escritorio). */}
+                    {coberturaListo && (
+                      <div className="mb-3">
+                        <p className="text-xs text-muted-foreground mb-1">Recurso maquinaria</p>
+                        <MaquinasDelProceso
+                          cob={porProceso.get(proceso.id)}
+                          listo={coberturaListo}
+                          enUso={(porProceso.get(proceso.id)?.lineas_abiertas ?? 0) > 0}
+                          onAbrir={
+                            editaRangos || editaProcesos
+                              ? () => setProcesoAbierto(procesoAbierto === proceso.id ? null : proceso.id)
+                              : undefined
+                          }
+                        />
+                      </div>
+                    )}
 
                     {/* Quién lo hace y en qué máquina, también en el teléfono. Hasta ahora
                         los editores vivían sólo en la tabla de escritorio: el aviso del plan

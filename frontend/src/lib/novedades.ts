@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "procesos-en-que-maquina",
+        fecha: "2026-09-29",
+        tipo: "mejora",
+        seccion: "Recursos",
+        titulo: "En Procesos ves en qué recurso maquinaria se hace cada uno",
+        detalle:
+            "Antes la fila de un proceso decía quién puede hacerlo pero no en qué máquina: FRESADORA F6, por ejemplo, no decía nada. Ahora hay una columna «Recurso maquinaria». Si alguien cargó la máquina, sale tal cual. Si no, sale con línea punteada y la leyenda «por el nombre»: son las máquinas que el planificador va a usar según el nombre y el rango del proceso. FRESADORA F6 usa FRESADORA 1, FRESADORA 2 y FRESADORA VAN NORMAN, porque ninguna se llama F6. Los procesos que se hacen a mano dicen «No usa máquina», y los que no tienen ninguna que les sirva dicen «Sin máquina — asignar»: lo tocás y la cargás ahí mismo. Si una máquina cargada no la acepta el rango del proceso, sale en amarillo: el planificador no la usa. La columna también va en el Excel y el PDF.",
+        href: "/recursos?tab=procesos",
+    },
+    {
         id: "vista-previa-pantalla-completa",
         fecha: "2026-09-26",
         tipo: "mejora",

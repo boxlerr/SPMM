@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_URL } from "@/config";
+import type { MotivoSinMaquina, OrigenMaquinas } from "@/lib/maquinasDelProceso";
 
 /**
  * Cobertura cruzada rango ↔ maquinaria.
@@ -34,6 +35,16 @@ export interface ProcesoCobertura {
     rangos: RangoRef[];
     /** En qué máquinas se hace, si alguien lo cargó. Vacío = se deduce del nombre. */
     maquinas?: RangoRef[];
+    /**
+     * Con qué máquinas lo va a agendar el planificador, resuelto en el backend con las
+     * mismas reglas que el solver (ver `lib/maquinasDelProceso`): las cargadas, las que
+     * deduce del nombre, ninguna porque va a mano, o ninguna porque no encuentra. Los
+     * cuatro son opcionales: un backend sin deployar no los manda.
+     */
+    maquinas_origen?: OrigenMaquinas;
+    maquinas_efectivas?: RangoRef[];
+    maquinas_sin_rango?: RangoRef[];
+    maquinas_motivo?: MotivoSinMaquina | null;
     /** Cuántos operarios DISPONIBLES pueden hacerlo (por rango o habilidad manual). */
     habilitados: number;
     por_habilidad_manual: number;

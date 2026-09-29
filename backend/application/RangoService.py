@@ -56,6 +56,11 @@ class RangoService:
         try:
             logger.info("Service - Cobertura de rangos.")
             data = await self.repository.find_cobertura()
+            # A cada proceso, las máquinas con las que el planificador lo va a agendar
+            # (cargadas o deducidas del nombre). Se importa acá y no arriba porque el
+            # módulo arrastra al planificador entero, y el resto de este servicio no lo usa.
+            from backend.application.MaquinasDelProceso import con_maquinas_de_cada_proceso
+            data = con_maquinas_de_cada_proceso(data)
             return ResponseDTO(status=True, data=jsonable_encoder(data))
         except InfrastructureException as e:
             logger.error(f"Service - Error de infraestructura en cobertura: {e}")
