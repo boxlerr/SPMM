@@ -216,6 +216,9 @@ class RangoRepository:
                         "id": m.id,
                         "nombre": m.nombre,
                         "cod_maquina": m.cod_maquina,
+                        # El tipo decide la familia antes que el nombre (torno CNC o
+                        # convencional): MaquinasDelProceso lo usa igual que el solver.
+                        "tipo": getattr(m, "tipo", None),
                         "rangos": [
                             {"id": rid, "nombre": nombre_rango.get(rid, f"#{rid}")}
                             for rid in sorted(por_maquina.get(m.id, []),

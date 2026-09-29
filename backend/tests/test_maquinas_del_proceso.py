@@ -179,10 +179,9 @@ def test_una_maquina_dada_de_baja_no_cuenta_como_cargada():
     r = maquinas_del_proceso("TORNO T1", _rangos("OFICIAL"),
                              [{"id": 999999, "nombre": "TORNO FANTASMA"}], TALLER)
     assert r["origen"] == ORIGEN_NOMBRE
-    # Toda la familia TORNO que acepta OFICIAL: los seis convencionales y los tres CNC
-    # (también tienen OFICIAL), que es lo que el solver le ofrece a un «TORNO T1».
-    assert _ids(r["efectivas"]) == _ids_de(
-        *TORNOS_CONVENCIONALES, "TORNO CNC 1", "TORNO CNC 2", "TORNO CNC 3")
+    # Los seis tornos convencionales. Los CNC también aceptan OFICIAL, pero desde el
+    # 29/9/2026 son otra familia: sin «CNC» en el nombre, el trabajo es convencional.
+    assert _ids(r["efectivas"]) == _ids_de(*TORNOS_CONVENCIONALES)
 
 
 def test_una_familia_que_el_taller_no_tiene_dice_que_no_hay_maquina():
@@ -214,11 +213,11 @@ def test_una_preparacion_sin_familia_busca_la_maquina_por_parecido_de_nombre():
 
 
 def test_sin_rangos_se_listan_todas_las_de_la_familia():
-    """Un proceso sin rango no filtra: puede ir a cualquiera de su familia (incluida la CNC).
-    El solver, en cambio, le presta rangos por parecido de nombre; ver el módulo."""
+    """Un proceso sin rango no filtra: puede ir a cualquiera de su familia (la CNC no: es
+    otra familia desde el 29/9/2026). El solver, en cambio, le presta rangos por parecido
+    de nombre; ver el módulo."""
     r = _resolver("FRESADORA", rangos=())
-    assert _ids(r["efectivas"]) == _ids_de(
-        "FRESADORA 1", "FRESADORA 2", "FRESADORA CNC", "FRESADORA VAN NORMAN")
+    assert _ids(r["efectivas"]) == _ids_de("FRESADORA 1", "FRESADORA 2", "FRESADORA VAN NORMAN")
 
 
 # ── La cobertura entera ───────────────────────────────────────────────────────
@@ -370,7 +369,8 @@ def _dominio_del_solver(nombre, rangos, cargadas):
     usa_maquina = proceso_usa_maquina(nombre, es_tercerizado=tercerizado)
     familia = familia_requerida_from_proceso(nombre) if usa_maquina else ""
     procesos_norm = [(1, proc_id, 1, None, 5, 60, ids_rango, nombre, usa_maquina, familia, {})]
-    maquinarias = [(m["id"], {r["id"] for r in m["rangos"]}, m["nombre"], m["cod_maquina"])
+    # Con el tipo quinto, como lo cargan los loaders del planificador.
+    maquinarias = [(m["id"], {r["id"] for r in m["rangos"]}, m["nombre"], m["cod_maquina"], m.get("tipo"))
                    for m in TALLER]
     salida = _crear_variables_y_dominios(
         cp_model.CpModel(), procesos_norm, [(10, 1)], maquinarias, set(), set(),

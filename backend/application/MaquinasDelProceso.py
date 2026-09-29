@@ -124,9 +124,10 @@ def maquinas_del_proceso(nombre: str, rangos: list[dict], cargadas: list[dict],
 
     # 2. Sin dato cargado: la familia que dice el nombre.
     familia = familia_requerida_from_proceso(nombre)
+    # Con el tipo cargado en Recursos, como el solver: es lo que dice si es CNC.
     de_la_familia = [
         m for m in maquinas
-        if familia and familia_from_maquina(m["nombre"], m.get("cod_maquina") or "") == familia
+        if familia and familia_from_maquina(m["nombre"], m.get("cod_maquina") or "", m.get("tipo")) == familia
     ]
     usables = [m for m in de_la_familia if _acepta(pide, m)]
 
