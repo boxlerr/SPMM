@@ -132,13 +132,17 @@ def estimar_plan(
     pn, _h = PS._normalizar_procesos(procesos, PS.PRIORIDAD_PESOS)
     pn, cant2, presel_maq2, presel_op2, partes = PS._partir_y_heredar(
         pn, cant_op_map, preseleccion_maq, preseleccion_op)
+    # Qué trabajo prepara cada preparación (hereda quién lo tiene cargado a mano), igual
+    # que en el solver.
+    setup_de = PS._setup_hereda_de(pn, partes)
     # Los dominios salen de la misma función del solver, sobre un modelo descartable. Los
     # dos conjuntos de rangos que pide sólo pesan en la penalización del solver, no en
     # quién puede hacer qué (ver _resolver_planificacion).
     (_, _, _, _, _, dur_map, op_to_rango, REAL_OP, DOP, _REAL_MAQ, DMAQ, maq_to_rangos,
      maq_to_familia, op_dom, maq_dom, _, _) = PS._crear_variables_y_dominios(
         cp_model.CpModel(), pn, operarios, maquinarias, {1, 11}, {8, 14}, nativas_off, cant2,
-        presel_maq2, op_planos, ots_con_plano, skills_manuales, presel_op2, maquinas_por_proceso)
+        presel_maq2, op_planos, ots_con_plano, skills_manuales, presel_op2, maquinas_por_proceso,
+        setup_de=setup_de)
     # Los acompañantes (pasos de a 2 o más) salen del MISMO conjunto que usa el solver:
     # el del principal ANTES de la persona elegida a mano (`operarios_para_acompanantes`
     # en _crear_variables_y_dominios). Con la persona elegida, el dominio del principal es
@@ -149,13 +153,14 @@ def estimar_plan(
     if presel_op2 and any(int(cant2.get(k, 1) or 1) > 1 for k in presel_op2):
         (_, _, _, _, _, _, _, _, _, _, _, _, _, op_dom_libre, _, _, _) = PS._crear_variables_y_dominios(
             cp_model.CpModel(), pn, operarios, maquinarias, {1, 11}, {8, 14}, nativas_off, cant2,
-            presel_maq2, op_planos, ots_con_plano, skills_manuales, None, maquinas_por_proceso)
+            presel_maq2, op_planos, ots_con_plano, skills_manuales, None, maquinas_por_proceso,
+            setup_de=setup_de)
         acompanantes_de = {k: set(v) for k, v in op_dom_libre.items()}
     op_to_rangos = {}
     for o, r in operarios:
         op_to_rangos.setdefault(o, set()).add(r)
     pares = PS._pares_permitidos(pn, op_dom, maq_dom, op_to_rango, maq_to_rangos,
-                                 maq_to_familia, DOP, DMAQ, op_to_rangos, skills_manuales)
+                                 maq_to_familia, DOP, DMAQ, op_to_rangos, skills_manuales, setup_de)
 
     reales = set(REAL_OP)
     cal = {o: c for o, c in (calendarios or {}).items() if o in reales}
@@ -301,6 +306,13 @@ def estimar_plan(
         if len(ops_k) == 1:
             unico_de[k] = next(iter(ops_k))
 
+    # Preparación y trabajo que van SEGUIDOS (PS._agregar_preparacion_pegada): el reparto
+    # los programa juntos, como un bloque. Si no, este reparto —que es el punto de partida
+    # del solver— los separaría y el solver arrancaría de un plan que no le sirve.
+    # Los pasos de a dos o más personas quedan afuera: el bloque es de una sola persona.
+    pegada_con = {s: p for s, p in PS._preparaciones_pegadas(pn, partes)
+                  if int(cant2.get(s, 1) or 1) == 1 and int(cant2.get(p, 1) or 1) == 1}
+
     def repartir(n_semanas, regla: str, cuidar_unicos: bool, guia: str = "libre"):
         ventanas = PS.construir_ventanas_semanales(n_semanas, start_date, list(feriados),
                                                    fecha_hasta=None, incluir_sabado=hay_sabado)
@@ -355,6 +367,23 @@ def estimar_plan(
                 if not avanzo:
                     return None   # no entra en el horizonte armado
 
+        def hueco_en_bloque(desde, dur_prep, dur_trab, recursos, ops_con_horario):
+            """El primer arranque en que la preparación y su trabajo entran SEGUIDOS con
+            estos recursos: la preparación en [T, T+dur_prep) y el trabajo desde T+dur_prep.
+            Cada vuelta avanza hasta el próximo lugar posible, nunca de a un minuto."""
+            t = desde
+            while True:
+                ini = primer_hueco(t, dur_prep, recursos, ops_con_horario)
+                if ini is None:
+                    return None
+                pegado = ini + dur_prep
+                ini_trab = primer_hueco(pegado, dur_trab, recursos, ops_con_horario)
+                if ini_trab is None:
+                    return None
+                if ini_trab == pegado:
+                    return ini
+                t = max(ini + 1, ini_trab - dur_prep)
+
         exclusivas_pendientes = defaultdict(int)
         for k, o in unico_de.items():
             exclusivas_pendientes[o] += dur_map[k]
@@ -378,6 +407,17 @@ def estimar_plan(
             gente = max(1, int(cant2.get(k, 1) or 1))
             desde = listo[k]
             g = raiz(k)
+            # Si es una preparación que va pegada a su trabajo, los dos van en bloque
+            # (ver pegada_con). Sólo si hay pares que sirvan para los dos: si no, el que
+            # prepara no puede hacer el trabajo y el bloque no tiene sentido.
+            trabajo = pegada_con.get(k) if g in pares_grupo else None
+            dur_trab = dur_map[trabajo] if trabajo is not None else 0
+
+            def hueco(recursos, ops_con_horario):
+                if trabajo is None:
+                    return primer_hueco(desde, dur, recursos, ops_con_horario)
+                return hueco_en_bloque(desde, dur, dur_trab, recursos, ops_con_horario)
+
             candidatos = reales_de[k]
             if g in pares_grupo:
                 # Sólo pares que sirven para todo el grupo (ver pares_grupo). Si no queda
@@ -396,7 +436,7 @@ def estimar_plan(
                 candidatos = filtrados or candidatos
             mejor = None
             if not candidatos:
-                ini = primer_hueco(desde, dur, [], [])
+                ini = hueco([], [])
                 if ini is None:
                     return None
                 mejor = (ini + dur, ini, None, None, [])
@@ -417,13 +457,13 @@ def estimar_plan(
                     recursos = [("op", o)] + [("op", x) for x in extra] + ([("maq", maq)] if maq is not None else [])
                     # El horario que se mira es el del principal: el solver no le aplica
                     # el turno a los acompañantes.
-                    ini = primer_hueco(desde, dur, recursos, [o])
+                    ini = hueco(recursos, [o])
                     if ini is None:
                         continue
                     # Al único que sabe algo se le cobra lo que todavía le queda de eso:
                     # sólo toma trabajo ajeno si igual termina antes que los demás.
                     cargo = (exclusivas_pendientes[o] if (cuidar_unicos and unico_de.get(k) != o) else 0)
-                    clave = (ini + dur + cargo, ocupado[("op", o)], o, maq if maq is not None else -1)
+                    clave = (ini + dur + dur_trab + cargo, ocupado[("op", o)], o, maq if maq is not None else -1)
                     if mejor_clave is None or clave < mejor_clave:
                         mejor_clave, mejor = clave, (ini + dur, ini, o, maq, extra)
                 if mejor is None:
@@ -431,29 +471,38 @@ def estimar_plan(
                     # sale a las 15:00 y un paso que sólo entra de 12:30 a 16:00). El
                     # solver lo deja como excedente; acá se cuenta sin gente y va a
                     # «nadie del taller puede», en vez de perder la cuenta entera.
-                    ini = primer_hueco(desde, dur, [], [])
+                    ini = hueco([], [])
                     if ini is None:
                         return None
                     mejor = (ini + dur, ini, None, None, [])
-                    sin_lugar[0] += dur * gente
+                    sin_lugar[0] += (dur + dur_trab) * gente
             fin, ini, o, maq, extra = mejor
+            # El bloque: la preparación en [ini, fin) y su trabajo pegado, [fin, fin_bloque).
+            fin_bloque = fin + dur_trab
             if o is not None:
                 par_del_grupo.setdefault(g, (o, maq if maq is not None else DMAQ))
                 for x in [o] + extra:
-                    agenda[("op", x)].ocupar(ini, fin)
-                    ocupado[("op", x)] += dur
+                    agenda[("op", x)].ocupar(ini, fin_bloque)
+                    ocupado[("op", x)] += dur + dur_trab
                 if maq is not None:
-                    agenda[("maq", maq)].ocupar(ini, fin)
-                    ocupado[("maq", maq)] += dur
+                    agenda[("maq", maq)].ocupar(ini, fin_bloque)
+                    ocupado[("maq", maq)] += dur + dur_trab
             fin_de[k] = fin
             asignado[k] = (ini, o, maq, list(extra))
             if k in unico_de:
                 exclusivas_pendientes[unico_de[k]] -= dur
-            lista = por_ot[k[0]]
-            i = lista.index(k)
+            ultimo = k
+            if trabajo is not None:
+                fin_de[trabajo] = fin_bloque
+                asignado[trabajo] = (fin, o, maq, [])
+                if trabajo in unico_de:
+                    exclusivas_pendientes[unico_de[trabajo]] -= dur_trab
+                ultimo = trabajo
+            lista = por_ot[ultimo[0]]
+            i = lista.index(ultimo)
             if i + 1 < len(lista):
                 sig = lista[i + 1]
-                listo[sig] = fin
+                listo[sig] = fin_de[ultimo]
                 heapq.heappush(cola, (prioridad(sig), sig))
         return ventanas, fin_de, agenda, ocupado, sin_lugar[0], asignado
 

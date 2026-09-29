@@ -76,14 +76,24 @@ PRIORIDAD_PESOS = {"urgente": 1, "urgente 1": 1, "urgente 2": 2, "normal": 3, "b
 #
 #   1. dejar un paso AFUERA del plan (excedente) ......... W_FUERA × PESO_EXCED_POR_PRIO
 #   2. dejar un paso SIN PERSONA o SIN MÁQUINA ............ penal_sin_recurso(H)
-#   3. ATRASO contra la fecha prometida, por minuto:
-#        - de cada paso ................................... ATRASO_MULT_POR_PRIORIDAD
+#   3. cada minuto que una OT queda ABIERTA entre su primer
+#      paso y el último (OT de corrido, si OT_DE_CORRIDO) .. W_OT_DE_CORRIDO
+#   4. ATRASO contra la fecha prometida, por minuto:
+#        - de cada paso (con OT de corrido, sólo del último:
+#          el fin de la OT) ............................... ATRASO_MULT_POR_PRIORIDAD
 #        - de la OT MÁS atrasada .......................... ATRASO_MAX_EQUIV × el suyo
-#   4. cada minuto que el plan o una OT terminan más tarde,
+#   5. cada minuto que el plan o una OT terminan más tarde,
 #      aunque no sea atraso .............................. W_FIN_PLAN, W_FIN_OT
 #
-# El escalón 4 no existía (sólo 1 punto por minuto de arranque de cada paso): si nada
+# El escalón 5 no existía (sólo 1 punto por minuto de arranque de cada paso): si nada
 # estaba atrasado, nada empujaba a terminar antes (Lucas, 25/9/2026).
+#
+# El 3 es de la reunión del 29/9/2026. Con el atraso cobrado paso por paso, al solver le
+# convenía arrancar los primeros pasos de TODAS las OT cuanto antes, aunque después
+# esperaran días: en el plan de las 48 OT del piloto sólo 2 iban de corrido, la espera
+# dentro de las OT sumaba 91.262 minutos de trabajo y «ninguna termina en la semana»
+# (Lucas). Lo acordado: «esta orden hay que empezarla y terminarla», por ahora siempre;
+# la opción flexible queda para más adelante (OT_DE_CORRIDO = False la devuelve).
 ATRASO_MULT_POR_PRIORIDAD = {1: 1000, 2: 800, 3: 500, 4: 300, 5: 200}
 # Pesos de prioridad para excedentes (más agresivo: prio 1 vale 100x prio 5)
 PESO_EXCED_POR_PRIO = {1: 10000, 2: 5000, 3: 1000, 4: 300, 5: 100}
@@ -102,6 +112,12 @@ ATRASO_MAX_EQUIV = 30
 # carga (lo marca el más cargado); los dos quedan debajo del atraso más barato (200).
 W_FIN_PLAN = 100
 W_FIN_OT = 20
+# OT de corrido (ver la jerarquía arriba). Por minuto que la OT queda abierta entre su
+# primer paso y el último: por encima del atraso más caro (1000), así hacer la OT de un
+# tirón le gana a adelantarle un paso a otra; y muy por debajo de dejar un paso sin
+# persona o afuera, así nunca se paga con eso.
+OT_DE_CORRIDO = True
+W_OT_DE_CORRIDO = 2_000
 # Sembrar el reparto rápido como punto de partida del solver (ver _sembrar_reparto).
 SEMBRAR_REPARTO = True
 
@@ -122,7 +138,8 @@ def penal_sin_recurso(H: int) -> int:
     de la OT.
     """
     peor = max(ATRASO_MULT_POR_PRIORIDAD.values())
-    por_minuto = 10 * peor + ATRASO_MAX_EQUIV * peor + W_FIN_PLAN + W_FIN_OT
+    por_minuto = (10 * peor + ATRASO_MAX_EQUIV * peor + W_FIN_PLAN + W_FIN_OT
+                  + (W_OT_DE_CORRIDO if OT_DE_CORRIDO else 0))
     return max(1_000_000, H * por_minuto + 1)
 
 
@@ -526,10 +543,14 @@ def _crear_variables_y_dominios(
     skills_manuales=None,
     preseleccion_op=None,
     maquinas_por_proceso=None,
+    setup_de=None,
 ):
     """
     Crea variables de inicio/fin/intervalos, dominios de operarios/maquinarias
     y devuelve todos los dicts necesarios para el resto del modelo.
+
+    `setup_de`: {clave de una preparación: id del proceso que prepara} (ver
+    _setup_hereda_de). La preparación suma a quienes tienen ESE trabajo cargado a mano.
 
     `cant_op_map`: dict {(orden_id, secuencia): cantidad_operarios}. Para procesos
     que requieren más de 1 operario se crean variables de operario adicionales
@@ -636,7 +657,12 @@ def _crear_variables_y_dominios(
         # porque `operarios` sale de operario_rango: un operario sin ningún rango no
         # existe para el resto del modelo (no tiene calendario ni no-overlap), y meterlo
         # en el dominio lo dejaría asignable sin ninguna de esas restricciones.
-        manuales = skills_manuales.get(proc_id)
+        manuales = set(skills_manuales.get(proc_id) or ())
+        # Una preparación también la puede hacer quien tiene cargado a mano el trabajo
+        # que prepara (ver _setup_hereda_de).
+        prod_de_este = (setup_de or {}).get((orden_id, secuencia))
+        if prod_de_este is not None:
+            manuales |= set(skills_manuales.get(prod_de_este) or ())
         if manuales:
             reales = set(REAL_OP_IDS)
             operarios_validos += [op_id for op_id in manuales if op_id in reales]
@@ -1143,6 +1169,70 @@ def _pares_setup_produccion(procesos_norm, partes=None):
     return pares
 
 
+def _preparaciones_pegadas(procesos_norm, partes=None) -> list[tuple]:
+    """[(último tramo de la preparación, primer tramo de su trabajo)] de los pares que van
+    uno detrás del otro en la OT, sin ningún paso en el medio.
+
+    Son los que tienen que ir SEGUIDOS (ver _agregar_preparacion_pegada). Si entre la
+    preparación y su trabajo la OT tiene otro paso, «seguido» es imposible —ese paso va en
+    el medio— y el par se deja como estaba.
+    """
+    orden_de = {}
+    for ot in {p[0] for p in procesos_norm}:
+        claves = sorted((p[0], p[2]) for p in procesos_norm if p[0] == ot)
+        for i, k in enumerate(claves):
+            orden_de[k] = i
+    salida = []
+    for claves_setup, claves_prod in _pares_setup_produccion(procesos_norm, partes):
+        ultima, primera = claves_setup[-1], claves_prod[0]
+        if orden_de.get(primera) == orden_de.get(ultima, -2) + 1:
+            salida.append((ultima, primera))
+    return salida
+
+
+def _agregar_preparacion_pegada(model, procesos_norm, inicio_vars, fin_vars, presente_vars=None,
+                                partes=None):
+    """La preparación y su trabajo van SEGUIDOS: el trabajo arranca cuando termina de
+    prepararse la máquina.
+
+    Lucas, 29/9/2026, sobre la OT 15644: «preparación de torno va con torno seguido». La
+    misma persona y la misma máquina ya estaban (_agregar_coordinacion_maq_setup), pero el
+    tiempo no: preparaba el torno a las 07:20 y lo usaba a las 14:45, o al día siguiente.
+    En el plan de las 48 OT del piloto 58 de 96 preparaciones quedaban separadas de su
+    trabajo, una por siete días.
+
+    En minutos de TRABAJO: si la preparación termina al cierre de la jornada, el trabajo
+    arranca a la mañana siguiente, que es el minuto de al lado en la línea del plan.
+    """
+    for ultima, primera in _preparaciones_pegadas(procesos_norm, partes):
+        restr = model.Add(inicio_vars[primera] == fin_vars[ultima])
+        if presente_vars is not None:
+            restr.OnlyEnforceIf([presente_vars[ultima], presente_vars[primera]])
+
+
+def _setup_hereda_de(procesos_norm, partes=None) -> dict:
+    """{clave de cada tramo de una preparación: id de proceso del trabajo que prepara}.
+
+    La preparación hereda del trabajo la familia y los rangos (_partir_y_heredar), y con
+    esto también quién lo puede hacer por habilidad CARGADA A MANO. Faltaba: Nahuel es
+    MEDIO OFICIAL y suelda con MIG porque se lo cargaron a mano, pero la preparación de
+    la soldadora hereda el rango OFICIAL de la soldadura y su habilidad manual no le
+    alcanzaba para prepararla. Como preparación y soldadura van con la misma persona
+    (_agregar_coordinacion_maq_setup), el par entero se iba a un oficial: en la OT 15644
+    soldó Matías y Nahuel quedó en el desarmado (reunión con Lucas, 29/9/2026). El que
+    hace el trabajo prepara la máquina: si alguien puede hacer uno, puede hacer el otro.
+    """
+    por_clave = {(p[0], p[2]): p for p in procesos_norm}
+    salida = {}
+    for claves_setup, claves_prod in _pares_setup_produccion(procesos_norm, partes):
+        prod = por_clave.get(claves_prod[0])
+        if prod is None:
+            continue
+        for clave in claves_setup:
+            salida[clave] = prod[1]
+    return salida
+
+
 def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars=None,
                                     op_domain_vals=None, *, dummy_op_id,
                                     partes=None, maq_domain_vals=None):
@@ -1248,6 +1338,7 @@ def _agregar_compatibilidad_op_maq(
     DUMMY_MAQ_ID,
     op_to_rangos=None,
     skills_manuales=None,
+    setup_de=None,
 ):
     """
     Añade restricciones de compatibilidad Operario–Maquinaria
@@ -1273,14 +1364,14 @@ def _agregar_compatibilidad_op_maq(
     """
     pares = _pares_permitidos(procesos_norm, op_domain_vals, maq_domain_vals, op_to_rango,
                               maq_to_rangos, maq_to_familia, DUMMY_OP_ID, DUMMY_MAQ_ID,
-                              op_to_rangos, skills_manuales)
+                              op_to_rangos, skills_manuales, setup_de)
     for clave, allowed_pairs in pares.items():
         model.AddAllowedAssignments([operario_vars[clave], maq_vars[clave]], allowed_pairs)
 
 
 def _pares_permitidos(procesos_norm, op_domain_vals, maq_domain_vals, op_to_rango,
                       maq_to_rangos, maq_to_familia, DUMMY_OP_ID, DUMMY_MAQ_ID,
-                      op_to_rangos=None, skills_manuales=None):
+                      op_to_rangos=None, skills_manuales=None, setup_de=None):
     """{(orden_id, secuencia): [[operario, máquina], ...]} que el solver permite.
 
     Es la regla de `_agregar_compatibilidad_op_maq` (ver su docstring), sacada a una
@@ -1289,6 +1380,7 @@ def _pares_permitidos(procesos_norm, op_domain_vals, maq_domain_vals, op_to_rang
     """
     op_to_rangos = op_to_rangos or {}
     skills_manuales = skills_manuales or {}
+    setup_de = setup_de or {}
     resultado = {}
     for (orden_id, proc_id, secuencia, _fp,
         _pp, _dur, rangos_proc, _nombre_proc, usa_maquina,familia_req, _skills) in procesos_norm:
@@ -1305,6 +1397,9 @@ def _pares_permitidos(procesos_norm, op_domain_vals, maq_domain_vals, op_to_rang
 
         needs = set(rangos_proc)
         con_manual = set(skills_manuales.get(proc_id, ()))
+        # La preparación, también con lo cargado a mano del trabajo que prepara.
+        if (orden_id, secuencia) in setup_de:
+            con_manual |= set(skills_manuales.get(setup_de[(orden_id, secuencia)], ()))
         allowed_pairs = []
 
         for op_id in ops_dom:
@@ -1497,16 +1592,15 @@ def _agregar_funcion_objetivo(
         entrega = minuto_de_entrega(fecha_prometida, ventanas) if ventanas else None
         deadline_rel = H * 10 if entrega is None else min(entrega, H * 10)
 
-        diff = model.NewIntVar(-H * 10, H * 10, f"diff_{orden_id}_{secuencia}")
-        model.Add(diff == end - deadline_rel)
-
-        lateness = model.NewIntVar(0, H * 10, f"late_{orden_id}_{secuencia}")
-        model.AddMaxEquality(lateness, [diff, 0])
-
         mult = atraso_mult_por_prioridad.get(peso_prioridad, 200)
-        if secuencia == ultimo_de_ot.get(orden_id) and entrega is not None:
+        es_ultimo = secuencia == ultimo_de_ot.get(orden_id)
+        if es_ultimo and entrega is not None:
             # El último paso de la OT: su atraso es el de la OT (ver ATRASO_MAX_EQUIV).
             atraso_de_ot[orden_id] = (end, deadline_rel, mult)
+        # Con OT de corrido se cobra el atraso de la OT —cuándo TERMINA—, no el de cada
+        # paso: cobrarlo paso por paso es lo que premiaba arrancar todas las OT a la vez y
+        # dejarlas esperando (ver la jerarquía, escalón 3).
+        cobra_atraso = es_ultimo or not OT_DE_CORRIDO
 
         presente = presente_vars[(orden_id, secuencia)] if presente_vars is not None else None
 
@@ -1527,8 +1621,13 @@ def _agregar_funcion_objetivo(
             model.AddBoolOr([b.Not(), presente.Not()]).OnlyEnforceIf(eff.Not())
             return eff
 
-        late_eff = _gate_int(lateness, H * 10, f"late_eff_{orden_id}_{secuencia}")
-        total_obj.append((late_eff, mult))
+        if cobra_atraso:
+            diff = model.NewIntVar(-H * 10, H * 10, f"diff_{orden_id}_{secuencia}")
+            model.Add(diff == end - deadline_rel)
+            lateness = model.NewIntVar(0, H * 10, f"late_{orden_id}_{secuencia}")
+            model.AddMaxEquality(lateness, [diff, 0])
+            late_eff = _gate_int(lateness, H * 10, f"late_eff_{orden_id}_{secuencia}")
+            total_obj.append((late_eff, mult))
 
         # Prioridad de skill (SKILL 1 < SKILL 2 < nativa), solo si el proceso entra
         # al plan: un excedente no debe pagar preferencia de operario.
@@ -1582,8 +1681,11 @@ def _agregar_funcion_objetivo(
     # liviano. Lo que quedó afuera del plan no tiene fin que cuidar: su `fin` queda libre y
     # el solver lo baja solo.
     fines_por_ot = {}
+    primera_de_ot = {}
     for (orden_id, _p, secuencia, *_r) in procesos_norm:
         fines_por_ot.setdefault(orden_id, []).append(fin_vars[(orden_id, secuencia)])
+        if secuencia < primera_de_ot.get(orden_id, (orden_id, secuencia + 1))[1]:
+            primera_de_ot[orden_id] = (orden_id, secuencia)
     if fines_por_ot:
         fin_plan = model.NewIntVar(0, H, "fin_plan")
         for orden_id, fines in fines_por_ot.items():
@@ -1592,6 +1694,17 @@ def _agregar_funcion_objetivo(
                 model.Add(fin_ot >= f)
             model.Add(fin_plan >= fin_ot)
             total_obj.append((fin_ot, W_FIN_OT))
+            # --- OT de corrido: cada minuto que la OT queda abierta ---
+            # Del arranque de su primer paso al fin del último. Lo que la OT trabaja es
+            # fijo, así que achicar esto es achicar la espera entre sus pasos. Si la OT
+            # quedó afuera del plan no cuenta: `abierta` puede quedar en 0.
+            if OT_DE_CORRIDO and W_OT_DE_CORRIDO:
+                primera = primera_de_ot[orden_id]
+                abierta = model.NewIntVar(0, H, f"abierta_ot_{orden_id}")
+                restr = model.Add(abierta >= fin_ot - inicio_vars[primera])
+                if presente_vars is not None:
+                    restr.OnlyEnforceIf(presente_vars[primera])
+                total_obj.append((abierta, W_OT_DE_CORRIDO))
         total_obj.append((fin_plan, W_FIN_PLAN))
 
     # --- El atraso de la OT más atrasada (ver ATRASO_MAX_EQUIV) ---
@@ -2378,6 +2491,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op, partes = _partir_y_heredar(
         procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op
     )
+    # Qué trabajo prepara cada preparación: hereda también quién lo tiene cargado a mano.
+    setup_de = _setup_hereda_de(procesos_norm, partes)
 
     # ¿Trabaja alguien los sábados? Si no, el día no aporta capacidad y hay que contar
     # más semanas para el mismo trabajo; si lo dejáramos como antes, el horizonte se
@@ -2512,6 +2627,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
             skills_manuales,
             preseleccion_op,
             maquinas_por_proceso,
+            setup_de=setup_de,
         )
 
         # El reparto rápido como punto de partida: el solver arranca con todo adentro.
@@ -2536,10 +2652,13 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         for _op_id, _r_id in operarios:
             op_to_rangos.setdefault(_op_id, set()).add(_r_id)
 
-        _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID,op_to_rangos,skills_manuales)
+        _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID,op_to_rangos,skills_manuales,
+                                       setup_de=setup_de)
         _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars, op_domain_vals,
                                         dummy_op_id=DUMMY_OP_ID, partes=partes,
                                         maq_domain_vals=maq_domain_vals)
+        _agregar_preparacion_pegada(model, procesos_norm, inicio_vars, fin_vars,
+                                    presente_vars=presente_vars, partes=partes)
         _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars)
 
         con_horario_propio = sum(
@@ -3154,7 +3273,7 @@ def minutos_de_lo_que_falta(tiempo_proceso, nombre_proceso: str, unidades, hecha
     return max(1, math.ceil(total * (unidades - hechas) / unidades))
 
 
-def _marcar_lineas(resultados, linea_por_clave, lote_por_clave=None):
+def _marcar_lineas(resultados, linea_por_clave, lote_por_clave=None, a_mano=None):
     """
     Le pega a cada fila del resultado el id de la PASADA que la originó, para que
     `planificacion.id_orden_trabajo_proceso` pueda apuntar a la línea exacta.
@@ -3169,6 +3288,9 @@ def _marcar_lineas(resultados, linea_por_clave, lote_por_clave=None):
     for r in resultados or []:
         clave = (r.get("orden_id"), r.get("secuencia"))
         r["id_orden_trabajo_proceso"] = linea_por_clave.get(clave)
+        # «Va a mano» porque así lo marcó el taller en ese paso (no porque el proceso sea
+        # de banco): la pantalla lo muestra como «No necesita» y deja volver atrás.
+        r["va_a_mano"] = clave in (a_mano or ())
         lote = (lote_por_clave or {}).get(clave)
         if lote:
             r["minutos_lote"], r["unidades_lote"], r["unidades_faltan"] = lote
@@ -3391,6 +3513,7 @@ async def planificar(
     preseleccion_maq = {}  # (orden_id, secuencia) -> id_maquinaria forzada (preselección Metlo)
     preseleccion_op = {}   # (orden_id, secuencia) -> id_operario forzado (elegido al cargar la OT)
     linea_por_clave = {}   # (orden_id, secuencia) -> orden_trabajo_proceso.id (qué pasada es)
+    a_mano_por_clave = set()  # pasos marcados «va a mano» en la OT
     lote_por_clave = {}    # (orden_id, secuencia) -> (min del lote, unidades, faltan) si se achicó
     procesos_sin_rango = {}  # id_proceso -> nombre, para avisar al final
     # id_proceso -> rangos que tiene cargados en Recursos. Se anotan SOLO los procesos
@@ -3425,6 +3548,8 @@ async def planificar(
         for secuencia, rel in _lineas_ordenadas(_elegidas):
             linea_por_clave[(orden.id, secuencia)] = getattr(rel, "id", None)
             cant_op_map[(orden.id, secuencia)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
+            if getattr(rel, "no_lleva_maquina", 0):
+                a_mano_por_clave.add((orden.id, secuencia))
             # Preselección de máquina: si el proceso tiene máquina elegida, se fuerza en el solver.
             _presel_maq = getattr(rel, "id_maquinaria", None)
             if _presel_maq:
@@ -3615,7 +3740,7 @@ async def planificar(
         arranque,
     )
 
-    _marcar_lineas(resultados, linea_por_clave, lote_por_clave)
+    _marcar_lineas(resultados, linea_por_clave, lote_por_clave, a_mano=a_mano_por_clave)
     planificados, excedentes = _split_resultados(resultados)
 
     # Diagnóstico de lo que traba el plan. El import va acá adentro porque el módulo
@@ -3766,6 +3891,7 @@ async def planificar_pendientes(
         procesos_para_solver = []
         cant_op_map = {}  # (orden_id, secuencia) -> operarios requeridos por el proceso
         linea_por_clave = {}   # (orden_id, secuencia) -> orden_trabajo_proceso.id
+        a_mano_por_clave = set()  # pasos marcados «va a mano» en la OT
         procesos_sin_rango = {}  # id_proceso -> nombre, para avisar al final
 
         for orden in ordenes:
@@ -3781,6 +3907,8 @@ async def planificar_pendientes(
             for secuencia, rel in _lineas_ordenadas(_pendientes):
                 linea_por_clave[(orden.id, secuencia)] = getattr(rel, "id", None)
                 cant_op_map[(orden.id, secuencia)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
+                if getattr(rel, "no_lleva_maquina", 0):
+                    a_mano_por_clave.add((orden.id, secuencia))
                 nombre_proceso = rel.proceso.nombre.strip() if rel.proceso else ""
                 # Solo lo que falta fabricar, igual que en planificar().
                 dur_min = minutos_de_lo_que_falta(
@@ -3834,7 +3962,7 @@ async def planificar_pendientes(
             cant_ordenes=len(ordenes),
         )
 
-        _marcar_lineas(resultados, linea_por_clave)
+        _marcar_lineas(resultados, linea_por_clave, a_mano=a_mano_por_clave)
         planificados, excedentes = _split_resultados(resultados)
         saved = await repo_planificacion.insertar_planificacion_lote(planificados)
         return {"planificados": saved, "excedentes": excedentes}

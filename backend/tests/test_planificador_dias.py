@@ -40,6 +40,7 @@ from backend.application.PlanificacionService import (
     W_FIN_OT,
     W_FIN_PLAN,
     W_FUERA,
+    W_OT_DE_CORRIDO,
     _convertir_minutos_a_fecha,
     construir_ventanas_semanales,
     dia_del_minimo,
@@ -165,8 +166,13 @@ def test_la_jerarquia_del_objetivo(H):
     # multiplicador más caro en ese paso y en la OT más atrasada, más lo que se gana
     # terminando antes con el plan y la OT enteros.
     peor = max(ATRASO_MULT_POR_PRIORIDAD.values())
-    peor_atraso = H * (peor + ATRASO_MAX_EQUIV * peor + W_FIN_PLAN + W_FIN_OT)
+    # Con OT de corrido, además lo que se ahorra de OT abierta (29/9/2026).
+    corrido = W_OT_DE_CORRIDO if PS.OT_DE_CORRIDO else 0
+    peor_atraso = H * (peor + ATRASO_MAX_EQUIV * peor + W_FIN_PLAN + W_FIN_OT + corrido)
     assert afuera_mas_barato > sin_recurso > peor_atraso
+    # OT de corrido está arriba del atraso: hacer la OT de un tirón le gana a adelantarle
+    # un paso a otra.
+    assert W_OT_DE_CORRIDO > peor
     # Terminar antes, por minuto, nunca vale más que un minuto de atraso.
     assert min(ATRASO_MULT_POR_PRIORIDAD.values()) > W_FIN_PLAN > W_FIN_OT > 1
 
@@ -350,7 +356,11 @@ def test_el_reparto_rapido_no_separa_la_preparacion_de_su_produccion():
     r = estimar_plan(procesos, operarios, maquinas, None, None, {}, {}, {}, {}, set(),
                      {104: {35}, 140: {38}}, _cal(35, 38, 40), [], {}, {}, LUNES, detalle=True)
     quien = {k[1]: (op, maq) for k, (_ini, op, maq, _x) in r["_asignacion"].items()}
-    assert quien == {1000: (40, 26), 2000: (40, 26)}, quien
+    # Los dos con la misma persona y la misma máquina. Desde el 29/9/2026 el 38 —que suelda
+    # por habilidad cargada a mano— también puede preparar su soldadora (ver
+    # PS._setup_hereda_de), así que puede ser él o el 40; el 35, que sólo prepara, no.
+    assert quien[1000] == quien[2000], quien
+    assert quien[1000] in {(38, 26), (40, 26)}, quien
 
 
 def test_la_semilla_se_completa_y_el_solver_arranca_con_todo_adentro(monkeypatch):
