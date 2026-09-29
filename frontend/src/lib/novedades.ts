@@ -47,6 +47,76 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "ot-de-corrido",
+        fecha: "2026-09-29",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "El plan hace cada OT de corrido: una vez que arranca, no la deja esperando",
+        detalle:
+            "Antes el planificador sólo cuidaba que cada paso llegara a la fecha prometida, y le convenía arrancar todas las OT a la vez aunque después quedaran días paradas: en el plan de las 48 OT del piloto sólo 2 iban de corrido y ninguna terminaba en la semana. Ahora, una vez que una OT empieza, sus pasos van uno atrás del otro, y la fecha prometida la mide el último paso. Puede quedar alguna espera cuando la máquina o la persona está ocupada con otra OT. Con las mismas 48 OT, 15 van de corrido, la espera dentro de las OT bajó a la cuarta parte y el plan termina un día y medio antes. Por ahora es siempre así; más adelante se va a poder elegir. Si tenías un plan armado, recalculalo.",
+        href: "/operaciones",
+    },
+    {
+        id: "preparacion-seguida",
+        fecha: "2026-09-29",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "La preparación de una máquina va seguida del trabajo que prepara",
+        detalle:
+            "«Preparación de torno» y su «Torneado» ya iban con la misma persona y en la misma máquina, pero no seguidos: en la OT 15644 el plan preparaba el torno a las 07:20 y lo usaba a las 14:45, y en otras al día siguiente. Ahora el trabajo arranca cuando termina la preparación; si la preparación termina al cierre, el trabajo arranca a primera hora del día siguiente. Si la OT tiene otro paso entre la preparación y el trabajo, se respeta ese orden.",
+        href: "/operaciones",
+    },
+    {
+        id: "trabajos-de-su-oficio",
+        fecha: "2026-09-29",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Cada uno recibe los trabajos de su oficio",
+        detalle:
+            "El plan le daba torneados y fresados a Guillermo Celiz, y torneados a Alejandro Gutierrez. Pasaban tres cosas. Celiz tiene la categoría OFICIAL, que lo habilita para cualquier trabajo de oficial, y además tenía torno y fresa cargados. Alejandro tenía SKILL 1 en torneado, igual que Gustavo, así que el torno se lo llevaba el que estuviera libre. Y quien tenía un trabajo cargado a mano no podía hacer su preparación: Nahuel suelda con MIG, pero la preparación de la soldadora no se la daban, y como las dos van con la misma persona, el par entero se iba a otro oficial. Ahora la preparación la puede hacer quien tiene cargado el trabajo; a Celiz se le apagaron en Recursos el torneado, el fresado y sus preparaciones; y Alejandro quedó con SKILL 2 en torneado: lo hace si Gustavo está ocupado. Todo se cambia desde la ficha de cada persona en Recursos.",
+        href: "/recursos",
+    },
+    {
+        id: "no-necesita-maquina",
+        fecha: "2026-09-29",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Podés marcar que un paso «No necesita» máquina, y se recuerda para ese producto",
+        detalle:
+            "En la vista previa, la lista de recurso maquinaria de cada paso tiene «No necesita». Elegilo cuando el paso se hace a mano, como el roscado de la OT 15668: deja de pedir máquina en esa OT y en las otras OT abiertas del mismo producto, y la próxima OT de ese producto sale igual, tanto la que llega del sistema viejo como la que armás con «Traer historial». Para volver atrás, elegí una máquina. Antes el plan le buscaba una máquina igual, y si no encontraba lo dejaba «sin máquina».",
+        href: "/operaciones",
+    },
+    {
+        id: "vista-previa-horas-por-ot",
+        fecha: "2026-09-29",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "La vista previa muestra las horas de trabajo de cada OT",
+        detalle:
+            "Hay una columna «Horas» con la suma de los pasos de cada OT, por ejemplo «6,5 h»; con el mouse encima dice los minutos exactos. Se oculta y se muestra como las demás columnas.",
+        href: "/operaciones",
+    },
+    {
+        id: "vista-previa-por-semana",
+        fecha: "2026-09-29",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "La vista previa separa las OT por la semana en que terminan",
+        detalle:
+            "Cada semana tiene su renglón, por ejemplo «Semana del 28/9 al 2/10 · 8 OT terminan esta semana · 97 h de trabajo»: se ve de un vistazo qué sale en la semana 1 y qué en la 2. El botón «Primeras primero» / «Últimas primero» da vuelta el orden.",
+        href: "/operaciones",
+    },
+    {
+        id: "hoja-panol-sin-hoja-en-blanco",
+        fecha: "2026-09-29",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "La hoja del pañol ya no sale con la primera hoja en blanco",
+        detalle:
+            "Cada día iba entero en una hoja, y si el primero no entraba debajo del encabezado se pasaba a la hoja siguiente: la primera salía vacía y quedaban otras casi vacías en el medio. Ahora un día largo se corta entre renglones, nunca a mitad de uno, y repite los títulos de la tabla en cada hoja; un día corto sigue yendo entero. Con el plan de las 48 OT pasó de 20 hojas a 15.",
+        href: "/operaciones",
+    },
+    {
         id: "procesos-genericos-y-cnc",
         fecha: "2026-09-29",
         tipo: "mejora",
