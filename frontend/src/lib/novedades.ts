@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "procesos-genericos-y-cnc",
+        fecha: "2026-09-29",
+        tipo: "mejora",
+        seccion: "Recursos",
+        titulo: "El torneado y el fresado convencionales ya no van a las máquinas CNC",
+        detalle:
+            "Los procesos que decían en qué máquina se hacían ahora tienen nombre genérico, y la máquina la elige el planificador: TORNO T1 a TORNO T6 son TORNEADO, FRESADORA F6 a F9 son FRESADO CONVENCIONAL, TORNO CNC es TORNEADO CNC y FRESADORA CNC es FRESADO CNC. Si el proceso no dice CNC, va a un torno o a una fresadora convencional: antes podía caer en una CNC que aceptara el rango, como el fresado de la OT 15644. Cada torno y cada fresadora dice en Recursos si es CNC (Tipo «Torno CNC» o «Fresadora CNC»), y eso es lo que mira el planificador. Además el catálogo pasó de 415 a 175 procesos: se sacaron 225 variantes mal escritas que no usaba nadie y se unieron los repetidos (CORTE CON AMOLADORA, ENSAMBLAJE, PUNTEADO Y ESCUADRADO, AGUSTE y AJUSTE PARA BUJE…). Las OT que llegan del sistema viejo con los nombres de antes entran con los nuevos. Si tenías un plan armado, recalculalo.",
+        href: "/recursos?tab=procesos",
+    },
+    {
         id: "procesos-en-que-maquina",
         fecha: "2026-09-29",
         tipo: "mejora",
