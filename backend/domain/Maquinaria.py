@@ -35,8 +35,12 @@ class Maquinaria(Base):
     #
     # Qué clase de máquina es. Lista CERRADA (MaquinariaService.TIPOS_MAQUINA) y no
     # texto libre: el texto libre se llena de variantes de la misma palabra, como ya le
-    # pasó al catálogo de procesos. Los valores son las familias del planificador.
+    # pasó al catálogo de procesos. Los valores son las familias del planificador, y
+    # desde el 29/9/2026 el planificador lo usa: cargado, le gana al nombre de la máquina
+    # (PlanificacionService.familia_from_maquina). Es lo que separa un torno o una
+    # fresadora CNC de los convencionales.
     # NULL = no se cargó; nunca se deduce del nombre (sería inventar un dato del taller).
+    # Mientras esté en NULL, el planificador sigue deduciendo la familia del nombre.
     tipo = Column(String(40), nullable=True)
     # operativa | en_mantenimiento | fuera_de_servicio (MaquinariaService.ESTADOS_OPERATIVOS).
     # Arranca en 'operativa' porque las máquinas ya cargadas se están usando todos los

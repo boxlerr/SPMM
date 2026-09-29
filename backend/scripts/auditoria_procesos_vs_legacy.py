@@ -84,8 +84,11 @@ def _url():
 
 def _clave(nombre: str) -> str:
     """Normaliza el nombre para comparar. El catálogo se cosechó de texto libre del
-    legacy y tiene gemelos que difieren sólo por espacios de adentro."""
-    return re.sub(r"\s+", " ", (nombre or "")).strip().upper()
+    legacy y tiene gemelos que difieren sólo por espacios de adentro. Y lo pasa al nombre
+    de SPMM («TORNO T1» → TORNEADO, ver catalogo_procesos), igual que el importador: si
+    no, después de la limpieza del 29/9 toda OT con torno o fresadora salía distinta."""
+    from backend.application.catalogo_procesos import nombre_en_spmm
+    return nombre_en_spmm(re.sub(r"\s+", " ", (nombre or "")).strip().upper())
 
 
 async def _objetivo(c):

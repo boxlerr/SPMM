@@ -19,12 +19,14 @@ from backend.infrastructure import auditoria_procesos as auditoria_proc
 
 # Qué clase de máquina es. Son las familias con las que el planificador clasifica
 # máquinas y procesos (familia_requerida_from_proceso en PlanificacionService.py), más
-# OTRO: así el día que se quiera cruzar el tipo cargado contra la familia que pide un
-# proceso, los dos lados hablan el mismo idioma. Otro test cuida que toda familia del
-# planificador esté acá.
+# OTRO. Desde el 29/9/2026 el planificador lo usa: el tipo cargado le gana al nombre de
+# la máquina (familia_from_maquina), y es lo que dice si un torno o una fresadora es CNC.
+# Otro test cuida que toda familia del planificador esté acá.
 TIPOS_MAQUINA: dict[str, str] = {
     "TORNO": "Torno",
+    "TORNO_CNC": "Torno CNC",
     "FRESADORA": "Fresadora",
+    "FRESADORA_CNC": "Fresadora CNC",
     "AGUJEREADORA": "Agujereadora",
     "LIMADORA": "Limadora",
     "RECTIFICADORA": "Rectificadora",

@@ -42,10 +42,12 @@ def test_lista_del_viejo_ordena_renumera_y_saltea_lo_que_no_es_proceso():
         _z(2, 6, "TORNO CNC", 420, id_=21),        # mismo paso repetido: van los dos
         _z(5, 0, None, 0),                          # fila vacía del viejo
     ]
+    # «TORNO CNC» del viejo es TORNEADO CNC en SPMM desde la limpieza del catálogo del
+    # 29/9/2026 (catalogo_procesos): la lista sale con el nombre de SPMM.
     assert imp.lista_del_viejo(filas) == [
         (1, "PROGRAMACION TORNO CNC", 40),
-        (2, "TORNO CNC", 420),
-        (3, "TORNO CNC", 420),
+        (2, "TORNEADO CNC", 420),
+        (3, "TORNEADO CNC", 420),
         (4, "EMBALADO", 10),
     ]
 

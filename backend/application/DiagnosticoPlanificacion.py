@@ -41,7 +41,7 @@ from backend.domain.PausaOrden import MOTIVO_EN_FRASE, fecha_corta, texto_del_mo
 from backend.application.PlanificacionService import (
     MIN_LABORAL_DIA,
     familia_requerida_from_proceso,
-    familia_from_maquina,
+    familia_de_maquina,
     _get_tipo_proceso,
     _norm,
 )
@@ -275,7 +275,7 @@ def construir_diagnosticos(
     for op_id, r_id in operarios:
         rangos_por_op.setdefault(op_id, set()).add(r_id)
 
-    maq_familia = {m[0]: familia_from_maquina(m[2], m[3]) for m in maquinarias}
+    maq_familia = {m[0]: familia_de_maquina(m) for m in maquinarias}
     maq_nombre = {m[0]: (m[2] or f"#{m[0]}").strip() for m in maquinarias}
     maq_rangos = {m[0]: set(m[1] or ()) for m in maquinarias}
 

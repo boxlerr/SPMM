@@ -98,6 +98,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
+from backend.application.catalogo_procesos import nombre_en_spmm
 from backend.scripts.sync_db import COLS_OT, Q_OTS, Q_PENDIENTES, _clave, _leer, _norm
 
 APLICAR = "--aplicar" in sys.argv
@@ -138,8 +139,16 @@ class CambioDuranteLaCorrida(Exception):
 
 def clave_proceso(nombre) -> str:
     """Nombre de proceso para comparar: mayúsculas y espacios colapsados. El catálogo de
-    SPMM se cosechó de texto libre y tiene gemelos que difieren sólo en eso."""
-    return re.sub(r"\s+", " ", nombre or "").strip().upper()
+    SPMM se cosechó de texto libre y tiene gemelos que difieren sólo en eso.
+
+    Y con el nombre de SPMM: desde el 29/9/2026 «TORNO T1» del viejo es TORNEADO,
+    «FRESADORA F6» es FRESADO CONVENCIONAL, etc. (catalogo_procesos). Se traduce acá y no
+    sólo al leer el viejo porque esta clave compara los DOS lados —la lista del viejo, las
+    pasadas de SPMM y el catálogo—: así una OT con «TORNO T1» no frena el importador por
+    «proceso que no está en el catálogo», y la recarga no ve distintos un TORNEADO de SPMM
+    y el «TORNO T1» del viejo (borraba la pasada, con su avance, y la volvía a insertar).
+    Anda igual antes y después de limpiar la base."""
+    return nombre_en_spmm(re.sub(r"\s+", " ", nombre or "").strip().upper())
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +158,7 @@ def lista_del_viejo(filas):
     """Filas de ZoTProcesos de UNA OT -> [(paso, clave, minutos)], paso = 1..N.
 
     Una fila sin proceso (id 0 o sin descripción en zProcesos) no es un paso: se saltea.
+    La clave sale con el nombre de SPMM (ver clave_proceso).
     """
     salida = []
     for f in sorted(filas, key=lambda x: (x["orden"] or 0, x["id"] or 0)):

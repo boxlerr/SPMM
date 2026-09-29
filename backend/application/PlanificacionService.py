@@ -570,14 +570,15 @@ def _crear_variables_y_dominios(
     #DUMMY_MAQ_ID = 999998
 
     #maq_to_rangos = {m_id: set(rs) for (m_id, rs, _n) in maquinarias}
-    REAL_MAQ_IDS = [m_id for (m_id, _rs, _n, _cod) in maquinarias]
+    REAL_MAQ_IDS = [m[0] for m in maquinarias]
     DUMMY_MAQ_ID = 999998
 
-    maq_to_rangos = {m_id: set(rs) for (m_id, rs, _n, _cod) in maquinarias}
+    maq_to_rangos = {m[0]: set(m[1]) for m in maquinarias}
 
-    # Familia/tipo de cada máquina. Sale del nombre (el código es una abreviatura
-    # que no matchea ninguna familia) — ver familia_from_maquina.
-    maq_to_familia = {m_id: familia_from_maquina(_n, _cod) for (m_id, _rs, _n, _cod) in maquinarias}
+    # Familia/tipo de cada máquina: el tipo cargado en Recursos y, si no hay, el nombre
+    # (el código es una abreviatura que no matchea ninguna familia) — ver
+    # familia_from_maquina. Las tuplas son (id, rangos, nombre, cod[, tipo]).
+    maq_to_familia = {m[0]: familia_de_maquina(m) for m in maquinarias}
 
     op_domain_vals = {}
     maq_domain_vals = {}
@@ -783,8 +784,8 @@ def _crear_variables_y_dominios(
                 )
 
                 candidates = [
-                    m_id for (m_id, _rs, nombre_m, _cod) in maquinarias
-                    if base and base in (_norm(nombre_m) or "")
+                    m[0] for m in maquinarias
+                    if base and base in (_norm(m[2]) or "")
                 ]
 
             if candidates:
@@ -1063,7 +1064,17 @@ def _setup_de_esta_produccion(proc_setup, proc_prod) -> bool:
         return False
     fam_setup = familia_requerida_from_proceso(proc_setup[7] or "")
     fam_prod = familia_requerida_from_proceso(proc_prod[7] or "")
-    return bool(fam_setup) and fam_setup == fam_prod
+    return _prepara_esa_familia(fam_setup, fam_prod)
+
+
+def _prepara_esa_familia(fam_setup: str, fam_prod: str) -> bool:
+    """¿Una preparación de la familia `fam_setup` es la de un trabajo de `fam_prod`?
+
+    Si son la misma familia, sí. Y una preparación que no dice CNC también prepara el
+    trabajo CNC: en el Integral hay OT con «PREPARACION DE TORNO» seguida de «TORNO CNC»,
+    y separar el torno CNC del convencional (29/9/2026) no puede dejarlas sin pareja. Al
+    revés no: «PROGRAMACION TORNO CNC» no prepara un torno convencional."""
+    return bool(fam_setup) and fam_setup in (fam_prod, familia_base(fam_prod))
 
 
 def _pares_setup_produccion(procesos_norm, partes=None):
@@ -1116,12 +1127,19 @@ def _pares_setup_produccion(procesos_norm, partes=None):
             tipo = _get_tipo_proceso(rep[7])
             if tipo == "SETUP":
                 pendientes.setdefault(familia, []).append(claves)
-            elif tipo == "PRODUCCION_MAQUINA" and pendientes.get(familia):
-                claves_setup = pendientes[familia].pop(0)
-                # Se confirma con la misma función de siempre: que haya UN lugar que
-                # decida si dos procesos están relacionados.
-                if _setup_de_esta_produccion(por_clave[claves_setup[0]], rep):
-                    pares.append((claves_setup, claves))
+            elif tipo == "PRODUCCION_MAQUINA":
+                # Primero una preparación de su misma familia y, si no hay, una que no
+                # dice CNC (ver _prepara_esa_familia): para un «TORNO CNC», «PROGRAMACION
+                # TORNO CNC» le gana a «PREPARACION DE TORNO».
+                for fam_setup in dict.fromkeys((familia, familia_base(familia))):
+                    if not pendientes.get(fam_setup):
+                        continue
+                    claves_setup = pendientes[fam_setup].pop(0)
+                    # Se confirma con la misma función de siempre: que haya UN lugar que
+                    # decida si dos procesos están relacionados.
+                    if _setup_de_esta_produccion(por_clave[claves_setup[0]], rep):
+                        pares.append((claves_setup, claves))
+                    break
     return pares
 
 
@@ -2707,8 +2725,23 @@ def familia_from_cod_maquina(cod: str) -> str:
     if c.startswith("OXICORTE") or c.startswith("SOPLETE"): return "OXICORTE"
     return ""
 
-def familia_from_maquina(nombre: str, cod: str) -> str:
-    """Familia de la máquina, sacada del NOMBRE y no del código.
+# Todas las familias que puede devolver familia_requerida_from_proceso. Son también los
+# tipos de máquina que se cargan en Recursos (MaquinariaService.TIPOS_MAQUINA, más OTRO),
+# y dos tests cuidan que las tres listas no se separen.
+FAMILIAS_MAQUINA = frozenset({
+    "TORNO", "TORNO_CNC", "FRESADORA", "FRESADORA_CNC", "AGUJEREADORA", "LIMADORA",
+    "GUILLOTINA", "PRENSA", "PLEGADORA", "SIERRA_CIRCULAR", "RECTIFICADORA", "OXICORTE",
+    "SOLDADORA_TIG", "SOLDADORA_MIG",
+})
+
+
+def familia_base(familia: str) -> str:
+    """TORNO_CNC → TORNO. La familia sin decir si la máquina es CNC o convencional."""
+    return familia[:-len("_CNC")] if familia.endswith("_CNC") else familia
+
+
+def familia_from_maquina(nombre: str, cod: str, tipo: str | None = None) -> str:
+    """Familia de la máquina: el TIPO cargado en Recursos y, si no hay, el NOMBRE.
 
     `cod_maquina` son abreviaturas ("TORY-1", "FCNCY-1", "PLE-1", "GUI-1") y
     familia_from_cod_maquina compara contra palabras enteras ("TORNO",
@@ -2723,20 +2756,49 @@ def familia_from_maquina(nombre: str, cod: str) -> str:
     que máquina y proceso hablen el mismo idioma —si mañana se agrega una familia,
     entra por los dos lados a la vez—. El código queda como fallback por si alguna
     máquina tiene un nombre poco claro pero un código explícito.
+
+    El tipo (`maquinaria.tipo`, RF-08) le gana a las dos: es lo que el taller dijo que
+    es la máquina, y el nombre es lo que deducimos. Es lo que separa un torno CNC de uno
+    convencional aunque mañana a la máquina le cambien el nombre. «Otro», o un valor
+    que no es una familia, no dice nada del planificador: sigue decidiendo el nombre.
     """
+    t = "_".join(_norm(tipo).split())
+    if t in FAMILIAS_MAQUINA:
+        return t
     return familia_requerida_from_proceso(nombre or "") or familia_from_cod_maquina(cod or "")
+
+
+def familia_de_maquina(maquina) -> str:
+    """Familia de una tupla de máquina del planificador: (id, rangos, nombre, cod[, tipo]).
+
+    El tipo va quinto y es opcional para que las tuplas de 4 que arman los tests y los
+    scripts sigan valiendo igual que antes."""
+    return familia_from_maquina(maquina[2], maquina[3], maquina[4] if len(maquina) > 4 else None)
+
 
 def familia_requerida_from_proceso(nombre_proc: str) -> str:
     n = _norm(nombre_proc)
 
     # Detección explícita de familias
-    if "EN FRESADORA" in n or "FRESADORA" in n or "TALLADO" in n or "AGUJEREADO EN FRESADORA" in n:
+    #
+    # Torno y fresadora vienen en dos versiones que NO se sustituyen: la convencional y
+    # la CNC. Lucas, 29/9/2026: «si no dice CNC y dice fresadora, es fresadora
+    # convencional», y lo mismo el torno. Antes eran una sola familia, así que un
+    # «FRESADORA F6» (fresado convencional) podía caer en la FRESADORA CNC y un
+    # «TORNO T1» en un torno CNC. «FRESAD» y «TORNEAD» son por los nombres genéricos del
+    # catálogo (FRESADO CONVENCIONAL, FRESADO CNC, TORNEADO, TORNEADO CNC), que no dicen
+    # «FRESADORA» ni «TORNO».
+    if "FRESAD" in n or "TALLADO" in n:
+        if "CNC" in n:
+            return "FRESADORA_CNC"
         return "FRESADORA"
-    
+
     if "AGUJEREADORA" in n or "RADIAL" in n or "TALADR" in n or "AVELLANAD" in n:
         return "AGUJEREADORA"
-    
-    if "TORNO" in n or "CILINDRADO" in n or "ROSCADO" in n or "REPUJADO" in n:
+
+    if "TORNO" in n or "TORNEAD" in n or "CILINDRADO" in n or "ROSCADO" in n or "REPUJADO" in n:
+        if "CNC" in n:
+            return "TORNO_CNC"
         return "TORNO"
     
     if "LIMADORA" in n:
@@ -3319,7 +3381,9 @@ async def planificar(
             # que dice Recursos aunque alguien más abajo toque el que va al solver.
             rangos_ok = set(rangos_en_recursos)
         #maquinarias.append((m.id, rangos_ok, m.nombre)) esto funciona
-        maquinarias.append((m.id, rangos_ok, m.nombre, m.cod_maquina))
+        # El tipo va quinto: es lo que separa un torno CNC de uno convencional (ver
+        # familia_from_maquina).
+        maquinarias.append((m.id, rangos_ok, m.nombre, m.cod_maquina, getattr(m, "tipo", None)))
 
 
     procesos_para_solver = []
@@ -3442,7 +3506,7 @@ async def planificar(
             # revertiría solo, sin que nada lo diga. Por eso el flag y no un "si quedó
             # vacía": el estado final de la lista no distingue las dos situaciones.
             if not rangos_validos and nombre_proceso_lower and not proceso_ajustado:
-                for _, rangos_maquina, nombre_maquina, _cod in maquinarias:
+                for _, rangos_maquina, nombre_maquina, *_resto in maquinarias:
 
                     if not rangos_maquina:
                         continue
@@ -3693,7 +3757,8 @@ async def planificar_pendientes(
         #    for m in maquinarias_orm
         #]
         maquinarias = [
-            (m.id, {rm.id_rango for rm in (m.rango_maquinarias or [])}, m.nombre, m.cod_maquina)
+            (m.id, {rm.id_rango for rm in (m.rango_maquinarias or [])}, m.nombre, m.cod_maquina,
+             getattr(m, "tipo", None))
             for m in maquinarias_orm
         ]
 

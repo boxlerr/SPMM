@@ -13,11 +13,14 @@ import type { Maquina } from "./_types";
 /**
  * Qué clase de máquina es. Son las familias con las que el planificador clasifica
  * máquinas y procesos, más «Otro». Lista cerrada y no texto libre: el texto libre se
- * llena de variantes de la misma palabra.
+ * llena de variantes de la misma palabra. El planificador lo usa: es lo que dice si un
+ * torno o una fresadora es CNC (un proceso sin «CNC» en el nombre va a las convencionales).
  */
 export const TIPOS_MAQUINA = [
   { valor: "TORNO", etiqueta: "Torno" },
+  { valor: "TORNO_CNC", etiqueta: "Torno CNC" },
   { valor: "FRESADORA", etiqueta: "Fresadora" },
+  { valor: "FRESADORA_CNC", etiqueta: "Fresadora CNC" },
   { valor: "AGUJEREADORA", etiqueta: "Agujereadora" },
   { valor: "LIMADORA", etiqueta: "Limadora" },
   { valor: "RECTIFICADORA", etiqueta: "Rectificadora" },
