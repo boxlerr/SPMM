@@ -12,7 +12,8 @@ import {
     Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw,
     ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
     HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
-    Columns3, Layers, ListFilter, ListChecks, LogOut, Printer, ArrowLeft, Pencil, Loader2} from "lucide-react";
+    Columns3, Layers, ListFilter, ListChecks, LogOut, Printer, ArrowLeft, Pencil, Loader2,
+    ArrowDown, ArrowUp} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,6 +61,28 @@ const getAuthHeaders = (): HeadersInit => {
     return token ? { 'Authorization': `Bearer ${token}` } : {};
 };
 
+/**
+ * El valor del desplegable de máquina que quiere decir «No necesita» (va a mano).
+ *
+ * Es distinto de «Sin asignar» (valor "0"): sin asignar es un hueco a resolver —el paso
+ * lleva máquina y todavía no tiene—; «No necesita» es una decisión —ese paso se hace sin
+ * máquina—. Hasta el 29/9/2026 las dos cosas eran la misma opción, que se llamaba de una
+ * u otra forma según lo que había decidido el planificador, y a mano no se podía decir
+ * «este roscado va sin torno» (reunión con Lucas).
+ */
+const NO_NECESITA = "no_necesita";
+
+/**
+ * Hasta cuántos trabajos un día de la hoja del pañol va entero en una sola hoja.
+ *
+ * Antes TODO día llevaba «no cortar» (`break-inside: avoid`), y un día largo que no
+ * entraba debajo del encabezado se iba entero a la hoja 2: la primera salía en blanco,
+ * con el encabezado solo (Lucas lo vio en vivo el 29/9/2026). Ahora sólo los días cortos
+ * no se cortan; los largos se cortan entre filas —nunca a mitad de una— y repiten el
+ * encabezado de la tabla en cada hoja. Veinte filas entran con holgura en una A4.
+ */
+const DIA_CORTO_PANOL = 20;
+
 interface PlanificacionResult {
     orden_id: number;
     proceso_id: number;
@@ -89,6 +112,10 @@ interface PlanificacionResult {
      *  y el "sin máquina" NO es un hueco. Se muestra "No necesita" en vez de
      *  "Sin asignar", con el desplegable disponible por si igual quieren una. */
     usa_maquina?: boolean;
+    /** El paso va a mano porque así lo marcaron en la OT («No necesita» elegido por una
+     *  persona), no porque el proceso sea de banco. Se puede volver atrás eligiendo una
+     *  máquina o «Sin asignar». */
+    va_a_mano?: boolean;
     secuencia?: number;
     /** Qué PASADA de la OT es esta fila (orden_trabajo_proceso.id).
      *  Es lo único que distingue las 13 pasadas de TORNO CNC de la 7497 entre sí,
@@ -1594,6 +1621,78 @@ export function PlanningPreviewScreen({
         });
     };
 
+    /**
+     * «No necesita» (va a mano), elegido por la persona en el desplegable de máquina.
+     *
+     * No es un retoque del plan como elegir una máquina: se guarda en el paso de la OT,
+     * así el planificador no le vuelve a reservar máquina en el próximo cálculo, y en las
+     * otras OT abiertas del mismo artículo. Es la memoria que pidió Lucas el 29/9/2026:
+     * «que la próxima vez que planifique el mismo producto ya salga el roscado sin
+     * máquina». Las OT que lleguen después del sistema viejo la copian al importarse.
+     *
+     * Se ve al toque y, si el guardado falla, vuelve a como estaba.
+     */
+    const marcarVaAMano = async (item: PlanificacionResult, vaAMano: boolean, maquina: number | null = null) => {
+        const antes = getEffectiveItem(item);
+        const clave = claveDeEdicion(item);
+        const poner = (fila: PlanificacionResult) => setEditedResults(prev => {
+            const next = { ...prev, [clave]: fila };
+            delete next[claveVieja(item)];
+            return next;
+        });
+        poner(vaAMano
+            ? { ...antes, id_maquinaria: null as any, usa_maquina: false, va_a_mano: true, sin_maquinaria: false }
+            : { ...antes, id_maquinaria: (maquina ?? null) as any, usa_maquina: true, va_a_mano: false });
+        const nombre = capitalize(item.nombre_proceso);
+        try {
+            if (!item.id_orden_trabajo_proceso) throw new Error("sin id de pasada");
+            const res = await fetch(
+                `${API_URL}/ordenes/${item.orden_id}/procesos/linea/${item.id_orden_trabajo_proceso}`,
+                {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+                    body: JSON.stringify({ no_lleva_maquina: vaAMano, para_el_articulo: true }),
+                },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const body = await res.json().catch(() => null);
+            const otras = Number(body?.data?.otras_del_articulo ?? 0);
+            const enOtras = otras > 0 ? ` y en ${otras} ${otras === 1 ? "OT abierta" : "OT abiertas"} más del mismo producto` : "";
+            toast.success(vaAMano
+                ? `«${nombre}» va sin máquina en esta OT${enOtras}. La próxima OT de este producto sale igual.`
+                : `«${nombre}» vuelve a llevar máquina en esta OT${enOtras}.`);
+        } catch (e) {
+            console.error(e);
+            poner(antes);
+            toast.error(`No se pudo guardar que «${nombre}» ${vaAMano ? "va sin máquina" : "lleva máquina"}. Quedó como estaba.`);
+        }
+    };
+
+    /** El valor del desplegable de máquina de un paso (ver NO_NECESITA). */
+    const valorMaquina = (e: PlanificacionResult) =>
+        e.usa_maquina === false && !e.id_maquinaria ? NO_NECESITA : (e.id_maquinaria?.toString() || "0");
+
+    const elegirMaquina = (item: PlanificacionResult, val: string) => {
+        const e = getEffectiveItem(item);
+        // De banco: el proceso no usa máquina por sí mismo (embalado, pintura...). Ahí
+        // «No necesita» ya es lo que hay y elegir una máquina es un retoque del plan.
+        const deBanco = e.usa_maquina === false && !e.va_a_mano;
+        if (val === NO_NECESITA) {
+            if (deBanco) {
+                handleUpdate(item, 'id_maquinaria', null);
+            } else if (!e.va_a_mano) {
+                void marcarVaAMano(item, true);
+            }
+            return;
+        }
+        const maquina = val === "0" ? null : parseInt(val);
+        if (e.va_a_mano) {
+            void marcarVaAMano(item, false, maquina);
+            return;
+        }
+        handleUpdate(item, 'id_maquinaria', maquina);
+    };
+
     const handleDateChange = (item: PlanificacionResult, dateStr: string) => {
         // dateStr is usually "YYYY-MM-DDTHH:mm" from datetime-local input
         // we might want to store it as string or convert to whatever format backend needs.
@@ -2248,7 +2347,8 @@ export function PlanningPreviewScreen({
   <td class="fill c"></td>
 </tr>`).join("");
 
-            return `<div class="dia">
+            // Un día corto va entero en una hoja; uno largo se corta entre filas (ver `.dia`).
+            return `<div class="dia${delDia.length <= DIA_CORTO_PANOL ? " corta" : ""}">
   <h2>${esc(nombreDia(dia))}
     <span class="resumen">${ots} ${ots === 1 ? "orden" : "órdenes"} · ${delDia.length} trabajos · ${Math.round(minutos / 60)} h</span>
   </h2>
@@ -2273,9 +2373,12 @@ body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;color:#
 .empresa{font-weight:bold;font-size:13px}
 .doc{font-size:16px;font-weight:bold;color:#1e3a5f}
 .head-r{text-align:right;font-size:10px;color:#666}
-.dia{margin-bottom:18px;break-inside:avoid}
+.dia{margin-bottom:18px}
+.dia.corta{break-inside:avoid;page-break-inside:avoid}
+tr{break-inside:avoid;page-break-inside:avoid}
+thead{display:table-header-group}
 h2{font-size:13px;color:#1e3a5f;margin:0 0 5px;border-bottom:1px solid #cbd5e1;padding-bottom:3px;
-   display:flex;justify-content:space-between;align-items:baseline}
+   display:flex;justify-content:space-between;align-items:baseline;break-after:avoid;page-break-after:avoid}
 .resumen{font-size:9.5px;color:#666;font-weight:normal}
 table{width:100%;border-collapse:collapse;font-size:10.5px}
 th,td{border:1px solid #999;padding:4px 6px;text-align:left;vertical-align:top}
@@ -2404,6 +2507,71 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         filas.sort((x, y) => (x.inicio - y.inicio) || (x.fin - y.fin) || (x.numero - y.numero));
         return filas;
     }, [gruposFiltrados, editedResults, clavesPorFila]);
+
+    /** Minutos de trabajo de la OT: la suma de sus pasos, sin contar dos veces los de a
+     *  dos personas (la fila del acompañante es el mismo trabajo, no otro). */
+    const minutosDeOT = (items: PlanificacionResult[]) =>
+        items.reduce((t, i) => {
+            const e = getEffectiveItem(i);
+            return e.slot_extra ? t : t + (e.duracion_min || 0);
+        }, 0);
+    const textoHoras = (minutos: number) => {
+        const h = minutos / 60;
+        return `${h.toLocaleString("es-AR", { maximumFractionDigits: h < 10 ? 1 : 0 })} h`;
+    };
+
+    /**
+     * La lista partida por la SEMANA en que termina cada OT.
+     *
+     * Lucas, 29/9/2026: «que te diga: de esta semana te entran tantas OT, y la otra
+     * semana tantas». Cada semana lleva su renglón con cuántas OT terminan ahí y cuántas
+     * horas de trabajo son. Adentro de cada semana siguen por arranque, como siempre, y
+     * «al revés» da vuelta todo: las semanas y las OT de cada una.
+     */
+    const [ordenAlReves, setOrdenAlReves] = React.useState(false);
+    type FilaDeLaTabla =
+        | { tipo: "semana"; lunes: number; cantidad: number; minutos: number }
+        | { tipo: "ot"; ordenId: number; items: PlanificacionResult[] };
+    const filasConSemanas = React.useMemo<FilaDeLaTabla[]>(() => {
+        const lunesDe = (ms: number) => {
+            const d = new Date(ms);
+            d.setHours(0, 0, 0, 0);
+            d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+            return d.getTime();
+        };
+        const grupos = new Map<number, typeof otsEnOrden>();
+        for (const fila of otsEnOrden) {
+            const clave = Number.isFinite(fila.fin) ? lunesDe(fila.fin) : Number.POSITIVE_INFINITY;
+            if (!grupos.has(clave)) grupos.set(clave, []);
+            grupos.get(clave)!.push(fila);
+        }
+        const semanas = Array.from(grupos.keys()).sort((a, b) => a - b);
+        if (ordenAlReves) semanas.reverse();
+        const salida: FilaDeLaTabla[] = [];
+        for (const lunes of semanas) {
+            const ots = grupos.get(lunes)!;
+            salida.push({
+                tipo: "semana",
+                lunes,
+                cantidad: ots.length,
+                minutos: ots.reduce((t, f) => t + minutosDeOT(f.items), 0),
+            });
+            for (const f of ordenAlReves ? [...ots].reverse() : ots) {
+                salida.push({ tipo: "ot", ordenId: f.ordenId, items: f.items });
+            }
+        }
+        return salida;
+    }, [otsEnOrden, ordenAlReves, editedResults]);
+
+    /** «Semana del 28/9 al 2/10». Sin fecha: las que el plan no llegó a ubicar. */
+    const tituloSemana = (lunes: number) => {
+        if (!Number.isFinite(lunes)) return "Sin fecha";
+        const desde = new Date(lunes);
+        const hasta = new Date(lunes);
+        hasta.setDate(hasta.getDate() + 4);
+        const dm = (d: Date) => `${d.getDate()}/${d.getMonth() + 1}`;
+        return `Semana del ${dm(desde)} al ${dm(hasta)}`;
+    };
 
     const otsFiltradas = Object.keys(gruposFiltrados).length;
     const procesosFiltrados = Object.values(gruposFiltrados).reduce((a, xs) => a + xs.length, 0);
@@ -2595,6 +2763,11 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         { clave: "prioridad", titulo: "Prioridad" },
         { clave: "prometida", titulo: "Prometida" },
         { clave: "trabajo", titulo: "Trabajo" },
+        // Cuánto trabajo lleva la OT, sumando sus pasos (Lucas, 29/9/2026: «¿dónde está
+        // el total de horas? Tendríamos que tenerlo a mano para tener una idea»). Es lo
+        // que se compara con «Trabajo» (de cuándo a cuándo) para ver si el plan es
+        // razonable: 9 h de trabajo repartidas en ocho días no lo son.
+        { clave: "horas", titulo: "Horas" },
         { clave: "alertas", titulo: "Alertas" },
     ] as const), []);
     const CLAVE_COLUMNAS = "plan_preview_columnas";
@@ -4155,6 +4328,21 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                         </PopoverContent>
                                     </Popover>
 
+                                    {/* De arriba para abajo o de abajo para arriba (Lucas, 29/9/2026):
+                                        da vuelta las semanas y las OT de cada una. */}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 gap-1.5 text-xs"
+                                        onClick={() => setOrdenAlReves(v => !v)}
+                                        title={ordenAlReves
+                                            ? "Ahora: primero lo que termina más tarde. Tocá para ver primero lo que termina antes."
+                                            : "Ahora: primero lo que termina antes. Tocá para ver primero lo que termina más tarde."}
+                                    >
+                                        {ordenAlReves ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />}
+                                        {ordenAlReves ? "Últimas primero" : "Primeras primero"}
+                                    </Button>
+
                                     {/* Columnas: trece entran en un monitor de escritorio y en ninguna
                                         otra cosa. Lo elegido queda guardado en el navegador. */}
                                     <Popover>
@@ -4238,12 +4426,29 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                             {ve("prioridad") && <th className="px-4 py-3 text-center">Prioridad</th>}
                                             {ve("prometida") && <th className="px-4 py-3 text-center">Prometida</th>}
                                             {ve("trabajo") && <th className="px-4 py-3 text-center">Trabajo</th>}
+                                            {ve("horas") && <th className="px-4 py-3 text-center" title="Horas de trabajo de la OT: la suma de sus pasos">Horas</th>}
                                             {ve("alertas") && <th className="px-4 py-3 text-center">Alertas</th>}
                                             <th className="px-4 py-3 text-center w-12"></th>
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-gray-200">
-                                        {otsEnOrden.map(({ ordenId, items }) => {
+                                        {filasConSemanas.map((fila) => {
+                                            if (fila.tipo === "semana") {
+                                                // El corte de semana (tarea del 29/9/2026): cuántas OT
+                                                // terminan en esa semana y cuánto trabajo son.
+                                                return (
+                                                    <tr key={`semana-${fila.lunes}`} className="bg-slate-100/80">
+                                                        <td colSpan={totalColumnas} className="px-4 py-1.5 text-xs text-slate-700">
+                                                            <span className="font-semibold">{tituloSemana(fila.lunes)}</span>
+                                                            <span className="ml-2 text-slate-500">
+                                                                · {fila.cantidad} {fila.cantidad === 1 ? "OT termina" : "OT terminan"} esta semana
+                                                                · {textoHoras(fila.minutos)} de trabajo
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            }
+                                            const { ordenId, items } = fila;
                                             const firstItem = items[0];
                                             const isExpanded = expandedOrderIds.includes(ordenId);
                                             // Entró a mano en esta vista previa (OT entera o procesos sueltos).
@@ -4428,6 +4633,14 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                         {ve("trabajo") && (
                                                         <td className="px-4 py-3 text-center text-inherit opacity-90 whitespace-nowrap">
                                                             {spanDeOT(effectiveItems)}
+                                                        </td>
+                                                        )}
+                                                        {ve("horas") && (
+                                                        <td
+                                                            className="px-4 py-3 text-center text-inherit opacity-90 whitespace-nowrap tabular-nums"
+                                                            title={`${minutosDeOT(items)} minutos de trabajo, sumando los pasos de la OT`}
+                                                        >
+                                                            {textoHoras(minutosDeOT(items))}
                                                         </td>
                                                         )}
                                                         {ve("alertas") && (
@@ -4788,8 +5001,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
 
                                                                                         <div className="px-4 py-2 border-b flex items-center">
                                                                                             <Select
-                                                                                                value={effectiveItem.id_maquinaria?.toString() || "0"}
-                                                                                                onValueChange={(val) => handleUpdate(item, 'id_maquinaria', val === "0" ? null : parseInt(val))}
+                                                                                                value={valorMaquina(effectiveItem)}
+                                                                                                onValueChange={(val) => elegirMaquina(item, val)}
                                                                                             >
                                                                                                 <SelectTrigger
                                                                                                     // `min-w-0` + truncado del texto: "AGUJEREADORA DE BANCO BURANI"
@@ -4801,7 +5014,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                         limitacionElegida && "border-amber-300 bg-amber-50/50"
                                                                                                     )}
                                                                                                     title={[
-                                                                                                        effectiveItem.usa_maquina === false
+                                                                                                        effectiveItem.va_a_mano
+                                                                                                            ? "Va sin máquina: lo marcaron así en la OT, y se recuerda para este producto. Elegí una máquina para volver atrás."
+                                                                                                            : effectiveItem.usa_maquina === false
                                                                                                             ? "Proceso manual: no usa recurso maquinaria. Podés asignarle uno igual si querés."
                                                                                                             : "",
                                                                                                         limitacionElegida ? `Limitación: ${limitacionElegida}` : "",
@@ -4811,10 +5026,11 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                 </SelectTrigger>
                                                                                                 <SelectContent>
                                                                                                     {/* "No necesita" ≠ "Sin asignar": embalado o pintura sin máquina
-                                                                                                        no es un hueco a resolver, es lo normal (pedido de Julián 16/08). */}
-                                                                                                    <SelectItem value="0" className="text-gray-400 italic">
-                                                                                                        {effectiveItem.usa_maquina === false ? "No necesita" : "Sin asignar"}
-                                                                                                    </SelectItem>
+                                                                                                        no es un hueco a resolver, es lo normal (pedido de Julián 16/08).
+                                                                                                        Desde el 29/9 son dos opciones: «No necesita» se puede elegir a
+                                                                                                        mano (ver NO_NECESITA). */}
+                                                                                                    <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
+                                                                                                    <SelectItem value={NO_NECESITA} className="text-gray-500 italic">No necesita</SelectItem>
                                                                                                     {availableMachines.map(m => {
                                                                                                         const limitacion = limitacionDeMaquina(m);
                                                                                                         return (
@@ -5030,8 +5246,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                 </SelectContent>
                                                                                             </Select>
                                                                                             <Select
-                                                                                                value={effU.id_maquinaria?.toString() || "0"}
-                                                                                                onValueChange={(val) => handleUpdate(u, 'id_maquinaria', val === "0" ? null : parseInt(val))}
+                                                                                                value={valorMaquina(effU)}
+                                                                                                onValueChange={(val) => elegirMaquina(u, val)}
                                                                                             >
                                                                                                 <SelectTrigger
                                                                                                     className={cn(
@@ -5047,9 +5263,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                     <SelectValue placeholder="Recurso maquinaria" />
                                                                                                 </SelectTrigger>
                                                                                                 <SelectContent>
-                                                                                                    <SelectItem value="0" className="text-gray-400 italic">
-                                                                                                        {effU.usa_maquina === false ? "No necesita" : "Sin asignar"}
-                                                                                                    </SelectItem>
+                                                                                                    <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
+                                                                                                    <SelectItem value={NO_NECESITA} className="text-gray-500 italic">No necesita</SelectItem>
                                                                                                     {availableMachines.map(m => {
                                                                                                         const limitacion = limitacionDeMaquina(m);
                                                                                                         return (
