@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "retoques-a-mano-al-recalcular",
+        fecha: "2026-09-30",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Recalcular conserva la persona y la máquina que elegiste a mano, sin traer de vuelta el plan anterior",
+        detalle:
+            "En la vista previa, si a un paso le cambiabas la persona, la máquina o el horario y después recalculabas, ese renglón volvía entero como estaba en el plan anterior —persona, máquina y horario—, encimado con el plan nuevo: quedaban procesos superpuestos y volvían asignaciones que ya se habían corregido. Ahora se guarda sólo lo que cambiaste. La persona y la máquina que elegiste se mantienen al recalcular, y todo lo demás lo pone el plan nuevo. El horario escrito a mano se mantiene mientras el plan deje ese paso donde estaba; si el recálculo lo mueve, queda el horario nuevo y te avisa. Si volvés a elegir lo que había puesto el plan, el renglón deja de estar marcado en rojo. Y la hoja del pañol imprime la persona y la máquina que elegiste, no las que había puesto el plan. Los planes sin confirmar que ya tenías se acomodan solos al abrirlos.",
+        href: "/operaciones",
+    },
+    {
         id: "ot-de-corrido",
         fecha: "2026-09-29",
         tipo: "mejora",
