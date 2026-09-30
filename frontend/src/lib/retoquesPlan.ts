@@ -29,6 +29,9 @@
  * el plan la siga poniendo ahí: al retomar el borrador (el mismo plan) sigue, y si un
  * recálculo mueve la fila, deja de aplicarse y queda el horario del plan nuevo.
  *
+ * AL CONFIRMAR, EL HORARIO ESCRITO SE GUARDA EN MINUTOS, que es lo único que guarda el
+ * plan: `horarioEscrito` dice cuál hay que convertir.
+ *
  * Lo que sigue sin resolverse: el planificador tampoco recibe la persona elegida. Después
  * de recalcular, la fila lleva el horario que el plan armó para OTRA persona y a la
  * elegida se le puede encimar con lo suyo. Es lo mismo que pasa con cualquier retoque sin
@@ -113,6 +116,28 @@ const mismoNumero = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
 export const horarioVigente = (fila: FilaDelPlan, retoque: Retoque): boolean =>
     retoque.fecha_inicio_estimada !== undefined
     && mismoMinuto(retoque.inicio_del_plan, fila.fecha_inicio_estimada);
+
+/** Lo que da el campo de la pantalla cuando está completo: «2026-10-02T11:00». */
+const FECHA_Y_HORA = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+
+/**
+ * El inicio escrito a mano que se GUARDA con esta fila, o `null` si la fila se guarda
+ * con el horario del plan.
+ *
+ * Al confirmar no se guarda la fecha: se guardan los minutos del paso (`inicio_min`,
+ * `fin_min`) y la fecha se vuelve a sacar de ellos al leer el plan. Hasta el 30/09/2026
+ * la fila planificada se mandaba con los minutos del plan, así que el horario escrito se
+ * veía en la pantalla y en la hoja del pañol y se perdía al guardar: se escribió 11:00
+ * en un paso que el plan tenía a las 07:20 y quedó guardado a las 07:20. Esto dice qué
+ * horario hay que pasar a minutos: el que sigue valiendo (`horarioVigente`), completo y
+ * distinto del del plan. Uno en blanco —el campo a medio corregir— no mueve nada.
+ */
+export function horarioEscrito(fila: FilaDelPlan, retoque: Retoque | undefined): string | null {
+    if (!retoque || !horarioVigente(fila, retoque)) return null;
+    const escrito = minutoDe(retoque.fecha_inicio_estimada);
+    if (!escrito || !FECHA_Y_HORA.test(escrito) || mismoMinuto(escrito, fila.fecha_inicio_estimada)) return null;
+    return escrito;
+}
 
 /** Un retoque sin campos no es un retoque. */
 const sinCampos = (retoque: Retoque) => Object.keys(retoque).length === 0;

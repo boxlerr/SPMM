@@ -36,7 +36,7 @@ import { unificarPreparaciones } from "@/lib/unificarAvisos";
 import { huellaRecursos } from "@/lib/huellaRecursos";
 import { antiguedadTexto, type TandaManual } from "@/lib/borradorPlan";
 import {
-    aplicarRetoque, cambiarRetoque, hayCambios, horariosQueNoVan, retoquesAlDia,
+    aplicarRetoque, cambiarRetoque, hayCambios, horarioEscrito, horariosQueNoVan, retoquesAlDia,
     type CambiosDelRetoque, type Nombres, type Retoque,
 } from "@/lib/retoquesPlan";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -628,7 +628,8 @@ export function PlanningPreviewScreen({
     /**
      * Convierte un datetime-local (YYYY-MM-DDTHH:mm) al `inicio_min` del plan.
      *
-     * Se usa cuando alguien asigna a mano un proceso que quedó afuera. Los minutos del
+     * Se usa cuando alguien le escribe el inicio a mano a un paso: a uno que quedó
+     * afuera, o a uno que el plan ya había ubicado. Los minutos del
      * planificador son minutos TRABAJADOS contados desde el arranque del plan, no
      * minutos de reloj contados desde ahora: acá se hacía `(fecha - ahora) / 60000`,
      * así que poner un proceso el jueves a las 8 guardaba mil y pico de minutos —los
@@ -643,6 +644,13 @@ export function PlanningPreviewScreen({
             ? new Date(inicioBase)
             : inicioDelPlan(new Date(), feriados, planningRange?.fecha_desde);
         return minutosDesdeFecha(base, destino, feriados);
+    };
+
+    /** Los minutos con que se guarda un paso que empieza a la hora escrita a mano: el
+     *  inicio contado desde el arranque del plan, y el fin, su duración más tarde. */
+    const minutosDelInicio = (horario: string, duracion: number | undefined) => {
+        const inicio_min = datetimeToInicioMin(horario);
+        return { inicio_min, fin_min: inicio_min + (duracion || 0) };
     };
 
     /** Devuelve true si el proceso "unfit" fue completado a mano por el usuario
@@ -729,8 +737,13 @@ export function PlanningPreviewScreen({
             // fila dejaría el plan apuntando a un paso borrado.
             if (procesosEnPlan.fueBorrada(r.id_orden_trabajo_proceso)) continue;
             const eff = getEffectiveItem(r);
+            // El plan guarda los MINUTOS, no la fecha: el inicio escrito a mano va
+            // convertido, como en los unfit de abajo. Sin esto se guardaba el minuto del
+            // plan y el horario que se veía en pantalla se perdía (ver `horarioEscrito`).
+            const escrito = horarioEscrito(r, retoqueDe(r));
             manualPlan.push({
                 ...eff,
+                ...(escrito ? minutosDelInicio(escrito, eff.duracion_min) : {}),
                 forzado_fuera_rango: forzarOrdenIds.has(r.orden_id),
             });
         }
@@ -743,12 +756,9 @@ export function PlanningPreviewScreen({
                 // del plan no puede guardarse.
                 if (procesosEnPlan.fueBorrada(u.id_orden_trabajo_proceso)) continue;
                 const eff = getEffectiveItem(u);
-                const inicioMin = datetimeToInicioMin(eff.fecha_inicio_estimada || "");
-                const finMin = inicioMin + (eff.duracion_min || 0);
                 manualPlan.push({
                     ...eff,
-                    inicio_min: inicioMin,
-                    fin_min: finMin,
+                    ...minutosDelInicio(eff.fecha_inicio_estimada || "", eff.duracion_min),
                     sin_asignar: false,
                     sin_maquinaria: false,
                     forzado_fuera_rango: true,
@@ -824,12 +834,6 @@ export function PlanningPreviewScreen({
     const onClickConfirmar = () => {
         if (cantidadPendientes > 0) { setShowDesactualizadoWarn(true); return; }
         seguirGuardando();
-    };
-
-    const handleConfirmWithEdits = () => {
-        // Devuelve al padre los resultados combinados (originales + edits del usuario).
-        const finalResults = results.map(item => getEffectiveItem(item));
-        (onConfirm as any)(finalResults);
     };
 
     // ---------- Estado nuevo: agregar OTs en vivo + recalcular ----------
@@ -2391,8 +2395,12 @@ export function PlanningPreviewScreen({
         const esc = (v: unknown) => String(v ?? "")
             .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-        // Una fila por proceso, con los retoques de la persona ya aplicados.
-        const filas = results.map(r => getEffectiveItem(r));
+        // Una fila por proceso, con los retoques de la persona ya aplicados y el inicio con
+        // que se guarda: un horario en blanco (el campo a medio corregir) va con el del plan.
+        const filas = results.map(r => ({
+            ...getEffectiveItem(r),
+            fecha_inicio_estimada: horarioEscrito(r, retoqueDe(r)) ?? r.fecha_inicio_estimada,
+        }));
 
         // Agrupar por día. Sin fecha van al final: son las que el plan no ubicó.
         const porDia = new Map<string, any[]>();
@@ -2939,11 +2947,19 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
      * marcadas cuando alguien les movió el inicio en la tabla. Esas traen el fin que
      * calculó el motor para el inicio viejo, así que el panel las reparte desde el
      * inicio nuevo en vez de creerle al fin.
+     *
+     * El inicio es el que se va a GUARDAR (`horarioEscrito`, el mismo que usa
+     * confirmar): un horario en blanco, que en la tabla es el campo a medio corregir,
+     * acá cuenta con el del plan, que es con el que se guardaría.
      */
     const filasParaCarga = React.useMemo(
         () => results.map(r => {
-            const e = getEffectiveItem(r);
-            return { ...e, fechaEditada: e.fecha_inicio_estimada !== r.fecha_inicio_estimada };
+            const escrito = horarioEscrito(r, retoqueDe(r));
+            return {
+                ...getEffectiveItem(r),
+                fecha_inicio_estimada: escrito ?? r.fecha_inicio_estimada,
+                fechaEditada: escrito !== null,
+            };
         }),
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [results, editedResults]
@@ -4922,8 +4938,11 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                 const nombreProceso = cambio?.proceso?.ahora ?? effectiveItem.nombre_proceso;
                                                                                 const idProcesoActual = cambio?.proceso?.id ?? effectiveItem.proceso_id;
                                                                                 /** El horario que se ve es de antes del cambio: o de esta fila, o del
-                                                                                 *  reordenamiento, que le mueve el lugar a toda la OT. */
-                                                                                const horarioViejo = !!cambio || !!cambiosDeLaOT?.pasos;
+                                                                                 *  reordenamiento, que le mueve el lugar a toda la OT. Salvo que
+                                                                                 *  lo hayan escrito a mano: ése no lo calculó el plan y es el que
+                                                                                 *  se guarda (ver `horarioEscrito`). */
+                                                                                const horarioViejo = (!!cambio || !!cambiosDeLaOT?.pasos)
+                                                                                    && !horarioEscrito(item, retoqueDe(item));
                                                                                 // La segunda persona de un proceso comparte la pasada con la fila de
                                                                                 // arriba: editarla dos veces sería editar lo mismo.
                                                                                 const noSeEdita = isCalculating || isConfirming || lineaId == null || !!item.slot_extra;

@@ -16,6 +16,8 @@ node y verifica:
   nuevo;
 - que el horario escrito a mano vale mientras el plan deje la fila donde estaba, y se
   descarta si el recálculo la mueve;
+- qué horario escrito se guarda al confirmar, pasado a minutos, y cuál no (en blanco,
+  igual al del plan);
 - que un borrador viejo (retoques de fila entera) se convierte a lo que la persona había
   cambiado: el idéntico no deja nada y el hecho sobre un plan anterior no trae de vuelta
   la persona de ese plan.
@@ -117,6 +119,23 @@ const sigueAfuera = { k: completo };
 r.afuera_sigue_igual = m.retoquesAlDia(sigueAfuera, () => afuera, nombres) === sigueAfuera;
 r.afuera_entra_al_plan = m.retoquesAlDia({ k: completo }, () => p2, nombres);
 
+// El horario que se guarda al confirmar (se pasa a minutos): el que vale, completo y
+// distinto del del plan.
+const escritoEn = (fila, fecha_inicio_estimada) =>
+    m.horarioEscrito(fila, { fecha_inicio_estimada, inicio_del_plan: fila.fecha_inicio_estimada });
+r.escrito = {
+    vigente: m.horarioEscrito(p1, r.horario),
+    fila_movida: m.horarioEscrito(p2, r.horario),
+    en_blanco: m.horarioEscrito(p1, r.en_blanco),
+    sin_retoque: m.horarioEscrito(p1, undefined),
+    solo_persona: m.horarioEscrito(p1, r.persona),
+    persona_y_horario: m.horarioEscrito(p1, r.ambos),
+    con_segundos: escritoEn(p1, '2026-10-01T14:00:00'),
+    igual_al_plan: escritoEn(p1, '2026-10-01T07:00'),
+    sin_hora: escritoEn(p1, '2026-10-01'),
+    afuera: m.horarioEscrito(afuera, completo),
+};
+
 // Borradores viejos: la fila entera.
 r.vieja_identica = m.retoquesAlDia({ '12720-68-7': { ...p1 } }, () => p1, nombres);
 r.vieja_persona = m.retoquesAlDia({ k: { ...p1, id_operario: NAHUEL } }, () => p1, nombres);
@@ -216,6 +235,28 @@ def test_al_recalcular_se_descarta_el_horario_y_se_conserva_la_persona(r):
 def test_el_horario_en_blanco_se_respeta_mientras_se_corrige(r):
     assert r["en_blanco"] == {"fecha_inicio_estimada": "", "inicio_del_plan": "2026-10-01T07:00:00"}
     assert r["en_blanco_aplicado"] == ""
+
+
+def test_al_confirmar_se_guarda_el_horario_escrito_que_vale(r):
+    """El plan guarda minutos, no fechas: el horario escrito se convierte al confirmar.
+
+    Hasta el 30/09/2026 la fila planificada se mandaba con los minutos del plan: se
+    escribió 11:00 en un paso que el plan tenía a las 07:20 y quedó guardado a las 07:20.
+    `horarioEscrito` dice cuál hay que convertir; lo que no (en blanco, el de una fila que
+    el recálculo movió, uno igual al del plan) se guarda con los minutos del plan.
+    """
+    assert r["escrito"] == {
+        "vigente": "2026-10-01T14:00",
+        "fila_movida": None,
+        "en_blanco": None,
+        "sin_retoque": None,
+        "solo_persona": None,
+        "persona_y_horario": "2026-10-01T14:00",
+        "con_segundos": "2026-10-01T14:00",
+        "igual_al_plan": None,
+        "sin_hora": None,
+        "afuera": "2026-10-03T08:00",
+    }
 
 
 def test_la_marca_de_cambiada_es_solo_si_la_fila_difiere_del_plan(r):
