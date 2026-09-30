@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "horario-a-mano-se-guarda",
+        fecha: "2026-09-30",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "La hora de inicio que le escribís a mano a un paso de la vista previa ahora se guarda al confirmar",
+        detalle:
+            "En la vista previa del plan le podías cambiar la hora de inicio a un paso que el plan ya había ubicado, y se veía en la tabla y en la hoja del pañol, pero al confirmar quedaba guardada la hora que había puesto el plan: se escribía 11:00 en un paso de las 07:20 y el plan guardado lo seguía teniendo a las 07:20. Ahora se guarda la hora que escribiste, y el paso dura lo mismo desde ahí. Si dejás la casilla en blanco, queda la hora del plan. Si escribís una hora en la que el taller no trabaja —antes de que abra, después de que cierre o un domingo—, se guarda en el primer horario de trabajo que le sigue. El panel de carga de recurso humano cuenta ese paso el día que escribiste, y cuando cambiás el orden de los pasos de una OT, el paso con la hora escrita a mano ya no se marca en naranja como calculado antes del cambio.",
+        href: "/operaciones",
+    },
+    {
         id: "retoques-a-mano-al-recalcular",
         fecha: "2026-09-30",
         tipo: "arreglo",
