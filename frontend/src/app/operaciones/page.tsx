@@ -1788,7 +1788,9 @@ export default function OperacionesPage() {
     // un borrador de ayer nunca detectaría lo que se arregló anoche.
     setHuellaPlan(borrador.huella ?? null);
     // Acá sí hay retoques que restaurar: el comentario de abajo lo prometía desde
-    // el 19/08 pero la vista previa nunca los recibía y se perdían todos.
+    // el 19/08 pero la vista previa nunca los recibía y se perdían todos. Los de un
+    // borrador anterior al 30/09/2026 son la fila entera: la vista previa los reduce a
+    // lo que se había cambiado al abrirlo, y su aviso de ediciones pisa el ref de acá.
     setEdicionesIniciales(borrador.ediciones || {});
     setForzarIdsIniciales(borrador.forzarOrdenIds || []);
     // Lo agregado a mano vuelve con el borrador. Los guardados antes del 11/09 no lo

@@ -54,7 +54,11 @@ export type BorradorPlan = {
     resultados: any[];
     excedentes: any[];
     diagnosticos: any[];
-    /** Los retoques a mano, indexados igual que en el modal. */
+    /**
+     * Los retoques a mano, indexados igual que en el modal: de cada fila, SÓLO lo que se
+     * le cambió (ver `lib/retoquesPlan`). Los borradores guardados antes del 30/09/2026
+     * traen la fila entera; la vista previa los convierte al abrirlos.
+     */
     ediciones: Record<string, any>;
     /** OTs excedentes que el usuario decidió forzar. */
     forzarOrdenIds: number[];

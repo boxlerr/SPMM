@@ -35,6 +35,10 @@ import { PanelCargaRecursoHumano } from "@/components/planning/PanelCargaRecurso
 import { unificarPreparaciones } from "@/lib/unificarAvisos";
 import { huellaRecursos } from "@/lib/huellaRecursos";
 import { antiguedadTexto, type TandaManual } from "@/lib/borradorPlan";
+import {
+    aplicarRetoque, cambiarRetoque, hayCambios, horariosQueNoVan, retoquesAlDia,
+    type CambiosDelRetoque, type Nombres, type Retoque,
+} from "@/lib/retoquesPlan";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
     payloadDeAjustes, descripcionDeAccion, claveDeAjuste, objetivosDeAjuste,
@@ -175,8 +179,9 @@ interface PlanningPreviewScreenProps {
     diagnosticos?: Diagnostico[];
     /** Avisa de cada retoque hecho a mano para que se guarde en el borrador.
      *  Sin esto el autoguardado solo vería el plan que devolvió el solver, y el
-     *  trabajo de acomodar máquinas y operarios se perdería igual. */
-    onEdicionesChange?: (ediciones: Record<string, any>, forzarOrdenIds: number[]) => void;
+     *  trabajo de acomodar máquinas y operarios se perdería igual. Cada retoque es
+     *  sólo lo que se cambió de la fila (ver `lib/retoquesPlan`). */
+    onEdicionesChange?: (ediciones: Record<string, Retoque>, forzarOrdenIds: number[]) => void;
     /** Cuándo se calculó este plan (ISO). Un borrador retomado puede ser de ayer. */
     calculadoEn?: string;
     /**
@@ -199,7 +204,8 @@ interface PlanningPreviewScreenProps {
      * justo el caso. Ver `lib/huellaRecursos`.
      */
     huellaAlCalcular?: string | null;
-    /** Retoques a mano que traía el borrador que se está retomando. */
+    /** Retoques a mano que traía el borrador que se está retomando. Los guardados antes
+     *  del 30/09/2026 son la fila entera: se convierten al abrir (ver `lib/retoquesPlan`). */
     edicionesIniciales?: Record<string, any>;
     /** OTs excedentes que ya venían forzadas en el borrador. */
     forzarIdsIniciales?: number[];
@@ -404,8 +410,12 @@ export function PlanningPreviewScreen({
      */
     const diagnosticos = React.useMemo(() => unificarPreparaciones(diagnosticosCrudos), [diagnosticosCrudos]);
 
-    // Local state for edits
-    const [editedResults, setEditedResults] = React.useState<Record<string, PlanificacionResult>>({});
+    /**
+     * Los retoques a mano, por fila: SÓLO lo que la persona cambió, no la fila entera.
+     * `getEffectiveItem` los funde sobre la fila del plan que esté en pantalla, y así un
+     * recálculo no trae de vuelta el plan viejo en las filas retocadas. Ver `lib/retoquesPlan`.
+     */
+    const [editedResults, setEditedResults] = React.useState<Record<string, Retoque>>({});
     const [expandedOrderIds, setExpandedOrderIds] = React.useState<number[]>([]);
     // Decisión por orden excedente: true = forzar (incluir igual), false = descartar (default)
     const [forzarOrdenIds, setForzarOrdenIds] = React.useState<Set<number>>(new Set());
@@ -486,11 +496,16 @@ export function PlanningPreviewScreen({
      *
      * Cuando el plan es nuevo, el padre manda los tres vacíos y esto los limpia,
      * que es lo que hacía antes con `forzarOrdenIds`.
+     *
+     * Los retoques de un borrador guardado antes del 30/09/2026 son la fila ENTERA:
+     * acá se convierten en lo que la persona había cambiado, comparándolos con la fila
+     * del mismo borrador, y los que no cambiaban nada se descartan. Sin esto, abrir un
+     * borrador viejo y recalcular volvía a imponer el plan viejo en esas filas.
      */
     React.useEffect(() => {
         if (!isOpen) return;
         setForzarOrdenIds(new Set(forzarIdsIniciales ?? []));
-        setEditedResults((edicionesIniciales ?? {}) as Record<string, PlanificacionResult>);
+        setEditedResults(retoquesAlDia(edicionesIniciales, filaDeClave, nombres));
         // Los ajustes "solo para este plan" vuelven por el mismo camino. Un plan nuevo
         // manda la lista vacía y eso los limpia: valen para el plan en el que se
         // aplicaron y no para el siguiente.
@@ -633,11 +648,11 @@ export function PlanningPreviewScreen({
     /** Devuelve true si el proceso "unfit" fue completado a mano por el usuario
      *  (operario + maquinaria + horario). En ese caso lo incluimos en el plan al confirmar. */
     const isUnfitManuallyAssigned = (item: PlanificacionResult): boolean => {
-        const edit = editedResults[claveDeEdicion(item)] || editedResults[claveVieja(item)];
-        if (!edit) return false;
-        return !!edit.id_operario && edit.id_operario > 0
-            && !!edit.id_maquinaria && edit.id_maquinaria > 0
-            && !!edit.fecha_inicio_estimada;
+        if (!retoqueDe(item)) return false;
+        const e = getEffectiveItem(item);
+        return !!e.id_operario && e.id_operario > 0
+            && !!e.id_maquinaria && e.id_maquinaria > 0
+            && !!e.fecha_inicio_estimada;
     };
 
     /**
@@ -1601,25 +1616,95 @@ export function PlanningPreviewScreen({
 
     const claveDeEdicion = (item: PlanificacionResult) => clavesPorFila.get(item) ?? claveBase(item);
 
-    const getEffectiveItem = (item: PlanificacionResult) => {
-        // El fallback a la clave vieja es por los borradores guardados antes de que
-        // la clave llevara la secuencia: sin esto, retomar uno de esos perdía todos
-        // los retoques a mano. En una OT con el proceso repetido el borrador viejo
-        // no distinguía las pasadas, así que ahí devuelve lo que ya devolvía antes.
-        return editedResults[claveDeEdicion(item)] || editedResults[claveVieja(item)] || item;
-    };
+    /**
+     * La fila del plan de cada clave de retoque, para ponerlos al día con el plan que
+     * está en pantalla. Una clave vieja (sin la secuencia) se compara con la primera
+     * pasada de esa OT y ese proceso.
+     */
+    const filaDeClave = React.useMemo(() => {
+        const porClave = new Map<string, PlanificacionResult>();
+        const porClaveVieja = new Map<string, PlanificacionResult>();
+        for (const [fila, clave] of clavesPorFila) {
+            porClave.set(clave, fila);
+            if (!porClaveVieja.has(claveVieja(fila))) porClaveVieja.set(claveVieja(fila), fila);
+        }
+        return (clave: string) => porClave.get(clave) ?? porClaveVieja.get(clave);
+    }, [clavesPorFila]);
 
-    const handleUpdate = (item: PlanificacionResult, field: keyof PlanificacionResult, value: any) => {
-        const currentEffective = getEffectiveItem(item);
-        const updated = { ...currentEffective, [field]: value };
+    /**
+     * El nombre de cada persona y cada máquina, con el mismo texto que les pone el plan
+     * al armarlo en Operaciones. Con esto una fila retocada dice el nombre de lo que se
+     * eligió y no el de lo que había puesto el planificador.
+     */
+    const nombres = React.useMemo<Nombres>(() => {
+        const operarios = new Map<number, string>(
+            availableOperators.map((o: any) => [o.id, `${o.nombre} ${o.apellido}`]));
+        const maquinas = new Map<number, string>(availableMachines.map((m: any) => [m.id, m.nombre]));
+        return { operario: id => operarios.get(id), maquina: id => maquinas.get(id) };
+    }, [availableOperators, availableMachines]);
+
+    // El fallback a la clave vieja es por los borradores guardados antes de que la clave
+    // llevara la secuencia: sin esto, retomar uno de esos perdía todos los retoques a
+    // mano. En una OT con el proceso repetido el borrador viejo no distinguía las
+    // pasadas, así que ahí se aplica a todas, como antes.
+    const retoqueDe = (item: PlanificacionResult): Retoque | undefined =>
+        editedResults[claveDeEdicion(item)] ?? editedResults[claveVieja(item)];
+
+    /** La fila como se ve: la del plan que está en pantalla con lo que se cambió a mano
+     *  encima. El retoque ya no REEMPLAZA la fila (ver `lib/retoquesPlan`). */
+    const getEffectiveItem = (item: PlanificacionResult) => aplicarRetoque(item, retoqueDe(item), nombres);
+
+    /**
+     * Cuando cambia el plan —un recálculo—, los retoques se ponen al día con él: la
+     * persona y la máquina elegidas se quedan, y el horario escrito a mano sobre una fila
+     * que el recálculo movió se descarta. El porqué está en `lib/retoquesPlan`: el
+     * planificador no recibe los retoques, así que ese horario se escribió sobre un plan
+     * que ya no existe y encimarlo con el nuevo es volver a los solapes.
+     *
+     * Descartar algo que la persona escribió no puede pasar en silencio, así que se
+     * avisa cuántos. Al abrir la pantalla no: el borrador trae el plan sobre el que se
+     * escribieron. Por eso se mira si ya estaba abierta.
+     *
+     * Con actualización funcional y declarado DESPUÉS del efecto de entrada: al abrir,
+     * trabaja sobre los retoques que ése acaba de cargar y no sobre los del plan anterior.
+     */
+    const abiertaAntes = React.useRef(false);
+    React.useEffect(() => {
+        const esRecalculo = abiertaAntes.current && isOpen;
+        abiertaAntes.current = isOpen;
+        if (!isOpen) return;
+        setEditedResults(prev => retoquesAlDia(prev, filaDeClave, nombres));
+        const movidos = esRecalculo ? horariosQueNoVan(editedResults, filaDeClave) : 0;
+        if (movidos > 0) {
+            toast.info(movidos === 1
+                ? "El recálculo movió un proceso al que le habías escrito el horario a mano: quedó el horario del plan nuevo."
+                : `El recálculo movió ${movidos} procesos a los que les habías escrito el horario a mano: quedaron los horarios del plan nuevo.`);
+        }
+        // Sólo cuando cambia el plan: los cambios del usuario pasan por `ponerRetoque`.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [filaDeClave, isOpen]);
+
+    /** Anota un cambio a mano en el retoque de la fila. Lo que vuelve a quedar como lo
+     *  puso el plan se saca del retoque, y una fila sin cambios se queda sin retoque. */
+    const ponerRetoque = (item: PlanificacionResult, cambios: CambiosDelRetoque) => {
+        const clave = claveDeEdicion(item);
         setEditedResults(prev => {
-            const next = { ...prev, [claveDeEdicion(item)]: updated };
-            // Si el retoque venía de un borrador viejo, la clave vieja tiene que
-            // irse: si no, queda tapando a la nueva en el `||` de arriba.
+            const retoque = cambiarRetoque(item, prev[clave] ?? prev[claveVieja(item)], cambios);
+            const next = { ...prev };
+            // Si el retoque venía de un borrador viejo, la clave vieja tiene que irse:
+            // si no, queda tapando a la nueva en `retoqueDe`.
             delete next[claveVieja(item)];
+            if (retoque) next[clave] = retoque;
+            else delete next[clave];
             return next;
         });
     };
+
+    const handleUpdate = (
+        item: PlanificacionResult,
+        field: "id_operario" | "id_maquinaria" | "fecha_inicio_estimada",
+        value: any,
+    ) => ponerRetoque(item, { [field]: value });
 
     /**
      * «No necesita» (va a mano), elegido por la persona en el desplegable de máquina.
@@ -1634,15 +1719,17 @@ export function PlanningPreviewScreen({
      */
     const marcarVaAMano = async (item: PlanificacionResult, vaAMano: boolean, maquina: number | null = null) => {
         const antes = getEffectiveItem(item);
-        const clave = claveDeEdicion(item);
-        const poner = (fila: PlanificacionResult) => setEditedResults(prev => {
-            const next = { ...prev, [clave]: fila };
-            delete next[claveVieja(item)];
-            return next;
-        });
-        poner(vaAMano
-            ? { ...antes, id_maquinaria: null as any, usa_maquina: false, va_a_mano: true, sin_maquinaria: false }
-            : { ...antes, id_maquinaria: (maquina ?? null) as any, usa_maquina: true, va_a_mano: false });
+        // Si falla se vuelven SÓLO los campos de la máquina a como estaban: si en el
+        // medio se cambió la persona de esta fila, eso se queda.
+        const comoEstaba: CambiosDelRetoque = {
+            id_maquinaria: antes.id_maquinaria ?? null,
+            usa_maquina: antes.usa_maquina,
+            va_a_mano: antes.va_a_mano,
+            sin_maquinaria: antes.sin_maquinaria,
+        };
+        ponerRetoque(item, vaAMano
+            ? { id_maquinaria: null, usa_maquina: false, va_a_mano: true, sin_maquinaria: false }
+            : { id_maquinaria: maquina ?? null, usa_maquina: true, va_a_mano: false });
         const nombre = capitalize(item.nombre_proceso);
         try {
             if (!item.id_orden_trabajo_proceso) throw new Error("sin id de pasada");
@@ -1663,7 +1750,7 @@ export function PlanningPreviewScreen({
                 : `«${nombre}» vuelve a llevar máquina en esta OT${enOtras}.`);
         } catch (e) {
             console.error(e);
-            poner(antes);
+            ponerRetoque(item, comoEstaba);
             toast.error(`No se pudo guardar que «${nombre}» ${vaAMano ? "va sin máquina" : "lleva máquina"}. Quedó como estaba.`);
         }
     };
@@ -1834,7 +1921,7 @@ export function PlanningPreviewScreen({
         }
         return salida;
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [tandasManuales, groupedResults, lineasVigentes, editedResults, unplannedOrders]);
+    }, [tandasManuales, groupedResults, lineasVigentes, editedResults, nombres, unplannedOrders]);
 
     // Placeholder for conflicts if missing (can be refined later)
     const conflicts = { details: [] as any[] };
@@ -4817,8 +4904,10 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                    cambio de recurso humano maquinaria u horario también quiero que se
                                                                                    marque el renglón en rojo"*). Hasta acá sólo se marcaba lo que
                                                                                    tocaba la ORDEN —cambiar el proceso, moverlo de lugar—, y quedaba
-                                                                                   la mitad de lo que uno toca sin ninguna señal. */
-                                                                                const retocadaAMano = !!(editedResults[claveDeEdicion(item)] || editedResults[claveVieja(item)]);
+                                                                                   la mitad de lo que uno toca sin ninguna señal.
+                                                                                   Se marca si la fila QUEDA distinta de la del plan: volver a
+                                                                                   elegir lo que había puesto el plan apaga la marca. */
+                                                                                const retocadaAMano = hayCambios(item, retoqueDe(item));
                                                                                 const limitacionElegida = limitacionDeMaquina(
                                                                                     availableMachines.find((m: any) => m.id === effectiveItem.id_maquinaria)
                                                                                 );
