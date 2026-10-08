@@ -8,16 +8,31 @@ import { API_URL } from "@/config";
 import { toast } from "@/lib/toast";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import { ListaFeriados, useFeriadosDelPais } from "./ListaFeriados";
+
+const aFechas = (dias: string[]) => dias.map((d) => {
+    const [y, m, day] = d.split('-').map(Number);
+    return new Date(y, m - 1, day);
+});
 
 interface AvailabilityConfigModalProps {
     isOpen: boolean;
     onClose: () => void;
+    /** Cambiaron los días que el planificador saltea (la pantalla de atrás cuenta con ellos). */
+    onFeriadosCambiados?: (bloqueados: string[]) => void;
 }
 
-export function AvailabilityConfigModal({ isOpen, onClose }: AvailabilityConfigModalProps) {
+export function AvailabilityConfigModal({ isOpen, onClose, onFeriadosCambiados }: AvailabilityConfigModalProps) {
     const [blockedDates, setBlockedDates] = useState<Date[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+
+    // Los feriados de Argentina se traen solos (8/10/2026); acá se elige si se trabajan.
+    const ponerBloqueados = (dias: string[]) => {
+        setBlockedDates(aFechas(dias));
+        onFeriadosCambiados?.(dias);
+    };
+    const delPais = useFeriadosDelPais(isOpen, format(new Date(), "yyyy-MM-dd"), ponerBloqueados);
 
     const getAuthHeaders = (): HeadersInit => {
         if (typeof window === 'undefined') return {};
@@ -71,7 +86,9 @@ export function AvailabilityConfigModal({ isOpen, onClose }: AvailabilityConfigM
                 });
                 if (!res.ok) throw new Error("Failed to remove");
 
-                setBlockedDates(prev => prev.filter(d => format(d, "yyyy-MM-dd") !== dateStr));
+                const data = await res.json().catch(() => null);
+                if (Array.isArray(data?.blocked_dates)) ponerBloqueados(data.blocked_dates);
+                else setBlockedDates(prev => prev.filter(d => format(d, "yyyy-MM-dd") !== dateStr));
                 toast.success("Fecha desbloqueada");
             } else {
                 // Add
@@ -82,7 +99,9 @@ export function AvailabilityConfigModal({ isOpen, onClose }: AvailabilityConfigM
                 });
                 if (!res.ok) throw new Error("Failed to add");
 
-                setBlockedDates(prev => [...prev, date]);
+                const data = await res.json().catch(() => null);
+                if (Array.isArray(data?.blocked_dates)) ponerBloqueados(data.blocked_dates);
+                else setBlockedDates(prev => [...prev, date]);
                 toast.success("Fecha bloqueada como no laboral");
             }
         } catch (error) {
@@ -95,14 +114,14 @@ export function AvailabilityConfigModal({ isOpen, onClose }: AvailabilityConfigM
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <CalendarDays className="w-5 h-5 text-blue-600" />
                         Configurar Disponibilidad
                     </DialogTitle>
                     <DialogDescription>
-                        Seleccione los días en los que <b>NO se trabajará</b> (feriados, mantenimiento). El sistema evitará planificar en estos días.
+                        Los feriados de Argentina se cargan solos; abajo elegís si el taller los trabaja. En el calendario marcá otros días en los que <b>no se trabaja</b> (mantenimiento, un paro). El planificador los saltea.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -136,6 +155,13 @@ export function AvailabilityConfigModal({ isOpen, onClose }: AvailabilityConfigM
                         <div className="w-4 h-4 bg-red-100 border border-red-200 rounded flex items-center justify-center text-xs text-red-600 font-bold line-through">12</div>
                         <span>Días no laborales (Click para alternar)</span>
                     </div>
+                    <ListaFeriados
+                        feriados={delPais.feriados ?? []}
+                        guardando={delPais.guardando}
+                        onElegir={delPais.elegir}
+                        titulo="Próximos feriados"
+                        className="mt-4 w-full max-h-64 overflow-y-auto"
+                    />
                 </div>
 
                 <DialogFooter>

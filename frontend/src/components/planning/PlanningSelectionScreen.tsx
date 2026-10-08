@@ -53,6 +53,8 @@ interface PlanningSelectionScreenProps {
     /** El período con el que quedó el plan cuando lo cambió la vista previa o se abrió
      *  un borrador: este paso lo adopta para que el chip diga lo mismo que el plan. */
     rangoDeLaVistaPrevia?: { rango: PlanningRange; vez: number } | null
+    /** Se eligió si se trabaja un feriado: los días que el planificador saltea ahora. */
+    onFeriadosCambiados?: (bloqueados: string[]) => void
 }
 
 export function PlanningSelectionScreen({
@@ -65,6 +67,7 @@ export function PlanningSelectionScreen({
     initialSelectedIds = [],
     onAbrirBorrador,
     rangoDeLaVistaPrevia = null,
+    onFeriadosCambiados,
 }: PlanningSelectionScreenProps) {
     const [selectedIds, setSelectedIds] = useState<number[]>(initialSelectedIds)
 
@@ -899,6 +902,10 @@ export function PlanningSelectionScreen({
                             if (modoSelector === "planificar") planificarCon(f)
                         }}
                         feriados={feriados}
+                        onFeriadosCambiados={(b) => {
+                            setFeriados(b)
+                            onFeriadosCambiados?.(b)
+                        }}
                         ordenesIds={selectedIds}
                         prometidas={unplannedOrders
                             .filter(o => selectedIds.includes(o.id))

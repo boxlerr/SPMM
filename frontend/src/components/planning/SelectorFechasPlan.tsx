@@ -36,6 +36,8 @@ import { Button } from "@/components/ui/button";
 import { Calendar as CalendarUI } from "@/components/ui/calendar";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { feriadosEntre } from "@/lib/feriados";
+import { ListaFeriados, useFeriadosDelPais } from "./ListaFeriados";
 import { inicioDelPlan } from "@/lib/plan-fechas";
 import { LUNES_A_VIERNES } from "@/lib/diasHabiles";
 import {
@@ -67,6 +69,8 @@ interface SelectorFechasPlanProps {
     diasDelTaller?: ReadonlySet<number>;
     /** Una línea al pie, al lado de los botones (cuánto tarda el recálculo, etc.). */
     nota?: React.ReactNode;
+    /** Se eligió si se trabaja un feriado: los días que el planificador saltea ahora. */
+    onFeriadosCambiados?: (bloqueados: string[]) => void;
 }
 
 const ICONO_DE_ATAJO: Record<AtajoDeFechas, React.ComponentType<{ className?: string }>> = {
@@ -126,14 +130,26 @@ export function SelectorFechasPlan({
     modo,
     valor,
     onConfirmar,
-    feriados,
+    feriados: feriadosDelPadre,
     ordenesIds,
     prometidas,
     diasDelTaller = LUNES_A_VIERNES,
     nota,
+    onFeriadosCambiados,
 }: SelectorFechasPlanProps) {
     const idLayout = React.useId();
     const dosMeses = useDosMeses();
+
+    // Los feriados del país con nombre, y si se trabaja cada uno (8/10/2026: «que lo
+    // muestre al momento de planificar si quiere elegirlo o no»). Elegir cambia los días
+    // que se saltean: desde ahí manda lo que contestó el servidor, acá y en la pantalla
+    // de atrás.
+    const [bloqueadosVivos, setBloqueadosVivos] = React.useState<string[] | null>(null);
+    const feriados = bloqueadosVivos ?? feriadosDelPadre;
+    const delPais = useFeriadosDelPais(abierto, isoDia(new Date()), (b) => {
+        setBloqueadosVivos(b);
+        onFeriadosCambiados?.(b);
+    });
 
     // El primer día en que puede arrancar el plan, con la regla del backend: si la
     // jornada de hoy ya empezó, el próximo día hábil. Se calcula en cada render a
@@ -242,7 +258,8 @@ export function SelectorFechasPlan({
             clearTimeout(tope);
             control.abort();
         };
-    }, [abierto, idsClave, claveCuenta]);
+    // Los feriados entran en la clave: elegir que se trabaja uno cambia la cuenta.
+    }, [abierto, idsClave, claveCuenta, feriadosClave]);
 
     const datos = cuenta.estado === "ok" ? cuenta.datos : null;
     const cuentaVieja = cuenta.estado === "ok" && cuenta.clave !== claveCuenta;
@@ -255,9 +272,14 @@ export function SelectorFechasPlan({
     const previaHasta = esperandoFin && sobre && desdeFecha && sobre > desdeFecha ? sobre : null;
     const feriadosFechas = React.useMemo(() => feriados.map(fechaDeIso), [feriadosClave]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    const feriadosTrabajados = React.useMemo(
+        () => (delPais.feriados ?? []).filter(f => !f.bloquea).map(f => fechaDeIso(f.fecha)),
+        [delPais.feriados],
+    );
     const modificadores: Record<string, Matcher | Matcher[]> = {
         finde: { dayOfWeek: [0, 6] },
         feriado: feriadosFechas,
+        feriadoTrabajado: feriadosTrabajados,
     };
     const clasesModificadores: Record<string, string> = {
         // Especificidad doble (`[&.finde]`) para ganarle al color base del día, y el finde
@@ -265,6 +287,7 @@ export function SelectorFechasPlan({
         // no se trabaja.
         finde: "finde [&.finde]:text-slate-400 [&.finde.rango-medio]:text-blue-900/45",
         feriado: "!text-rose-400 line-through decoration-rose-300",
+        feriadoTrabajado: "underline decoration-emerald-400 decoration-dotted decoration-2 underline-offset-4",
         rangoPunta: "!bg-blue-600 !text-white shadow-sm shadow-blue-600/30 hover:!bg-blue-700",
         rangoMedio: "rango-medio [&.rango-medio]:text-blue-900 hover:!bg-blue-100",
         rangoAbre: "rango-abre",
@@ -415,6 +438,15 @@ export function SelectorFechasPlan({
         };
     })();
 
+    // Los feriados que caen en lo que se está mirando. Sin «hasta», hasta el fin estimado
+    // de lo tildado o, sin eso, las próximas seis semanas.
+    const desdeLista = borrador?.desde ?? arranqueIso;
+    const hastaLista = borrador?.hasta
+        ?? (finEstimado && !cuentaVieja && finEstimado >= desdeLista
+            ? finEstimado
+            : isoDia(new Date(fechaDeIso(desdeLista).getTime() + 42 * 86_400_000)));
+    const feriadosDelPeriodo = feriadosEntre(delPais.feriados ?? [], desdeLista, hastaLista);
+
     const titulo = modo === "recalcular" ? "Cambiar las fechas del plan" : "¿Para qué fechas es el plan?";
     const cuantas = ordenesIds.length;
 
@@ -564,10 +596,23 @@ export function SelectorFechasPlan({
                                     <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-600" />Elegido</span>
                                     <span className="inline-flex items-center gap-1.5"><span className="text-rose-400 line-through">17</span>No laborable</span>
                                     <span className="inline-flex items-center gap-1.5"><span className="text-slate-400">sá do</span>Fin de semana</span>
+                                    {feriadosTrabajados.length > 0 && (
+                                        <span className="inline-flex items-center gap-1.5"><span className="underline decoration-emerald-400 decoration-dotted decoration-2 underline-offset-4">12</span>Feriado que se trabaja</span>
+                                    )}
                                     {finEstimado && !cuentaVieja && (
                                         <span className="inline-flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />Fin estimado de lo tildado</span>
                                     )}
                                 </div>
+                                {/* Los feriados del período, para elegir si se trabajan. */}
+                                <ListaFeriados
+                                    feriados={feriadosDelPeriodo}
+                                    guardando={delPais.guardando}
+                                    onElegir={delPais.elegir}
+                                    titulo={borrador?.hasta
+                                        ? (feriadosDelPeriodo.length === 1 ? "Cae un feriado en estas fechas" : `Caen ${feriadosDelPeriodo.length} feriados en estas fechas`)
+                                        : "Próximos feriados"}
+                                    className="mt-3 w-full max-w-[560px] px-1"
+                                />
                             </div>
                         </div>
 

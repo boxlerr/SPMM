@@ -194,6 +194,8 @@ interface PlanningPreviewScreenProps {
     /** Días que el taller no trabaja. Se usan en la vuelta de fecha a minutos, para que
      *  cuente los mismos días que el backend. */
     feriados?: string[];
+    /** Se eligió si se trabaja un feriado desde «Cambiar» fechas: los días que se saltean ahora. */
+    onFeriadosCambiados?: (bloqueados: string[]) => void;
     /**
      * Cómo estaban los datos de Recursos cuando se calculó este plan.
      *
@@ -387,6 +389,7 @@ export function PlanningPreviewScreen({
     calculadoEn,
     inicioBase,
     feriados = [],
+    onFeriadosCambiados,
     huellaAlCalcular,
     edicionesIniciales,
     forzarIdsIniciales,
@@ -3826,6 +3829,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                         valor={fechasDelPlanActual}
                                         onConfirmar={recalcularConFechas}
                                         feriados={feriados}
+                                        onFeriadosCambiados={onFeriadosCambiados}
                                         ordenesIds={selectorFechasAbierto ? buildOrdenIdsForRecalc(Array.from(forzarOrdenIds)) : []}
                                         prometidas={selectorFechasAbierto ? prometidasDelPlan(buildOrdenIdsForRecalc(Array.from(forzarOrdenIds))) : []}
                                         diasDelTaller={diasDelTaller}

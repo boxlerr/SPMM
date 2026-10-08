@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "feriados-solos",
+        fecha: "2026-10-08",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Los feriados de Argentina se cargan solos, y al planificar elegís si el taller los trabaja",
+        detalle:
+            "Antes los feriados había que cargarlos a mano y no había ninguno después de febrero: el plan ponía trabajo el lunes 12/10. Ahora el sistema trae solo los feriados nacionales del año y del que viene, con los traslados y los puentes, y los revisa cada semana por si se decreta uno nuevo. Al tocar Planificar, debajo del calendario, ves los feriados que caen en las fechas que elegiste y marcás «Se trabaja» o «No se trabaja». Si no elegís nada, un feriado no se trabaja y un día no laborable (los puentes, que son optativos) sí. Lo mismo está en el botón de feriados de Operaciones, donde además podés bloquear otros días a mano.",
+        href: "/operaciones",
+    },
+    {
         id: "horario-a-mano-se-guarda",
         fecha: "2026-09-30",
         tipo: "arreglo",

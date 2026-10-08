@@ -2909,6 +2909,7 @@ export default function OperacionesPage() {
             initialSelectedIds={isReplanning ? plannedOrdenes.map(o => o.id) : []}
             onAbrirBorrador={handleAbrirBorrador}
             rangoDeLaVistaPrevia={rangoDeLaVistaPrevia}
+            onFeriadosCambiados={setFeriados}
           />
           <PlanningPreviewScreen
             isOpen={isPreviewOpen}
@@ -2924,6 +2925,7 @@ export default function OperacionesPage() {
             calculadoEn={planCalculadoEn}
             inicioBase={baseBorrador.current?.inicioBase}
             feriados={feriados}
+            onFeriadosCambiados={setFeriados}
             onConfirm={handleConfirmPlan}
             results={previewResults}
             excedentes={excedentesResults}
@@ -3155,6 +3157,7 @@ export default function OperacionesPage() {
       <AvailabilityConfigModal
         isOpen={isAvailabilityModalOpen}
         onClose={() => setIsAvailabilityModalOpen(false)}
+        onFeriadosCambiados={setFeriados}
       />
 
       {/* Vive suelto: lo abre `isStatusConfirmOpen` desde cualquier lista. Estaba

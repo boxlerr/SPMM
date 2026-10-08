@@ -1440,6 +1440,35 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS ix_plan_semanal_ot ON plan_semanal (id_orden_trabajo)",
         ],
     ),
+    (
+        # Una tabla nueva, nada más. Si no llegara a aplicarse, FeriadoRepository no puede
+        # leerla y el planificador mira sólo dia_bloqueado, como antes del 8/10.
+        "2026-10-08_feriado",
+        [
+            "CREATE TABLE IF NOT EXISTS feriado ("
+            "fecha DATE PRIMARY KEY, "
+            "nombre VARCHAR(200) NOT NULL, "
+            "tipo VARCHAR(20) NOT NULL, "
+            "se_trabaja BOOLEAN, "
+            "decidido_por VARCHAR(120), "
+            "decidido_en TIMESTAMP, "
+            "traido_en TIMESTAMP NOT NULL)",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON TABLE feriado IS "
+            "'Feriados y días no laborables nacionales de Argentina (los trae FeriadoRepository de "
+            "api.argentinadatos.com) y si el taller trabaja cada uno. El planificador no trabaja la "
+            "unión de dia_bloqueado y de los feriados que bloquean.'",
+            "COMMENT ON COLUMN feriado.tipo IS "
+            "'inamovible, trasladable o puente (día no laborable, optativo para el empleador), como "
+            "lo da la fuente.'",
+            "COMMENT ON COLUMN feriado.se_trabaja IS "
+            "'Lo que eligió el taller. NULL = no se eligió: un puente se trabaja y cualquier otro "
+            "feriado no. Volver a traer el calendario no lo pisa.'",
+            "COMMENT ON COLUMN feriado.traido_en IS "
+            "'La última vez que la fuente lo confirmó, hora local sin zona. Pasada una semana se "
+            "vuelve a traer el año (a veces se decreta un feriado nuevo en el año).'",
+        ],
+    ),
 ]
 
 

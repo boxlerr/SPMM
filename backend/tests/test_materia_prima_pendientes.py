@@ -397,6 +397,14 @@ async def test_pendientes_no_hace_una_consulta_por_linea(session):
     from backend.domain.PiezaRecorte import PiezaRecorte
 
     await mundo(session)
+    # El calendario del taller como en producción: con las dos tablas, los días bloqueados
+    # y los feriados salen en una sola consulta (sin ellas, el savepoint que falla y el
+    # que reintenta suman consultas que en producción no existen).
+    await session.execute(text("CREATE TABLE dia_bloqueado (fecha DATE PRIMARY KEY, creado_en TIMESTAMP)"))
+    await session.execute(text(
+        "CREATE TABLE feriado (fecha DATE PRIMARY KEY, nombre VARCHAR(200) NOT NULL, "
+        "tipo VARCHAR(20) NOT NULL, se_trabaja BOOLEAN, decidido_por VARCHAR(120), "
+        "decidido_en TIMESTAMP, traido_en TIMESTAMP NOT NULL)"))
     session.add_all([Proceso(id=100, nombre="TORNO"), EstadoProceso(id=1, descripcion="Pendiente"),
                      EstadoProceso(id=2, descripcion="En curso"),
                      PiezaRecorte(id_pieza=BARRA, largo_mm=500, cantidad=1)])

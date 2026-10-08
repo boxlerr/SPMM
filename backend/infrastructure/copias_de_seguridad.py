@@ -302,6 +302,7 @@ NOMBRE_LLANO = {
     "planificacion_borrada": "Registro de planes borrados",
     "planificacion_intento": "Registro de planificaciones",
     "dia_bloqueado": "Calendario del taller (días sin trabajo)",
+    "feriado": "Feriados de Argentina y si el taller los trabaja",
     "operario": "Personas",
     "operario_rango": "Categorías de cada persona",
     "operario_proceso_skill": "Habilidades de cada persona",
