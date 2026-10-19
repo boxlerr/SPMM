@@ -76,7 +76,9 @@ export function duracionEstimada(cantidadOts: number, modo: "calcular" | "guarda
     // son segundos, no minutos. Con la estimación vieja la barra se arrastraba al 3%
     // mientras la pantalla ya se había cerrado.
     if (modo === "guardar") return Math.max(2, 1 + cantidadOts * 0.15);
-    return Math.min(380, 14 + cantidadOts * 3.8);
+    // Más la segunda pasada (cada uno en lo suyo, 19/10/2026): la mitad de lo que tarda
+    // la primera, hasta un minuto. Con las 23 OT del 17/10 tardó entre 28 y 58 segundos.
+    return Math.min(380, 14 + cantidadOts * 3.8 + Math.min(60, cantidadOts * 1.9));
 }
 
 export function ProgresoPlanificacion({

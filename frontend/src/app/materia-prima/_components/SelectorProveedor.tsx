@@ -23,10 +23,14 @@
  *
  * Un texto suelto se muestra con una marquita («sin alta») para que se note que no es
  * del catálogo.
+ *
+ * Con `gestionEnLista` (el paso tercerizado de la vista previa, 19/10/2026) cada renglón
+ * se edita o se elimina ahí mismo, y el alta va por /proveedores (lib/proveedores): con el
+ * Integral como dueño de las materias primas, las rutas de /materia-prima no escriben.
  */
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { AlertTriangle, Check, ChevronDown, Loader2, Plus, Search, Type, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Loader2, Pencil, Plus, Search, Trash2, Type, X } from "lucide-react";
 import { API_URL } from "@/config";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -39,6 +43,11 @@ import {
     type ProveedorIn,
 } from "@/lib/materiaPrima";
 import { MenuFlotante, useEscapeCierraLaLista } from "./SelectorInsumo";
+import {
+    crearProveedorDelPaso,
+    editarProveedorDelPaso,
+    eliminarProveedorDelPaso,
+} from "@/lib/proveedores";
 
 export interface SelectorProveedorProps {
     valor: ProveedorElegido;
@@ -54,6 +63,22 @@ export interface SelectorProveedorProps {
     /** Va al botón (alto, letra): en una grilla densa, `h-7 text-xs`. */
     triggerClassName?: string;
     id?: string;
+    /**
+     * Editar y eliminar cada proveedor desde la lista, y dar de alta por /proveedores (el
+     * paso tercerizado, 19/10/2026). Los días que tarda se editan acá también.
+     */
+    gestionEnLista?: boolean;
+    /** Se editó un proveedor desde la lista: el que llama actualiza el nombre o los días. */
+    onEditado?: (p: Proveedor) => void;
+}
+
+/** Lo que se está editando de un renglón: textos tal como están en los campos. */
+interface Edicion {
+    id: number;
+    razon_social: string;
+    fantasia: string;
+    cuit: string;
+    dias: string;
 }
 
 const ESPERA_MS = 250;
@@ -73,6 +98,8 @@ export function SelectorProveedor({
     className,
     triggerClassName,
     id,
+    gestionEnLista = false,
+    onEditado,
 }: SelectorProveedorProps) {
     const envoltorioRef = useRef<HTMLDivElement>(null);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -89,6 +116,14 @@ export function SelectorProveedor({
     const [creando, setCreando] = useState(false);
     /** El 409 del alta: ya hay uno con ese nombre. Se muestra el motivo y «Crear igual». */
     const [avisoAlta, setAvisoAlta] = useState<{ nombre: string; motivo: string } | null>(null);
+    // Editar o eliminar un renglón (sólo con `gestionEnLista`).
+    const [edicion, setEdicion] = useState<Edicion | null>(null);
+    const [avisoEdicion, setAvisoEdicion] = useState<string | null>(null);
+    /** El aviso es el 409 (ya hay otro con ese nombre): el botón pasa a «Guardar igual». */
+    const [pideConfirmar, setPideConfirmar] = useState(false);
+    const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+    const [porEliminar, setPorEliminar] = useState<number | null>(null);
+    const [eliminando, setEliminando] = useState(false);
 
     const ultimo = useRef(0);
     const controlador = useRef<AbortController | null>(null);
@@ -97,6 +132,10 @@ export function SelectorProveedor({
         setAbierto(false);
         setTexto("");
         setAvisoAlta(null);
+        setEdicion(null);
+        setAvisoEdicion(null);
+        setPideConfirmar(false);
+        setPorEliminar(null);
     }, []);
 
     // Con el menú abierto, su Escape no cierra el diálogo de afuera (el «+ Nuevo insumo»,
@@ -172,7 +211,9 @@ export function SelectorProveedor({
     const darDeAlta = async (nombre: string, forzar = false) => {
         setCreando(true);
         const cuerpo: ProveedorIn = { razon_social: nombre };
-        const r = await mpPost<Proveedor>(`${API_URL}/materia-prima/proveedores`, cuerpo, { forzar });
+        const r = gestionEnLista
+            ? { ...(await crearProveedorDelPaso(nombre, forzar)), practica: false }
+            : await mpPost<Proveedor>(`${API_URL}/materia-prima/proveedores`, cuerpo, { forzar });
         setCreando(false);
         // Modo práctica: el cartelito ya salió; la lista queda abierta con lo escrito.
         if (r.practica) return;
@@ -187,6 +228,102 @@ export function SelectorProveedor({
         toast.success(`Proveedor «${r.data.razon_social}» dado de alta`);
         onCambiar({ id: r.data.id, nombre: r.data.razon_social });
         cerrar();
+    };
+
+    const empezarEdicion = (p: Proveedor) => {
+        setPorEliminar(null);
+        setAvisoEdicion(null);
+        setPideConfirmar(false);
+        setEdicion({
+            id: p.id,
+            razon_social: p.razon_social ?? "",
+            fantasia: p.fantasia ?? "",
+            cuit: p.cuit ?? "",
+            dias: p.demora_dias == null ? "" : String(p.demora_dias),
+        });
+    };
+
+    const guardarEdicion = async (forzar = false) => {
+        if (!edicion || guardandoEdicion) return;
+        const p = resultados.find((x) => x.id === edicion.id);
+        if (!p) return;
+        const razon = edicion.razon_social.trim();
+        if (!razon) {
+            setAvisoEdicion("La razón social no puede quedar vacía.");
+            return;
+        }
+        const diasTexto = edicion.dias.trim();
+        const dias = diasTexto === "" ? null : Math.round(Number(diasTexto));
+        if (dias !== null && (!Number.isFinite(dias) || dias < 0 || dias > 365)) {
+            setAvisoEdicion("Los días van de 0 a 365.");
+            return;
+        }
+        // Sólo lo que cambió: lo demás ni viaja.
+        const cambios: Record<string, unknown> = {};
+        if (razon !== (p.razon_social ?? "")) cambios.razon_social = razon;
+        if (edicion.fantasia.trim() !== (p.fantasia ?? "")) cambios.fantasia = edicion.fantasia.trim() || null;
+        if (edicion.cuit.trim() !== (p.cuit ?? "")) cambios.cuit = edicion.cuit.trim() || null;
+        if (dias !== (p.demora_dias ?? null)) cambios.demora_dias = dias;
+        if (Object.keys(cambios).length === 0) {
+            setEdicion(null);
+            return;
+        }
+        setGuardandoEdicion(true);
+        const r = await editarProveedorDelPaso(p.id, cambios, forzar);
+        setGuardandoEdicion(false);
+        if (r.requiereConfirmacion) {
+            setAvisoEdicion(r.error ?? "Ya hay otro proveedor con ese nombre.");
+            setPideConfirmar(true);
+            return;
+        }
+        if (!r.ok || !r.data) {
+            setAvisoEdicion(r.error ?? "No se pudo guardar el proveedor.");
+            setPideConfirmar(false);
+            return;
+        }
+        const nuevo = r.data;
+        setResultados((rs) => rs.map((x) => (x.id === nuevo.id ? { ...x, ...nuevo } : x)));
+        setEdicion(null);
+        setAvisoEdicion(null);
+        onEditado?.(nuevo);
+        toast.success(`Proveedor «${nuevo.razon_social}» guardado`);
+    };
+
+    const eliminar = async (p: Proveedor) => {
+        if (eliminando) return;
+        setEliminando(true);
+        const r = await eliminarProveedorDelPaso(p.id);
+        setEliminando(false);
+        setPorEliminar(null);
+        if (!r.ok || !r.data) {
+            toast.error(r.error ?? "No se pudo eliminar el proveedor.");
+            return;
+        }
+        setResultados((rs) => rs.filter((x) => x.id !== p.id));
+        if (r.data.borrado === "del_todo") {
+            toast.success(`Proveedor «${p.razon_social}» eliminado`);
+        } else {
+            const usos = Object.entries(r.data.usos ?? {}).map(([que, n]) => `${n} ${que}`).join(", ");
+            toast.success(`«${p.razon_social}» ya no sale en las listas`, {
+                description: usos
+                    ? `No se borra del todo porque ya se usó (${usos}): eso queda como estaba.`
+                    : "Venía del Integral: queda guardado, pero no se ofrece más.",
+            });
+        }
+    };
+
+    /** Las teclas de los campos de la edición: Enter guarda, Escape la cierra y nada más. */
+    const tecladoEdicion = (e: KeyboardEvent<HTMLInputElement>) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+            e.preventDefault();
+            void guardarEdicion();
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            e.nativeEvent.stopImmediatePropagation();
+            setEdicion(null);
+            setAvisoEdicion(null);
+        }
     };
 
     const hacer = (a: Accion) => {
@@ -326,7 +463,90 @@ export function SelectorProveedor({
                         </div>
                     )}
 
-                    {resultados.map((p, n) => (
+                    {resultados.map((p, n) => (edicion?.id === p.id ? (
+                        <div key={p.id} className="space-y-1.5 rounded-md border border-blue-200 bg-blue-50/60 p-2 text-xs">
+                            <input
+                                autoFocus
+                                aria-label="Razón social"
+                                value={edicion.razon_social}
+                                onChange={(e) => { setEdicion({ ...edicion, razon_social: e.target.value }); setPideConfirmar(false); }}
+                                onKeyDown={tecladoEdicion}
+                                placeholder="Razón social"
+                                className="h-7 w-full rounded border border-gray-200 bg-white px-2 text-sm font-medium text-gray-800 outline-none focus:border-blue-400"
+                            />
+                            <input
+                                aria-label="Nombre de fantasía"
+                                value={edicion.fantasia}
+                                onChange={(e) => { setEdicion({ ...edicion, fantasia: e.target.value }); setPideConfirmar(false); }}
+                                onKeyDown={tecladoEdicion}
+                                placeholder="Nombre de fantasía"
+                                className="h-7 w-full rounded border border-gray-200 bg-white px-2 outline-none focus:border-blue-400"
+                            />
+                            <div className="flex items-center gap-1.5">
+                                <input
+                                    aria-label="CUIT"
+                                    value={edicion.cuit}
+                                    onChange={(e) => { setEdicion({ ...edicion, cuit: e.target.value }); setPideConfirmar(false); }}
+                                    onKeyDown={tecladoEdicion}
+                                    placeholder="CUIT"
+                                    className="h-7 min-w-0 flex-1 rounded border border-gray-200 bg-white px-2 tabular-nums outline-none focus:border-blue-400"
+                                />
+                                <input
+                                    aria-label="Días que tarda"
+                                    type="number"
+                                    min={0}
+                                    max={365}
+                                    value={edicion.dias}
+                                    onChange={(e) => setEdicion({ ...edicion, dias: e.target.value })}
+                                    onKeyDown={tecladoEdicion}
+                                    placeholder="—"
+                                    className="h-7 w-14 rounded border border-gray-200 bg-white px-1.5 tabular-nums outline-none focus:border-blue-400"
+                                />
+                                <span className="text-gray-500">días</span>
+                            </div>
+                            <div className="flex items-center justify-end gap-2">
+                                {avisoEdicion && <span className="mr-auto leading-snug text-amber-800">{avisoEdicion}</span>}
+                                <button
+                                    type="button"
+                                    onClick={() => { setEdicion(null); setAvisoEdicion(null); }}
+                                    className="rounded px-2 py-1 font-medium text-gray-600 hover:bg-gray-100"
+                                >
+                                    Cerrar
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={guardandoEdicion}
+                                    onClick={() => void guardarEdicion(pideConfirmar)}
+                                    className="inline-flex items-center gap-1 rounded bg-blue-600 px-2.5 py-1 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                                >
+                                    {guardandoEdicion && <Loader2 className="h-3 w-3 animate-spin" />}
+                                    {pideConfirmar ? "Guardar igual" : "Guardar"}
+                                </button>
+                            </div>
+                        </div>
+                    ) : porEliminar === p.id ? (
+                        <div key={p.id} className="flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs text-rose-900">
+                            <span className="min-w-0 flex-1 leading-snug">
+                                ¿Eliminar <strong className="font-semibold">«{p.razon_social}»</strong>? Si ya se usó, sólo sale de las listas.
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setPorEliminar(null)}
+                                className="rounded px-2 py-1 font-medium text-rose-800 hover:bg-rose-100"
+                            >
+                                No
+                            </button>
+                            <button
+                                type="button"
+                                disabled={eliminando}
+                                onClick={() => void eliminar(p)}
+                                className="inline-flex items-center gap-1 rounded bg-rose-600 px-2.5 py-1 font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
+                            >
+                                {eliminando && <Loader2 className="h-3 w-3 animate-spin" />}
+                                Eliminar
+                            </button>
+                        </div>
+                    ) : (
                         <div
                             key={p.id}
                             role="option"
@@ -335,22 +555,48 @@ export function SelectorProveedor({
                             onClick={() => elegir(p)}
                             onMouseEnter={() => setActivo(n)}
                             className={cn(
-                                "flex cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-sm",
+                                "group flex cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-sm",
                                 n === activo ? "bg-blue-50" : "hover:bg-gray-50",
                                 p.inactivo && "opacity-60",
                             )}
                         >
                             <span className="min-w-0 flex-1">
                                 <span className="block truncate font-medium text-gray-800">{p.razon_social}</span>
-                                {(p.fantasia || p.cuit) && (
+                                {(p.fantasia || p.cuit || (gestionEnLista && p.demora_dias != null)) && (
                                     <span className="block truncate text-[11px] text-gray-500">
-                                        {[p.fantasia, p.cuit ? `CUIT ${p.cuit}` : null].filter(Boolean).join(" · ")}
+                                        {[
+                                            p.fantasia,
+                                            p.cuit ? `CUIT ${p.cuit}` : null,
+                                            gestionEnLista && p.demora_dias != null ? `tarda ${p.demora_dias} días` : null,
+                                        ].filter(Boolean).join(" · ")}
                                     </span>
                                 )}
                             </span>
                             {valor.id === p.id && <Check className="h-4 w-4 shrink-0 text-blue-600" />}
+                            {gestionEnLista && (
+                                <span className={cn("flex shrink-0 items-center gap-0.5", n === activo ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>
+                                    <button
+                                        type="button"
+                                        title="Editar el proveedor"
+                                        aria-label={`Editar ${p.razon_social}`}
+                                        onClick={(e) => { e.stopPropagation(); empezarEdicion(p); }}
+                                        className="rounded p-1 text-gray-400 hover:bg-white hover:text-blue-600"
+                                    >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        title="Eliminar el proveedor"
+                                        aria-label={`Eliminar ${p.razon_social}`}
+                                        onClick={(e) => { e.stopPropagation(); setEdicion(null); setPorEliminar(p.id); }}
+                                        className="rounded p-1 text-gray-400 hover:bg-white hover:text-rose-600"
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                </span>
+                            )}
                         </div>
-                    ))}
+                    )))}
 
                     {!error && !cargando && resultados.length === 0 && !acciones.length && (
                         <div className="px-3 py-4 text-center text-sm italic text-gray-400">

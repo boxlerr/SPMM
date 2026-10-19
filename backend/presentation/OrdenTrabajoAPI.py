@@ -371,6 +371,70 @@ async def editar_proceso_orden(
         id_orden, id_otp, body.model_dump(exclude_unset=True), usuario=current_user)
 
 
+# ── Los proveedores del paso tercerizado: escribir, editar y eliminar desde la lista ──
+#
+# 19/10/2026, Julián: «el proveedor, que se pueda escribir, editar y eliminar en la lista al
+# elegirlo». Son los de materias primas, cuyas rutas (/materia-prima/proveedores) no
+# escriben con el Integral como dueño (application/materia_prima/dueno.py). Julián eligió que
+# SPMM mande en los que se tocan desde esta lista: el espejo no pisa lo dado de alta acá ni
+# lo que se edita acá (ver MateriaPrimaCatalogoService.editar_proveedor). Van con la OT
+# (permiso «ordenes»), que es quien guarda el proveedor del paso.
+
+class ProveedorDelPasoIn(BaseModel):
+    razon_social: str
+    fantasia: str | None = None
+    cuit: str | None = None
+
+
+class ProveedorDelPasoCambiosIn(BaseModel):
+    razon_social: str | None = None
+    fantasia: str | None = None
+    cuit: str | None = None
+    demora_dias: int | None = Field(default=None, ge=0, le=365)
+
+
+@router.post("/proveedores")
+async def crear_proveedor_del_paso(dto: ProveedorDelPasoIn, request: Request, forzar: bool = False,
+                                   db=Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """Alta desde la lista del paso tercerizado (409 si ya hay uno que se llama igual)."""
+    from backend.application.MateriaPrimaCatalogoService import MateriaPrimaCatalogoService
+    from backend.dto.MateriaPrimaCatalogoDTO import ProveedorIn
+    logger.info("API - Inicio POST /proveedores")
+    servicio = MateriaPrimaCatalogoService(db)
+    resultado = await servicio.crear_proveedor(ProveedorIn(**dto.model_dump()), current_user, forzar)
+    historial_cambios.dejar_dicho_alta(
+        request, id_entidad=historial_cambios.id_de_respuesta(resultado), frase=servicio.frase)
+    return resultado
+
+
+@router.put("/proveedores/{id_proveedor}")
+async def editar_proveedor_del_paso(id_proveedor: int, dto: ProveedorDelPasoCambiosIn, request: Request,
+                                    forzar: bool = False, db=Depends(get_db),
+                                    current_user: dict = Depends(get_current_user)):
+    """Edición desde la lista: sólo lo que viene (409 si el nombre ya es de otro)."""
+    from backend.application.MateriaPrimaCatalogoService import MateriaPrimaCatalogoService
+    from backend.dto.MateriaPrimaCatalogoDTO import ProveedorCambiosIn
+    logger.info(f"API - Inicio PUT /proveedores/{id_proveedor}")
+    servicio = MateriaPrimaCatalogoService(db)
+    resultado = await servicio.editar_proveedor(
+        id_proveedor, ProveedorCambiosIn(**dto.model_dump(exclude_unset=True)), current_user, forzar)
+    historial_cambios.dejar_dicho_alta(request, id_entidad=id_proveedor, frase=servicio.frase)
+    return resultado
+
+
+@router.delete("/proveedores/{id_proveedor}")
+async def eliminar_proveedor_del_paso(id_proveedor: int, request: Request, db=Depends(get_db),
+                                      current_user: dict = Depends(get_current_user)):
+    """Eliminar desde la lista: del todo si nunca se usó y es de SPMM; si no, sale de las
+    listas y lo que ya lo nombraba queda igual."""
+    from backend.application.MateriaPrimaCatalogoService import MateriaPrimaCatalogoService
+    logger.info(f"API - Inicio DELETE /proveedores/{id_proveedor}")
+    servicio = MateriaPrimaCatalogoService(db)
+    resultado = await servicio.eliminar_proveedor(id_proveedor, current_user)
+    historial_cambios.dejar_dicho_alta(request, id_entidad=id_proveedor, frase=servicio.frase)
+    return resultado
+
+
 @router.delete("/ordenes/{id_orden}/procesos/{id_proceso}")
 async def eliminar_proceso_orden(
     id_orden: int,

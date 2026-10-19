@@ -1498,6 +1498,19 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "WHERE id_proveedor IS NOT NULL",
         ],
     ),
+    (
+        # Los proveedores que SPMM toma desde la lista del paso tercerizado (19/10/2026):
+        # el espejo del Integral deja de pisarlos.
+        "2026-10-19b_proveedor_editado_en_spmm",
+        [
+            "ALTER TABLE proveedor "
+            "ADD COLUMN IF NOT EXISTS editado_en_spmm TIMESTAMP",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON COLUMN proveedor.editado_en_spmm IS "
+            "'Cuándo se lo editó o dio de baja en SPMM (lista del paso tercerizado, desde el 19/10/2026). "
+            "Desde ahí manda SPMM: el espejo del Integral no lo vuelve a pisar. NULL = lo sigue trayendo el espejo.'",
+        ],
+    ),
 ]
 
 

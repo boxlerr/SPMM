@@ -252,6 +252,55 @@ def test_el_fresado_largo_va_al_fresador(solver_rapido):
             assert {filas[(1, 1)]["id_operario"], filas[(2, 1)]["id_operario"]} == {ALEJANDRO}
 
 
+TORNO = [(3, {OFICIAL}, "TORNO 1", "TORY-1", "TORNO")]
+SKILLS_TORNEADO = {GUSTAVO: (1, 0), ALEJANDRO: (2, 8)}
+
+
+def _dos_fresados_y_un_torneado():
+    """Dos fresados de 120 minutos y un torneado de 30, sin apuro de fechas, con dos
+    fresadoras y un torno. A la par, el plan termina antes; pero uno de los fresados lo
+    haría Gustavo, que es tornero."""
+    procesos = [
+        _paso(1, 1, 120, "FRESADO CONVENCIONAL", [OFICIAL], proc=FRESADO, skills=SKILLS_FRESADO),
+        _paso(2, 1, 120, "FRESADO CONVENCIONAL", [OFICIAL], proc=FRESADO, skills=SKILLS_FRESADO),
+        _paso(3, 1, 30, "TORNEADO", [OFICIAL], proc=TORNEADO, skills=SKILLS_TORNEADO),
+    ]
+    return procesos, [(ALEJANDRO, OFICIAL), (GUSTAVO, OFICIAL)], FRESAS + TORNO
+
+
+def test_si_las_fechas_lo_permiten_los_fresados_son_del_fresador(solver_rapido):
+    """19/10/2026, Julián: «tiene que estar resuelto siempre, no sólo en esa: tiene que
+    asignar correctamente según sus skills». Sin apuro de fechas, la segunda pasada pone
+    los dos fresados uno detrás del otro con Alejandro, y Gustavo tornea."""
+    procesos, operarios, maquinas = _dos_fresados_y_un_torneado()
+    filas = _resolver(procesos, operarios, maquinas)
+    assert filas[(1, 1)]["id_operario"] == ALEJANDRO
+    assert filas[(2, 1)]["id_operario"] == ALEJANDRO
+    assert filas[(3, 1)]["id_operario"] == GUSTAVO
+
+
+def test_sin_la_segunda_pasada_gustavo_fresaba(solver_rapido, monkeypatch):
+    """El mismo caso con sólo el reparto de horarios fijos: así estaba el 19/10. A la par
+    termina antes, y con los dos ocupados a esa hora no hay a quién pasarle el fresado."""
+    monkeypatch.setattr(PS, "SEGUNDA_PASADA_ESPECIALIDAD", False)
+    procesos, operarios, maquinas = _dos_fresados_y_un_torneado()
+    filas = _resolver(procesos, operarios, maquinas)
+    assert GUSTAVO in {filas[(1, 1)]["id_operario"], filas[(2, 1)]["id_operario"]}
+
+
+def test_primero_las_fechas(solver_rapido):
+    """Tres fresados de 160 minutos prometidos para el lunes 19: Alejandro llega a dos ese
+    día (uno de 160 no entra antes del desayuno). Esperarlo atrasaría el tercero, así que
+    ése lo hace Gustavo: primero las fechas, después cada uno en lo suyo."""
+    lunes = datetime(2026, 10, 19)
+    procesos = [_paso(ot, 1, 160, "FRESADO CONVENCIONAL", [OFICIAL], proc=FRESADO,
+                      skills=SKILLS_FRESADO, prometida=lunes) for ot in (1, 2, 3)]
+    filas = _resolver(procesos, [(ALEJANDRO, OFICIAL), (GUSTAVO, OFICIAL)], FRESAS)
+    quien = [filas[(ot, 1)]["id_operario"] for ot in (1, 2, 3)]
+    assert sorted(quien) == sorted([ALEJANDRO, ALEJANDRO, GUSTAVO])
+    assert all(filas[(ot, 1)]["fecha_fin_estimada"].startswith("2026-10-19") for ot in (1, 2, 3))
+
+
 def test_el_reparto_por_especialidad_no_mueve_horarios_ni_maquinas(solver_rapido, monkeypatch):
     """El caso del 19/10 en chico: un torneado y un fresado a la vez, cada uno en su máquina.
     Con el reparto apagado puede salir cruzado; con el reparto, cada uno en lo suyo, y los

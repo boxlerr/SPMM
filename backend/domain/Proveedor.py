@@ -38,6 +38,11 @@ class Proveedor(Base):
     # inventado. Dato de SPMM: el viejo no lo tiene y el espejo de materias primas sólo
     # actualiza las columnas que trae de allá, así que no lo pisa.
     demora_dias = Column(SmallInteger, nullable=True)
+    # Cuándo se lo editó o dio de baja en SPMM, desde la lista del paso tercerizado (19/10/
+    # 2026: «que se pueda escribir, editar y eliminar en la lista al elegirlo», y Julián
+    # eligió que SPMM mande). Si vino del Integral (id_legacy), desde ese momento el espejo
+    # de materias primas no lo vuelve a pisar. NULL = el espejo lo sigue trayendo.
+    editado_en_spmm = Column(DateTime, nullable=True)
     # Hora local AR sin zona; quién, tomado del token. NULL = vino del viejo o de un
     # script: nunca un autor inventado.
     creado_en = Column(DateTime, nullable=True)

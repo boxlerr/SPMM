@@ -21,6 +21,7 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { SelectorProveedor } from "@/app/materia-prima/_components/SelectorProveedor";
+import type { Proveedor } from "@/lib/materiaPrima";
 import { diaCorto } from "@/lib/paraClaude";
 
 export interface DatosDelProveedor {
@@ -144,6 +145,23 @@ export function ProveedorDelPaso({
         );
     };
 
+    /** Se editó un proveedor desde la lista: si es el de este paso, su nombre y sus días. */
+    const alEditarElProveedor = (p: Proveedor) => {
+        if (p.id !== actual.id_proveedor) return;
+        const nuevo: DatosDelProveedor = {
+            ...actual,
+            proveedor_nombre: p.razon_social,
+            demora_del_proveedor: p.demora_dias ?? null,
+        };
+        setActual(nuevo);
+        setDias(demoraEfectiva(nuevo)?.toString() ?? "");
+        // Si el paso usa los días de siempre del proveedor, el plan tiene que esperarlos.
+        if (actual.demora_del_paso == null && (p.demora_dias ?? null) !== actual.demora_del_proveedor) {
+            setSinRecalcular(true);
+        }
+        onGuardado?.(nuevo);
+    };
+
     const efectiva = demoraEfectiva(actual);
     const deDonde = actual.demora_del_paso == null && actual.demora_del_proveedor != null
         ? `los de siempre de ${actual.proveedor_nombre ?? "este proveedor"}`
@@ -157,6 +175,9 @@ export function ProveedorDelPaso({
             <SelectorProveedor
                 valor={{ id: actual.id_proveedor, nombre: actual.proveedor_nombre }}
                 onCambiar={(v) => elegirProveedor(v.id, v.nombre)}
+                // Escribir uno nuevo, editarlo y eliminarlo desde la lista (19/10/2026).
+                gestionEnLista
+                onEditado={alEditarElProveedor}
                 disabled={bloqueado || guardando || lineaId == null}
                 placeholder="¿Qué proveedor lo hace?"
                 className="w-auto min-w-[11rem] max-w-[16rem] flex-1"

@@ -53,8 +53,9 @@ import { PlanoDeOrden } from "@/components/common/PlanoDeOrden";
 import { AvisoPausadasEnElPlan } from "@/components/pausas/AvisoPausadasEnElPlan";
 import { exportarReporte, filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 import { lindo, pedirEquipo, seccionesDelEquipo } from "@/lib/equipo";
+import { terminosDeBusqueda } from "@/lib/busqueda";
 import {
-    bajarTexto, diaCorto, listarNumeros, numerosDeOT, textoDelPlanParaClaude,
+    bajarTexto, diaCorto, listarNumeros, textoDelPlanParaClaude,
     type PasoDelPlanParaClaude,
 } from "@/lib/paraClaude";
 import { ProveedorDelPaso, demoraEfectiva, type DatosDelProveedor } from "@/components/planning/ProveedorDelPaso";
@@ -980,16 +981,18 @@ export function PlanningPreviewScreen({
     }, [unplannedOrders, selectedOrderIds, results, stickyExcedentes]);
 
     const filteredAddableOrders = React.useMemo(() => {
-        const term = addSearchTerm.toLowerCase();
-        if (!term) return addableOrders;
-        return addableOrders.filter(o =>
+        // Como el buscador del Paso 1 (lib/busqueda): una lista de OT —la que devuelve
+        // Claude— busca cada número por su cuenta; un texto se busca entero.
+        const terminos = terminosDeBusqueda(addSearchTerm);
+        if (terminos.length === 0) return addableOrders;
+        const coincide = (o: any, term: string) =>
             String(o.id_otvieja || o.id).includes(term) ||
             (o.cliente?.nombre || "").toLowerCase().includes(term) ||
             (o.articulo?.descripcion || "").toLowerCase().includes(term) ||
             (o.articulo?.cod_articulo || "").toLowerCase().includes(term) ||
             // D1: también buscar por nombre de proceso.
-            (Array.isArray(o.procesos) && o.procesos.some((p: any) => (p.proceso?.nombre || "").toLowerCase().includes(term)))
-        );
+            (Array.isArray(o.procesos) && o.procesos.some((p: any) => (p.proceso?.nombre || "").toLowerCase().includes(term)));
+        return addableOrders.filter(o => terminos.some(t => coincide(o, t)));
     }, [addableOrders, addSearchTerm]);
 
     const togglePendingAdd = (id: number) => {
@@ -1002,40 +1005,24 @@ export function PlanningPreviewScreen({
     };
 
     /**
-     * «Pegar lista» (reunión con Lucas del 17/10/2026): la lista de números de OT que
-     * devuelve Claude, tildada de una en vez de buscar y tildar OT por OT. No agrega nada
-     * todavía: tilda, y «Agregar» hace lo de siempre.
+     * «Tildar las N» (reunión con Lucas del 17/10/2026): con la lista de OT que devuelve
+     * Claude pegada en el buscador, se tildan de una todas las que encontró. Dice cuáles de
+     * la lista no aparecen: las que ya están en el plan y las que no se pueden agregar.
      */
-    const [verPegarLista, setVerPegarLista] = React.useState(false);
-    const [textoPegado, setTextoPegado] = React.useState("");
-    const tildarLaListaPegada = () => {
-        const numeros = numerosDeOT(textoPegado);
-        if (numeros.length === 0) {
-            toast.error("No encontré números de OT en lo que pegaste.");
-            return;
-        }
-        const porNumero = new Map(addableOrders.map(o => [Number(o.id_otvieja || o.id), o.id]));
+    const tildarLasQueSeVen = () => {
+        const ids = filteredAddableOrders.map(o => o.id);
+        setPendingAddIds(prev => new Set([...Array.from(prev), ...ids]));
+        const numeros = terminosDeBusqueda(addSearchTerm).filter(t => /^\d+$/.test(t)).map(Number);
+        const vistos = new Set(filteredAddableOrders.map(o => Number(o.id_otvieja || o.id)));
         const enElPlan = new Set(results.map(r => Number(r.id_otvieja || r.orden_id)));
-        const tildadas: number[] = [];
-        const yaEstan: number[] = [];
-        const noEstan: number[] = [];
-        for (const n of numeros) {
-            const id = porNumero.get(n);
-            if (id != null) tildadas.push(id);
-            else if (enElPlan.has(n)) yaEstan.push(n);
-            else noEstan.push(n);
-        }
-        setPendingAddIds(prev => new Set([...Array.from(prev), ...tildadas]));
-        setAddSearchTerm("");
-        setTextoPegado("");
-        setVerPegarLista(false);
+        const yaEstan = numeros.filter(n => !vistos.has(n) && enElPlan.has(n));
+        const noEstan = numeros.filter(n => !vistos.has(n) && !enElPlan.has(n));
         const detalle = [
             yaEstan.length ? `Ya están en el plan: ${listarNumeros(yaEstan)}.` : "",
             noEstan.length ? `No están para agregar (no existen, ya se planificaron o no tienen procesos): ${listarNumeros(noEstan)}.` : "",
         ].filter(Boolean).join(" ");
-        const titulo = `Tildé ${tildadas.length} de ${numeros.length} OT.${tildadas.length ? " Tocá «Agregar» para sumarlas al plan." : ""}`;
-        if (tildadas.length) toast.success(titulo, detalle ? { description: detalle, duration: 9000 } : undefined);
-        else toast.warning(titulo, detalle ? { description: detalle, duration: 9000 } : undefined);
+        toast.success(`Tildé ${ids.length} OT. Tocá «Agregar» para sumarlas al plan.`,
+            detalle ? { description: detalle, duration: 9000 } : undefined);
     };
 
     // D1: seleccionar/deseleccionar un proceso suelto de una OT.
@@ -3711,50 +3698,26 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                 <div className="relative flex-1">
                                                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                                                     <Input
-                                                        placeholder="Buscar por OT, cliente, código..."
+                                                        placeholder="Buscar por OT, cliente, código… o pegá la lista de OT"
                                                         value={addSearchTerm}
                                                         onChange={(e) => setAddSearchTerm(e.target.value)}
                                                         className="pl-8 h-8 text-xs"
                                                     />
                                                 </div>
-                                                <Button
-                                                    type="button"
-                                                    size="sm"
-                                                    variant={verPegarLista ? "secondary" : "outline"}
-                                                    className="h-8 shrink-0 gap-1 px-2 text-xs"
-                                                    onClick={() => setVerPegarLista(v => !v)}
-                                                    title="Pegá una lista de números de OT (por ejemplo, la que te devolvió Claude) y se tildan todas de una"
-                                                >
-                                                    <ListChecks className="w-3.5 h-3.5" />
-                                                    Pegar lista
-                                                </Button>
+                                                {terminosDeBusqueda(addSearchTerm).length > 0 && filteredAddableOrders.length > 0 && (
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-8 shrink-0 gap-1 px-2 text-xs"
+                                                        onClick={tildarLasQueSeVen}
+                                                        title="Tilda todas las OT que encontró el buscador (por ejemplo, la lista que devolvió Claude)"
+                                                    >
+                                                        <ListChecks className="w-3.5 h-3.5" />
+                                                        {filteredAddableOrders.length === 1 ? "Tildar la 1" : `Tildar las ${filteredAddableOrders.length}`}
+                                                    </Button>
+                                                )}
                                             </div>
-                                            {verPegarLista && (
-                                                <div className="space-y-1.5 rounded-md border border-blue-100 bg-blue-50/50 p-2">
-                                                    <textarea
-                                                        autoFocus
-                                                        value={textoPegado}
-                                                        onChange={(e) => setTextoPegado(e.target.value)}
-                                                        placeholder="OT: 15922, 15842, 15866"
-                                                        rows={3}
-                                                        className="w-full resize-y rounded border border-gray-200 bg-white px-2 py-1.5 font-mono text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                                                    />
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <span className="text-[11px] leading-snug text-gray-500">
-                                                            Separadas por coma, espacio o renglón. Si pegás la respuesta entera de Claude, se toma el renglón «OT:».
-                                                        </span>
-                                                        <Button
-                                                            type="button"
-                                                            size="sm"
-                                                            className="h-7 shrink-0 bg-blue-600 px-2.5 text-xs hover:bg-blue-700"
-                                                            onClick={tildarLaListaPegada}
-                                                            disabled={!textoPegado.trim()}
-                                                        >
-                                                            Tildar
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            )}
                                         </div>
                                         {/* Lista scrolleable: overflow-auto nativo en vez de ScrollArea de Radix
                                             (que dentro de un Popover a veces no respeta max-height y bloquea el scroll). */}

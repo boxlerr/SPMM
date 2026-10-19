@@ -11,7 +11,7 @@ muestra tal cual, y no como el 400 genérico de Pydantic.
 from datetime import date
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ─────────────────────────── catálogos chicos ───────────────────────────
@@ -35,6 +35,14 @@ class ProveedorIn(BaseModel):
     cuit: Optional[str] = None
     telefono: Optional[str] = None
     mail: Optional[str] = None
+
+
+class ProveedorCambiosIn(BaseModel):
+    """Edición desde la lista del paso tercerizado: sólo lo que viene se cambia."""
+    razon_social: Optional[str] = None
+    fantasia: Optional[str] = None
+    cuit: Optional[str] = None
+    demora_dias: Optional[int] = Field(default=None, ge=0, le=365)
 
 
 # ─────────────────────────── insumos ───────────────────────────

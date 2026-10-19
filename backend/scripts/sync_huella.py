@@ -286,7 +286,13 @@ def _columnas_spmm(modo: str) -> dict[str, tuple[str, str]]:
         "pieza_movimiento": ("id, id_pieza, fecha, tipo, cantidad, comentario, id_orden_trabajo, "
                              "id_orden_trabajo_pieza, origen, anulado", ""),
         "pieza_precio": ("id, id_pieza, fecha, precio, origen, id_proveedor", ""),
-        "proveedor": ("id, id_legacy, " + ", ".join(COLS_PROVEEDOR), ""),
+        # Sólo los que trae el espejo: los dados de alta en SPMM (id_legacy NULL) y los
+        # editados o dados de baja en SPMM (editado_en_spmm, desde el 19/10/2026) son de
+        # SPMM, y tocarlos no es «alguien que escribió por afuera». El primero que se edita
+        # sale de esta cuenta, y eso se ve una vez como cambio de SPMM: la pasada que
+        # restituye ya no lo toca.
+        "proveedor": ("id, id_legacy, " + ", ".join(COLS_PROVEEDOR),
+                      " WHERE id_legacy IS NOT NULL AND editado_en_spmm IS NULL"),
         "material": ("id, nombre, letra_codigo", ""),
         "material_calidad": ("id, id_material, nombre", ""),
         "plan_semanal": ("id, semana, fecha_original, numero_ot, id_orden_trabajo, prioridad, "

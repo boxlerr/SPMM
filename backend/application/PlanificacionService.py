@@ -1646,8 +1646,21 @@ def _agregar_funcion_objetivo(
 
     `vueltas_virtuales` (de `_agregar_ventanas_horarias`): lo que vuelve del proveedor
     DESPUÉS del último día del plan. Ver «Lo que vuelve después del plan», abajo.
+
+    Devuelve los términos por grupo (ver `sumar`), para la segunda pasada.
     """
     total_obj = []
+    # Cada término va también a su grupo, para la segunda pasada
+    # (_segunda_pasada_por_especialidad): lo que esa pasada no puede empeorar —pasos
+    # afuera, sin persona o máquina, y las fechas (atraso, OT de corrido)— y quién hace
+    # cada trabajo, contado POR MINUTO (acá la preferencia es por paso: un fresado de
+    # tres horas pesaba lo mismo que uno de diez minutos).
+    grupos = {"afuera": [], "sin_recurso": [], "fechas": [], "quien_min": [], "resto": []}
+
+    def sumar(var, coef, grupo):
+        total_obj.append((var, coef))
+        grupos[grupo].append((var, coef))
+
     ultimo_de_ot = {}
     for p in procesos_norm:
         ultimo_de_ot[p[0]] = max(ultimo_de_ot.get(p[0], p[2]), p[2])
@@ -1801,28 +1814,29 @@ def _agregar_funcion_objetivo(
             lateness = model.NewIntVar(0, H * 10, f"late_{orden_id}_{secuencia}")
             model.AddMaxEquality(lateness, [diff, 0])
             late_eff = _gate_int(lateness, H * 10, f"late_eff_{orden_id}_{secuencia}")
-            total_obj.append((late_eff, mult))
+            sumar(late_eff, mult, "fechas")
 
         # Prioridad de skill (SKILL 1 < SKILL 2 < nativa), solo si el proceso entra
         # al plan: un excedente no debe pagar preferencia de operario.
         for _i, (pres_b, penal) in enumerate(penal_prioridad):
             pres_eff = _gate_bool(pres_b, f"skillp_eff_{orden_id}_{secuencia}_{_i}")
             total_obj.append((pres_eff, penal))
+            grupos["quien_min"].append((pres_eff, penal * max(1, int(dur))))
 
         base_prior = model.NewIntVar(0, 10000, f"base_{orden_id}_{secuencia}")
         model.Add(base_prior == (6 - min(peso_prioridad, 5)) * 100)
         base_eff = _gate_int(base_prior, 10000, f"base_eff_{orden_id}_{secuencia}")
-        total_obj.append((base_eff, 1))
+        sumar(base_eff, 1, "resto")
 
         ini_eff = _gate_int(inicio_vars[(orden_id, secuencia)], H, f"ini_eff_{orden_id}_{secuencia}")
-        total_obj.append((ini_eff, 1))
+        sumar(ini_eff, 1, "resto")
 
         # Penalizaciones por dummy (solo si presente)
         pd_eff = _gate_bool(pick_dummy, f"pd_eff_{orden_id}_{secuencia}")
-        total_obj.append((pd_eff, PENAL_DUMMY))
+        sumar(pd_eff, PENAL_DUMMY, "sin_recurso")
         if usa_maquina:
             pdm_eff = _gate_bool(pick_dummy_maq, f"pdm_eff_{orden_id}_{secuencia}")
-            total_obj.append((pdm_eff, PENAL_DUMMY_MAQ))
+            sumar(pdm_eff, PENAL_DUMMY_MAQ, "sin_recurso")
 
         # Slots extra de operario (procesos que requieren N personas): penalizar
         # que queden en DUMMY, para que el solver trate de cubrir las N posiciones.
@@ -1831,7 +1845,7 @@ def _agregar_funcion_objetivo(
             model.Add(ev == 999999).OnlyEnforceIf(ev_dummy)
             model.Add(ev != 999999).OnlyEnforceIf(ev_dummy.Not())
             ev_eff = _gate_bool(ev_dummy, f"xdumeff_{orden_id}_{secuencia}_{ex_idx}")
-            total_obj.append((ev_eff, PENAL_DUMMY))
+            sumar(ev_eff, PENAL_DUMMY, "sin_recurso")
 
 
         # (la penalización por sobre-cualificación se arma arriba, junto a los picks
@@ -1842,7 +1856,7 @@ def _agregar_funcion_objetivo(
             peso_exced = PESO_EXCED_POR_PRIO.get(peso_prioridad, 100)
             ausente = model.NewBoolVar(f"ausente_{orden_id}_{secuencia}")
             model.Add(ausente == 1 - presente)
-            total_obj.append((ausente, W_FUERA * peso_exced))
+            sumar(ausente, W_FUERA * peso_exced, "afuera")
 
     # --- Lo que vuelve del proveedor después del plan ---
     # Si la pieza vuelve después del último día del plan, lo que sigue de la OT queda
@@ -1865,13 +1879,13 @@ def _agregar_funcion_objetivo(
         resto = sum(p[5] for p in procesos_norm if p[0] == orden_id and p[2] > secuencia)
         cuando = model.NewIntVar(0, tope, f"vuelve_despues_min_{orden_id}_{secuencia}")
         model.Add(cuando >= vuelve).OnlyEnforceIf(afuera)
-        total_obj.append((cuando, W_FIN_OT))
+        sumar(cuando, W_FIN_OT, "resto")
         entrega = _entrega_extendida(paso[3], ventanas) if ventanas else None
         if entrega is not None:
             tarde = model.NewIntVar(0, tope + resto, f"tarde_vuelta_{orden_id}_{secuencia}")
             model.Add(tarde >= vuelve + resto - entrega).OnlyEnforceIf(afuera)
             mult = atraso_mult_por_prioridad.get(paso[4], 200)
-            total_obj.append((tarde, mult))
+            sumar(tarde, mult, "fechas")
             tardes_de_vuelta.append((tarde, mult, tope + resto))
 
     # --- Terminar antes, aunque no haya atraso ---
@@ -1907,7 +1921,7 @@ def _agregar_funcion_objetivo(
             for f in fines:
                 model.Add(fin_ot >= f)
             model.Add(fin_plan >= fin_ot)
-            total_obj.append((fin_ot, W_FIN_OT))
+            sumar(fin_ot, W_FIN_OT, "resto")
             # --- OT de corrido: cada minuto que la OT queda abierta ---
             # Del arranque de su primer paso al fin del último. Lo que la OT trabaja es
             # fijo, así que achicar esto es achicar la espera entre sus pasos. Si la OT
@@ -1919,8 +1933,8 @@ def _agregar_funcion_objetivo(
                                   - sum(espera_de_ot.get(orden_id, [])))
                 if presente_vars is not None:
                     restr.OnlyEnforceIf(presente_vars[primera])
-                total_obj.append((abierta, W_OT_DE_CORRIDO))
-        total_obj.append((fin_plan, W_FIN_PLAN))
+                sumar(abierta, W_OT_DE_CORRIDO, "fechas")
+        sumar(fin_plan, W_FIN_PLAN, "resto")
 
     # --- El atraso de la OT más atrasada (ver ATRASO_MAX_EQUIV) ---
     # En minutos ponderados por la prioridad de cada OT: una urgente atrasada un día pesa
@@ -1940,9 +1954,10 @@ def _agregar_funcion_objetivo(
                 restriccion.OnlyEnforceIf(ultimo)
         for tarde, mult_ot, _cota in tardes_de_vuelta:
             model.Add(atraso_max >= tarde * mult_ot)
-        total_obj.append((atraso_max, ATRASO_MAX_EQUIV))
+        sumar(atraso_max, ATRASO_MAX_EQUIV, "fechas")
 
     model.Minimize(sum(v * c for (v, c) in total_obj))
+    return grupos
 
 
 def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None, blocked_dates=None, es_fin: bool = False):
@@ -2707,6 +2722,116 @@ def _completar_semilla(model, max_seg: float = 15.0) -> bool:
 
 
 # ------------------------------------------------------------
+# Segunda pasada: cada uno en lo suyo, también moviendo horarios
+# ------------------------------------------------------------
+#
+# 19/10/2026, con las 23 OT del 17/10: el reparto de abajo (horarios fijos) le sacaba a
+# Gustavo los fresados, pero se los daba a Iván, que también es tornero, porque a esa hora
+# Alejandro y Matías estaban fresando otras OT. Julián: «tiene que estar resuelto siempre,
+# no sólo en esa: tiene que asignar correctamente según sus skills».
+#
+# Lo que pidió Lucas el 17/10 es un ORDEN: primero las fechas, después que cada uno haga
+# lo suyo. Eso es resolver dos veces. La primera pasada arma el plan como siempre. La
+# segunda vuelve a resolver el MISMO modelo con tres candados —ni más pasos afuera, ni más
+# trabajo sin persona o máquina, ni peores fechas (atraso, OT de corrido y la OT más
+# atrasada, con la misma cuenta de la primera pasada)— y ahora busca, minuto a minuto, que
+# cada trabajo lo haga el de SKILL 1 (después el de SKILL 2, después el que sabe sin estar
+# marcado). Puede mover horarios y máquinas: si el fresado de una OT puede esperar a que
+# Alejandro se desocupe sin atrasar ninguna entrega, espera. Si no hay forma sin atrasar,
+# lo hace el que sigue en la lista. Después de las preferencias, terminar antes.
+#
+# Arranca desde la primera pasada (cada variable con su valor como pista): lo peor que
+# puede pasar es que no encuentre nada mejor, y entonces el plan queda como estaba.
+SEGUNDA_PASADA_ESPECIALIDAD = True
+# Tope de segundos de la segunda pasada: la mitad de lo de la primera, hasta este tope, y
+# se corta antes si no mejora durante la mitad del corte de la primera (nunca menos de
+# SEGUNDA_PASADA_CORTE_MIN: con el modelo entero, las mejoras llegan de a ratos).
+SEGUNDA_PASADA_SEG_MAX = 60
+SEGUNDA_PASADA_CORTE_MIN = 8
+
+
+def _resolver_con_corte(model, seg: float, corte_seg: float):
+    """(solver, estado) con el mismo corte por estancamiento de la primera pasada: si
+    lleva `corte_seg` sin encontrar nada mejor, se usa lo que hay."""
+    import threading
+    import time as _t
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = seg
+    solver.parameters.num_search_workers = int(os.getenv("SOLVER_WORKERS", "0")) or max(2, min(8, os.cpu_count() or 2))
+    solver.parameters.log_search_progress = False
+    ultima = {"t": None}
+
+    class _Mejoras(cp_model.CpSolverSolutionCallback):
+        def on_solution_callback(self):
+            ultima["t"] = _t.monotonic()
+
+    fin = threading.Event()
+
+    def _vigia():
+        while not fin.wait(1.0):
+            if ultima["t"] is not None and (_t.monotonic() - ultima["t"]) > corte_seg:
+                getattr(solver, "stop_search", getattr(solver, "StopSearch", lambda: None))()
+                return
+
+    threading.Thread(target=_vigia, daemon=True).start()
+    try:
+        estado = solver.Solve(model, _Mejoras())
+    finally:
+        fin.set()
+    return solver, estado
+
+
+def _segunda_pasada_por_especialidad(model, solver, grupos: dict | None, seg: float,
+                                     corte_seg: float):
+    """(solver, estado) de la segunda pasada si encontró un reparto mejor sin empeorar
+    nada de lo que cuida la primera (ver arriba); None si no hacía falta, no pudo o no
+    mejoró: el que llama sigue con la primera."""
+    if not SEGUNDA_PASADA_ESPECIALIDAD or not grupos or not grupos.get("quien_min"):
+        return None
+    try:
+        import time as _t
+
+        def valor(s, lista):
+            return sum(int(s.Value(v)) * c for v, c in lista)
+
+        antes = valor(solver, grupos["quien_min"])
+        if antes <= 0:
+            return None   # ya está cada uno en lo suyo
+        variables = [model.GetIntVarFromProtoIndex(i) for i in range(len(model.Proto().variables))]
+        valores = [solver.Value(v) for v in variables]
+        model.ClearHints()
+        for v, x in zip(variables, valores):
+            model.AddHint(v, x)
+        candados = {}
+        for grupo in ("afuera", "sin_recurso", "fechas"):
+            if grupos.get(grupo):
+                candados[grupo] = valor(solver, grupos[grupo])
+                model.Add(sum(v * c for v, c in grupos[grupo]) <= candados[grupo])
+        model.ClearObjective()
+        model.Minimize(sum(v * c for v, c in grupos["quien_min"])
+                       + sum(v * c for v, c in grupos.get("resto", [])))
+
+        t0 = _t.monotonic()
+        segunda, estado = _resolver_con_corte(model, seg, corte_seg)
+        if estado not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            logger.warning("PLANIFICADOR: la segunda pasada (cada uno en lo suyo) no dio "
+                           "solución; queda la primera.")
+            return None
+        despues = valor(segunda, grupos["quien_min"])
+        logger.info(
+            f"PLANIFICADOR: segunda pasada (cada uno en lo suyo) en {_t.monotonic() - t0:.1f}s: "
+            f"preferencia por minuto {antes} → {despues}; "
+            + ", ".join(f"{g} {candados[g]} → {valor(segunda, grupos[g])}" for g in candados))
+        if despues >= antes:
+            return None
+        return segunda, estado
+    except Exception as e:   # es una mejora: si algo falla, queda la primera pasada
+        logger.warning(f"PLANIFICADOR: no se pudo hacer la segunda pasada por especialidad ({e})")
+        return None
+
+
+# ------------------------------------------------------------
 # Con los horarios ya armados: cada uno en lo suyo
 # ------------------------------------------------------------
 #
@@ -3200,7 +3325,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         )
 
         # ---- Función objetivo ----
-        _agregar_funcion_objetivo(
+        grupos_objetivo = _agregar_funcion_objetivo(
             model,
             procesos_norm,
             inicio_vars,
@@ -3322,8 +3447,22 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         falto_lugar = bool(afuera) or (
             sin_recurso_reparto is not None and sin_recurso > sin_recurso_reparto)
         if not falto_lugar or ultimo_intento:
-            # Con los horarios ya fijos, cada uno en lo suyo (reunión del 17/10/2026, ver
-            # _reasignar_por_especialidad). No cambia fechas ni máquinas: sólo personas.
+            # Cada uno en lo suyo (reunión del 17/10/2026): primero una segunda pasada que
+            # puede mover horarios sin empeorar las fechas (_segunda_pasada_por_especialidad)
+            # y después, con los horarios ya fijos, el reparto de personas
+            # (_reasignar_por_especialidad), que no cambia fechas ni máquinas.
+            segunda = _segunda_pasada_por_especialidad(
+                model, solver, grupos_objetivo,
+                seg=max(15.0, min(float(SEGUNDA_PASADA_SEG_MAX), seg_intento / 2)),
+                corte_seg=max(float(SEGUNDA_PASADA_CORTE_MIN), corte_intento / 2))
+            if segunda is not None:
+                solver, status = segunda
+                resultados = _extraer_resultados(
+                    solver, status, procesos_norm, inicio_vars, fin_vars, operario_vars,
+                    maq_vars, op_to_rango, DUMMY_OP_ID, DUMMY_MAQ_ID, ahora_ref,
+                    presente_vars=presente_vars, op_extra_vars=op_extra_vars, partes=partes,
+                    blocked_dates=blocked_dates, demoras_modelo=demoras_modelo,
+                    incluir_sabado=hay_sabado)
             pares_ok = _pares_permitidos(
                 procesos_norm, op_domain_vals, maq_domain_vals, op_to_rango, maq_to_rangos,
                 maq_to_familia, DUMMY_OP_ID, DUMMY_MAQ_ID, op_to_rangos, skills_manuales,

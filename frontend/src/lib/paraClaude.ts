@@ -5,7 +5,8 @@
  *
  *   1. ANTES de planificar: «que yo se lo pueda pasar y me organice» qué OT conviene meter
  *      en la semana, según lo urgente y quién puede hacer cada cosa. Claude devuelve una
- *      lista de números de OT y esa lista se pega en «Pegar lista» del Paso 1.
+ *      lista de números de OT y esa lista se pega en el buscador del Paso 1 (ver
+ *      lib/busqueda): con el tilde de arriba se tildan todas.
  *   2. CON el plan armado: «exporto este PDF, le paso el PDF y un botón para exportar todas
  *      las skills de una», para que explique asignaciones como la del 19/10 —por qué la
  *      fresadora fue a Gustavo y no a Alejandro— y proponga cambios.
@@ -67,7 +68,7 @@ export const COMO_DECIDE = `## Cómo decide el planificador de Metlosys
 
 - **Jornada**: de 07:00 a 16:00, con desayuno de 09:00 a 09:15 y almuerzo de 12:00 a 12:30 (495 minutos de trabajo). Los sábados sólo si alguien los trabaja. Los feriados no, salvo que se haya elegido trabajarlos.
 - **Qué pesa más, en este orden**: 1) que ningún paso quede afuera del plan; 2) que cada paso tenga persona y máquina; 3) que cada OT vaya de corrido: se empieza y se termina, sin dejarla esperando entre pasos; 4) llegar a la fecha prometida (lo urgente pesa más); 5) terminar todo lo antes posible.
-- **Quién puede hacer cada proceso**: el que lo tiene por su rango o cargado a mano en su ficha, salvo que se lo hayan apagado. Entre los que pueden, prefiere al de **SKILL 1**, después al de **SKILL 2**, después al que sabe sin estar marcado; la posición en la lista desempata. Esa preferencia pesa poco al armar los horarios (las fechas van primero); con los horarios ya armados, se revisa quién hace cada trabajo para que cada uno haga lo suyo (SKILL 1) sin mover ninguna fecha ni ninguna máquina.
+- **Quién puede hacer cada proceso**: el que lo tiene por su rango o cargado a mano en su ficha, salvo que se lo hayan apagado. Entre los que pueden, prefiere al de **SKILL 1**, después al de **SKILL 2**, después al que sabe sin estar marcado; la posición en la lista desempata. El plan se arma en dos vueltas: primero por fechas, y después, sin atrasar ninguna entrega, se reacomoda para que cada trabajo lo haga el de SKILL 1, contando los minutos (puede cambiar horarios y máquinas). Si esperar al de SKILL 1 atrasaría una entrega, lo hace el que sigue.
 - **Preparación y trabajo**: la preparación de una máquina y el trabajo que sigue los hace la misma persona, en la misma máquina y seguidos.
 - **Máquinas**: cada proceso va en las máquinas cargadas para él (o las de su tipo), y sólo las puede usar alguien cuyo rango la habilita.
 - **Planos**: si la OT tiene un plano cargado en la orden, sus pasos sólo los hace alguien que sabe leer planos.
@@ -300,7 +301,7 @@ Sos quien ayuda a Lucas (jefe de taller) a elegir qué órdenes de trabajo (OT) 
 
 1. Elegí las OT que conviene planificar: primero lo urgente y lo más atrasado contra la fecha prometida, y que el trabajo llene la semana sin pasarse de las horas que tiene cada uno. Ojo con los cuellos: si un proceso lo puede hacer una sola persona, no le cargues más horas de las que tiene.
 2. Explicá en pocas líneas por qué esas y por qué dejaste afuera las urgentes que no entran.
-3. Al final, en un renglón aparte, la lista de números de OT separados por coma, así: \`OT: 15922, 15842, 15866\`. Ese renglón se pega tal cual en «Pegar lista» de Metlosys.
+3. Al final, en un renglón aparte, la lista de números de OT separados por coma, así: \`OT: 15922, 15842, 15866\`. Ese renglón se pega tal cual en el buscador del Paso 1 de Metlosys.
 
 Respondé en castellano y en palabras del taller. Si un dato falta (una OT sin minutos, un proceso que nadie sabe hacer), decilo.`;
 
@@ -335,29 +336,6 @@ Respondé en castellano y en palabras del taller. Si un dato falta (una OT sin m
 }
 
 // ─────────────────────────── La vuelta: pegar la lista ───────────────────────────
-
-/**
- * Los números de OT de un texto pegado: «OT: 15922, 15842 15866», una por renglón, con «#»
- * o sin. Sin repetidos y en el orden en que aparecen. Los números de menos de 3 cifras no
- * cuentan (son pasos, cantidades o días, no OT).
- *
- * Si se pega la respuesta entera de Claude, sólo cuenta el renglón que empieza con «OT:»
- * (el que se le pide que deje al final): el resto trae fechas, años y horas.
- */
-export function numerosDeOT(texto: string): number[] {
-    const renglonesOT = (texto ?? "").split(/\r?\n/).filter((r) => /^\s*[*_`]*\s*OTs?\s*[:：]/i.test(r));
-    const fuente = renglonesOT.length ? renglonesOT.join("\n") : (texto ?? "");
-    const vistos = new Set<number>();
-    const salida: number[] = [];
-    for (const m of fuente.matchAll(/\d+/g)) {
-        if (m[0].length < 3) continue;
-        const n = Number(m[0]);
-        if (!Number.isFinite(n) || vistos.has(n)) continue;
-        vistos.add(n);
-        salida.push(n);
-    }
-    return salida;
-}
 
 /** «15922, 15842 y 15866». */
 export function listarNumeros(numeros: (number | string)[]): string {

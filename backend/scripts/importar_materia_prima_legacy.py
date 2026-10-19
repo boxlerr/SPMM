@@ -486,7 +486,7 @@ class Estado:
         self.calidades = [dict(r) for r in await f("SELECT id, id_material, nombre FROM material_calidad")]
         self.formatos = [dict(r) for r in await f("SELECT id, nombre FROM formato")]
         self.proveedores = [dict(r) for r in await f(
-            "SELECT id, id_legacy, " + ", ".join(COLS_PROVEEDOR) + " FROM proveedor")]
+            "SELECT id, id_legacy, editado_en_spmm, " + ", ".join(COLS_PROVEEDOR) + " FROM proveedor")]
         self.piezas = [dict(r) for r in await f(
             "SELECT id, cod_pieza, stockactual, " + ", ".join(COLS_PIEZA) + " FROM pieza ORDER BY id")]
         # Por número visible (id_otvieja). Artículo, cliente (su número en el viejo) y
@@ -868,11 +868,16 @@ async def paso_proveedores(ctx: Contexto):
     est = ctx.estado
     por_legacy = {p["id_legacy"]: p for p in est.proveedores if p["id_legacy"] is not None}
     nuevos, cambiados = [], []
+    editados_en_spmm = 0
     for fila in ctx.viejo["proveedor"]:
         datos = _proveedor_desde_legacy(fila)
         actual = por_legacy.get(fila["idProveedor"])
         if actual is None:
             nuevos.append({"id_legacy": fila["idProveedor"], **datos})
+        elif actual.get("editado_en_spmm"):
+            # Editado o dado de baja en SPMM desde la lista del paso tercerizado: desde el
+            # 19/10/2026 manda SPMM en ése (ver MateriaPrimaCatalogoService.editar_proveedor).
+            editados_en_spmm += 1
         else:
             dif = _diferencias(actual, datos, COLS_PROVEEDOR)
             if dif:
@@ -882,6 +887,7 @@ async def paso_proveedores(ctx: Contexto):
     paso.contar("proveedores nuevos", len(nuevos))
     paso.contar("  inactivos (de los nuevos)", sum(p["inactivo"] for p in nuevos))
     paso.contar("proveedores actualizados", len(cambiados))
+    paso.contar("editados o dados de baja en SPMM (no se pisan)", editados_en_spmm)
     paso.contar("proveedores dados de alta en SPMM (no se tocan)",
                 sum(1 for p in est.proveedores if p["id_legacy"] is None))
     for p in nuevos[:max(0, ctx.ejemplos - len(paso.ejemplos))]:

@@ -84,6 +84,7 @@ from backend.dto.MateriaPrimaCatalogoDTO import (
     MovimientoIn,
     PrecioIn,
     PrevisualizarIn,
+    ProveedorCambiosIn,
     ProveedorIn,
     RecorteCambiosIn,
     RecorteIn,
@@ -404,6 +405,87 @@ class MateriaPrimaCatalogoService:
             await self.db.flush()
         self.frase = f"dio de alta el proveedor {proveedor.razon_social}"
         return ResponseDTO(status=True, errorDescription="", data=_proveedor_a_dict(proveedor))
+
+    async def _otro_con_el_mismo_nombre(self, id_proveedor: int | None, razon_social: str | None,
+                                        fantasia: str | None, cuit: str | None) -> str | None:
+        """El aviso de duplicado del alta, sin contarse a sí mismo: None si no hay otro."""
+        nombres = {norm_proveedor(razon_social)} - {""}
+        if fantasia:
+            nombres.add(norm_proveedor(fantasia))
+        digitos = solo_digitos(cuit)
+        for id_p, razon, fant, cuit_p, inactivo in await self.repo.proveedores_para_comparar():
+            if id_p == id_proveedor:
+                continue
+            mismo_nombre = bool(nombres & {norm_proveedor(razon), norm_proveedor(fant)} - {""})
+            mismo_cuit = bool(digitos) and len(digitos) >= 8 and digitos == solo_digitos(cuit_p)
+            if mismo_nombre or mismo_cuit:
+                cual = f"«{razon}»" + (f" ({fant})" if fant else "")
+                por = " con el mismo CUIT" if mismo_cuit and not mismo_nombre else ""
+                return f"Ya existe el proveedor {cual}{por}{' (inactivo)' if inactivo else ''}."
+        return None
+
+    async def editar_proveedor(self, id_proveedor: int, dto: ProveedorCambiosIn,
+                               usuario: dict | None = None, forzar: bool = False):
+        """Edición desde la lista del paso tercerizado (19/10/2026, Julián: «que se pueda
+        escribir, editar y eliminar en la lista al elegirlo»). Sólo lo que viene.
+
+        SPMM manda en lo que se toca acá (lo eligió Julián): si el proveedor vino del
+        Integral y cambia algo de lo que trae el espejo (razón social, fantasía, CUIT),
+        queda la hora en `editado_en_spmm` y el espejo ya no lo pisa. Los días no los trae
+        el espejo. 409 si el nombre o el CUIT nuevos ya son de OTRO proveedor, salvo
+        `forzar` (hay homónimos de verdad)."""
+        proveedor = await self.repo.proveedor(id_proveedor)
+        if proveedor is None:
+            raise NotFoundException(f"No existe el proveedor {id_proveedor}.")
+        cambios = dto.model_dump(exclude_unset=True)
+        datos = {c: _texto_con_largo(cambios[c], _LARGOS_PROVEEDOR[c], f"«{c.replace('_', ' ')}»")
+                 for c in ("razon_social", "fantasia", "cuit") if c in cambios}
+        if "razon_social" in datos and not datos["razon_social"]:
+            raise BusinessException("La razón social del proveedor es obligatoria.")
+        if "demora_dias" in cambios:
+            datos["demora_dias"] = cambios["demora_dias"]
+        del_espejo = {"razon_social", "fantasia", "cuit"} & {
+            c for c, v in datos.items() if v != getattr(proveedor, c)}
+        if del_espejo and not forzar:
+            otro = await self._otro_con_el_mismo_nombre(
+                proveedor.id, datos.get("razon_social", proveedor.razon_social),
+                datos.get("fantasia", proveedor.fantasia), datos.get("cuit", proveedor.cuit))
+            if otro:
+                raise ConfirmacionRequeridaException(f"{otro} ¿Guardarlo igual?")
+        async with self._escritura("guardar el proveedor"):
+            for c, v in datos.items():
+                setattr(proveedor, c, v)
+            if del_espejo and proveedor.id_legacy is not None:
+                proveedor.editado_en_spmm = ahora_ar()
+            await self.db.flush()
+        self.frase = f"editó el proveedor {proveedor.razon_social}"
+        return ResponseDTO(status=True, errorDescription="", data=_proveedor_a_dict(proveedor))
+
+    async def eliminar_proveedor(self, id_proveedor: int, usuario: dict | None = None):
+        """Eliminar desde la lista del paso tercerizado. Si se dio de alta en SPMM y nunca
+        se usó, se borra del todo. Si no —lo nombran insumos, precios, materias primas de
+        OT o pasos tercerizados, o vino del Integral, que el espejo lo volvería a traer—, se
+        da de baja: sale de todas las listas y lo que ya lo nombraba queda como estaba."""
+        proveedor = await self.repo.proveedor(id_proveedor)
+        if proveedor is None:
+            raise NotFoundException(f"No existe el proveedor {id_proveedor}.")
+        nombre = proveedor.razon_social
+        usos = await self.repo.usos_del_proveedor(id_proveedor)
+        del_todo = proveedor.id_legacy is None and not any(usos.values())
+        async with self._escritura("eliminar el proveedor"):
+            if del_todo:
+                await self.db.delete(proveedor)
+            else:
+                proveedor.inactivo = 1
+                if proveedor.id_legacy is not None:
+                    proveedor.editado_en_spmm = ahora_ar()
+            await self.db.flush()
+        self.frase = (f"eliminó el proveedor {nombre}" if del_todo
+                      else f"dio de baja el proveedor {nombre}")
+        return ResponseDTO(status=True, errorDescription="", data={
+            "id": id_proveedor, "borrado": "del_todo" if del_todo else "de_las_listas",
+            "usos": {k: v for k, v in usos.items() if v},
+        })
 
     # ═══════════════════════════ insumos: lista y ficha ═══════════════════════════
 

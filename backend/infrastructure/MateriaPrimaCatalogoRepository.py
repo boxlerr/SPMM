@@ -119,6 +119,20 @@ class MateriaPrimaCatalogoRepository:
                    Proveedor.inactivo)
         )).all()
 
+    async def usos_del_proveedor(self, id_proveedor: int) -> dict[str, int]:
+        """En cuántas filas aparece un proveedor: insumos, precios, materias primas de OT y
+        pasos tercerizados. Con alguna, no se borra: se da de baja."""
+        from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
+
+        usos = {}
+        for nombre, modelo in (("insumos", Pieza), ("precios", PiezaPrecio),
+                               ("materias primas de OT", OrdenTrabajoPieza),
+                               ("pasos tercerizados", OrdenTrabajoProceso)):
+            usos[nombre] = int((await self.db.execute(
+                select(func.count()).select_from(modelo).where(modelo.id_proveedor == id_proveedor)
+            )).scalar() or 0)
+        return usos
+
     # ─────────────────────────── insumos: lista ───────────────────────────
 
     @staticmethod

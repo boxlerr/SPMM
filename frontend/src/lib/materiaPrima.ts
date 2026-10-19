@@ -189,6 +189,8 @@ export interface Proveedor {
     telefono: string | null;
     mail: string | null;
     inactivo: boolean;
+    /** Días de calendario que tarda en devolver un trabajo tercerizado. Null = no se sabe. */
+    demora_dias?: number | null;
 }
 
 /** `POST /materia-prima/proveedores` (alta rápida: alcanza con la razón social). */

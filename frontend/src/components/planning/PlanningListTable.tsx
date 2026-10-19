@@ -66,6 +66,7 @@ import { rankMaterial, resumirMaterial } from "@/lib/materialOT";
 import { ExportarMenu, type ExtraExportar } from "@/components/common/ExportarMenu";
 import { MarcaPausada } from "@/components/pausas/MarcaPausada";
 import { filtroBusqueda, type SeccionExport } from "@/lib/exportar";
+import { terminosDeBusqueda } from "@/lib/busqueda";
 import {
     columnasOrdenes,
     columnasPasos,
@@ -664,22 +665,10 @@ function _PlanningListTable({
         setSortConfig({ key: direction ? key : null, direction });
     };
 
-    // Términos efectivos de búsqueda. Se puede pegar una lista de OTs — "13345
-    // 13343" o "#13345, #13343" — y cada número filtra por su cuenta (el # y los
-    // separadores se ignoran). Un texto normal ("ceramica cañuelas") se busca
-    // entero, como frase; con comas, cada parte por separado. trim(): un espacio
-    // al final ("13345 ") hacía que la búsqueda no encontrara NADA.
-    const searchTerms = React.useMemo(() => {
-        const raw = searchTerm.trim();
-        if (!raw) return [] as string[];
-        const tokens = raw.split(/[\s,;]+/).map(t => t.replace(/^#/, "")).filter(Boolean);
-        const esListaDeNumeros = tokens.length > 0 && tokens.every(t => /^\d+$/.test(t));
-        const terms = (esListaDeNumeros || raw.includes(","))
-            ? tokens.map(t => t.toLowerCase())
-            : [raw.replace(/^#/, "").toLowerCase()];
-        // "#" o "," solos no son una búsqueda: sin términos se muestra todo.
-        return terms.filter(Boolean);
-    }, [searchTerm]);
+    // Términos efectivos de búsqueda (lib/busqueda): una lista de OT —«13345 13343», o el
+    // renglón «OT: …» que devuelve Claude— busca cada número por su cuenta; un texto normal
+    // se busca entero. Con el tilde de la cabecera se tildan todas las que quedan a la vista.
+    const searchTerms = React.useMemo(() => terminosDeBusqueda(searchTerm), [searchTerm]);
 
     const porBusqueda = React.useMemo(() => {
         if (searchTerms.length === 0) return data;
