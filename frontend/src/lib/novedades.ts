@@ -53,7 +53,7 @@ export const NOVEDADES: Novedad[] = [
         seccion: "Operaciones",
         titulo: "El plan pone a cada uno en lo suyo: el fresador en la fresadora y el tornero en el torno",
         detalle:
-            "En el plan del lunes 19/10 Alejandro, que es fresador, estaba torneando mientras Gustavo, que es tornero, estaba en la fresadora. El planificador prefería al de SKILL 1, pero poco, y por paso: un fresado de tres horas pesaba lo mismo que uno de diez minutos. Ahora, con los horarios ya armados, el plan revisa quién hace cada trabajo y lo pasa al de SKILL 1 cuando está libre a esa hora (o cuando puede cambiar un trabajo con otro), contando las horas. No mueve ninguna fecha ni ninguna máquina: primero las fechas, después cada uno en lo suyo. La persona elegida a mano en la OT se respeta siempre.",
+            "En el plan del lunes 19/10 Alejandro, que es fresador, estaba torneando mientras Gustavo, que es tornero, estaba en la fresadora. El planificador prefería al de SKILL 1, pero poco, y por paso: un fresado de tres horas pesaba lo mismo que uno de diez minutos. Ahora el plan se arma en dos vueltas: primero por fechas, como siempre, y después, sin atrasar ninguna entrega, lo reacomoda para que cada trabajo lo haga el de SKILL 1, contando las horas: puede cambiar horarios y máquinas, por ejemplo dejar que un fresado espere a que el fresador se desocupe. Si esperar atrasaría una entrega, lo hace el que sigue en la lista. La persona elegida a mano en la OT se respeta siempre.",
         href: "/operaciones",
     },
     {
@@ -63,7 +63,7 @@ export const NOVEDADES: Novedad[] = [
         seccion: "Operaciones",
         titulo: "Un paso tercerizado dice qué proveedor lo hace, y el plan espera los días que tarda en volver",
         detalle:
-            "En la vista previa un paso tercerizado decía «Tercerizado» como recurso humano y como recurso maquinaria, y el plan seguía con el paso siguiente al otro día, como si el trabajo volviera en el momento. Ahora en la fila del paso elegís el proveedor (por ejemplo, el que vulcaniza el frente de carro) y cuántos días de calendario tarda: si sale el 19 y tarda 10 días, vuelve el 29, y lo que sigue de la OT arranca ese día. El proveedor queda guardado en la OT y en las otras OT abiertas del mismo producto, y los días se recuerdan para ese proveedor. Después de elegirlo, tocá «Recalcular» para que el plan lo espere. Si vuelve después del último día del plan, lo que sigue queda en «Fuera del plan» con el motivo (con «Ampliar 2 semanas» entra), y la pieza sale a tiempo para volver y terminarse antes de la fecha prometida.",
+            "En la vista previa un paso tercerizado decía «Tercerizado» como recurso humano y como recurso maquinaria, y el plan seguía con el paso siguiente al otro día, como si el trabajo volviera en el momento. Ahora en la fila del paso elegís el proveedor (por ejemplo, el que vulcaniza el frente de carro) y cuántos días de calendario tarda: si sale el 19 y tarda 10 días, vuelve el 29, y lo que sigue de la OT arranca ese día. El proveedor queda guardado en la OT y en las otras OT abiertas del mismo producto, y los días se recuerdan para ese proveedor. En la misma lista podés escribir uno que no está para darlo de alta, y con el lápiz o el tacho de cada renglón editarlo (nombre, CUIT y días) o eliminarlo: lo que cambies ahí queda, aunque venga del Integral, y si ya se usó sólo sale de las listas. Después de elegirlo, tocá «Recalcular» para que el plan lo espere. Si vuelve después del último día del plan, lo que sigue queda en «Fuera del plan» con el motivo (con «Ampliar 2 semanas» entra), y la pieza sale a tiempo para volver y terminarse antes de la fecha prometida.",
         href: "/operaciones",
     },
     {
@@ -93,17 +93,17 @@ export const NOVEDADES: Novedad[] = [
         seccion: "Operaciones",
         titulo: "Exportar para analizar con Claude: el plan, las OT y las habilidades del equipo, listos para pegar",
         detalle:
-            "En el menú «Exportar» de la vista previa está «Plan + habilidades para Claude»: un archivo de texto con el pedido ya escrito, cómo decide el planificador, el plan OT por OT, lo que hace cada persona día por día y lo que sabe hacer cada uno, para preguntarle por qué el plan eligió a alguien y qué cambiaría. En el Paso 1, el mismo menú tiene «Elegir las OT con Claude»: las OT de la lista y las fechas del plan, para que proponga cuáles planificar en la semana y devuelva los números listos para «Pegar lista».",
+            "En el menú «Exportar» de la vista previa está «Plan + habilidades para Claude»: un archivo de texto con el pedido ya escrito, cómo decide el planificador, el plan OT por OT, lo que hace cada persona día por día y lo que sabe hacer cada uno, para preguntarle por qué el plan eligió a alguien y qué cambiaría. En el Paso 1, el mismo menú tiene «Elegir las OT con Claude»: las OT de la lista y las fechas del plan, para que proponga cuáles planificar en la semana y devuelva los números listos para pegar en el buscador.",
         href: "/operaciones",
     },
     {
-        id: "pegar-lista-de-ot",
+        id: "buscador-con-lista-de-ot",
         fecha: "2026-10-19",
-        tipo: "nuevo",
+        tipo: "mejora",
         seccion: "Operaciones",
-        titulo: "«Pegar lista»: pegás los números de OT y se tildan todos de una",
+        titulo: "La lista de OT que te devuelve Claude se pega en el buscador",
         detalle:
-            "Para planificar una lista de OT había que buscarlas y tildarlas de a una. Ahora, en el Paso 1 (al lado de «Ver solo las tildadas») y en «Agregar OTs» de la vista previa, está «Pegar lista»: pegás los números separados por coma, espacio o renglón —o la respuesta entera de Claude— y se tildan todas. Te dice cuáles no están para planificar.",
+            "En el Paso 1 el buscador ya aceptaba varios números de OT; ahora también toma el renglón «OT: 15922, 15842 y 15866» tal como lo escribe Claude, o su respuesta entera, y muestra esas OT: con el tilde de arriba se tildan todas. En «Agregar OTs» de la vista previa el buscador hace lo mismo, y «Tildar las N», al lado, tilda todas las que encontró y te dice cuáles ya estaban en el plan.",
         href: "/operaciones",
     },
     {
