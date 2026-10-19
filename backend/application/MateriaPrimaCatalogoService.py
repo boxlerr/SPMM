@@ -200,6 +200,9 @@ def _proveedor_a_dict(p: Proveedor) -> dict:
         "telefono": p.telefono,
         "mail": p.mail,
         "inactivo": _bool(p.inactivo),
+        # Cuántos días tarda en devolver un trabajo tercerizado (lo usa el selector de
+        # proveedor de la vista previa del plan). None = no se sabe.
+        "demora_dias": getattr(p, "demora_dias", None),
     }
 
 

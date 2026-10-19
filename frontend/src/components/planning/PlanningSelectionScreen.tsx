@@ -28,10 +28,15 @@ import {
     rangoSinDias, servidorSinEstimacion,
     type EstimacionDelPlan, type MotivoSinEstimacion,
 } from "@/lib/estimarPlan"
-import { numeroEs } from "@/lib/diasHabiles"
+import { contarDiasHabiles, numeroEs } from "@/lib/diasHabiles"
 import { inicioDelPlan } from "@/lib/plan-fechas"
 import { ChipPeriodoPlan, SelectorFechasPlan } from "./SelectorFechasPlan"
 import { fechasVigentes, rangoParaElPlan, type FechasDelPlan } from "@/lib/fechasDelPlan"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { pedirEquipo } from "@/lib/equipo"
+import {
+    bajarTexto, listarNumeros, numerosDeOT, textoParaElegirOTs, type OtParaElegir,
+} from "@/lib/paraClaude"
 
 export interface PlanningRange {
     fecha_desde?: string  // "YYYY-MM-DD"
@@ -272,6 +277,73 @@ export function PlanningSelectionScreen({
         const fuera = new Set(sinMaterial.map(o => o.id))
         setSelectedIds(prev => prev.filter(id => !fuera.has(id)))
         setSoloTildadas(prev => (prev === null ? null : prev.filter(id => !fuera.has(id))))
+    }
+
+    /**
+     * «Pegar lista» (reunión con Lucas del 17/10/2026). Lucas le pide a Claude qué OT meter
+     * en la semana y Claude le devuelve los números: acá se pegan y se tildan todas de una,
+     * en vez de buscarlas de a una entre 180 renglones. Se suman a lo que ya estaba tildado
+     * y quedan a la vista con «Ver solo las tildadas», para revisarlas antes de planificar.
+     */
+    const [pegarAbierto, setPegarAbierto] = useState(false)
+    const [textoPegado, setTextoPegado] = useState("")
+    const tildarLaListaPegada = () => {
+        const numeros = numerosDeOT(textoPegado)
+        if (numeros.length === 0) {
+            toast.error("No encontré números de OT en lo que pegaste.")
+            return
+        }
+        const porNumero = new Map(unplannedOrders.map(o => [Number(o.id_otvieja ?? o.id), o.id]))
+        const encontradas = numeros.map(n => porNumero.get(n)).filter((id): id is number => id != null)
+        const faltan = numeros.filter(n => !porNumero.has(n))
+        const nuevas = Array.from(new Set([...selectedIds, ...encontradas]))
+        setSelectedIds(nuevas)
+        // Para revisarlas: la lista muestra lo tildado (lo de antes y lo pegado).
+        if (encontradas.length > 0) setSoloTildadas(nuevas)
+        setTextoPegado("")
+        setPegarAbierto(false)
+        const detalle = faltan.length
+            ? `No están para planificar (no existen, ya están planificadas o terminadas): ${listarNumeros(faltan)}.`
+            : undefined
+        const titulo = `Tildé ${encontradas.length} de ${numeros.length} OT de la lista.`
+        if (encontradas.length) toast.success(titulo, detalle ? { description: detalle, duration: 9000 } : undefined)
+        else toast.warning(titulo, detalle ? { description: detalle, duration: 9000 } : undefined)
+    }
+
+    /**
+     * El archivo para que Claude elija las OT de la semana (ver lib/paraClaude): lo que
+     * muestra la lista —con los filtros puestos—, cuáles ya están tildadas, para qué días
+     * es el plan y las habilidades de todo el equipo.
+     */
+    const bajarParaElegirConClaude = async () => {
+        const equipo = await pedirEquipo()
+        const tildadas = new Set(selectedIds)
+        const ots: OtParaElegir[] = filteredOrders.map(o => ({
+            numero: o.id_otvieja ?? o.id,
+            cliente: o.cliente?.nombre ?? null,
+            articulo: o.articulo?.descripcion ?? null,
+            codigo: o.articulo?.cod_articulo ?? null,
+            prioridad: o.prioridad?.descripcion ?? null,
+            prometida: o.fecha_prometida && !o.fecha_prometida.startsWith("1950") ? o.fecha_prometida : null,
+            entrada: o.fecha_entrada ?? null,
+            unidades: o.unidades ?? null,
+            material: resumirMaterial(o.estado_material, o.no_lleva_materia_prima).rotulo,
+            tildada: tildadas.has(o.id),
+            procesos: (o.procesos || [])
+                // Lo terminado ya no es trabajo que planificar.
+                .filter(p => p.estado_proceso?.id !== 3)
+                .map((p, i) => ({
+                    paso: p.orden ?? i + 1,
+                    nombre: p.proceso?.nombre ?? "",
+                    minutos: Number(p.tiempo_proceso) || 0,
+                    personas: Math.max(1, Number(p.cant_operarios) || 1),
+                })),
+        }))
+        const desde = rangoElegido.fecha_desde ?? arranqueReal.toISOString().slice(0, 10)
+        const hasta = rangoElegido.fecha_hasta
+        const periodo = hasta ? `del ${diaCorto(desde)} al ${diaCorto(hasta)}` : null
+        const diasHabiles = hasta ? contarDiasHabiles(desde, hasta, feriados) : null
+        return bajarTexto(textoParaElegirOTs({ ots, equipo, periodo, diasHabiles }), "elegir_ot_con_claude")
     }
 
     /**
@@ -816,9 +888,53 @@ export function PlanningSelectionScreen({
                         orders={unplannedOrders}
                         compacto
                         acciones={
-                            /* Lucas, 23/09: «al lado de limpiar filtros poné un botón de
+                            <>
+                            {/* «Pegar lista» (17/10/2026): la lista de OT que devolvió Claude,
+                                tildada de una. Va al lado de «Ver solo las tildadas» porque
+                                termina ahí: muestra lo que se tildó para revisarlo. */}
+                            <Popover open={pegarAbierto} onOpenChange={setPegarAbierto}>
+                                <PopoverTrigger asChild>
+                                    <button
+                                        type="button"
+                                        className={cn(
+                                            "flex items-center gap-1.5 px-2.5 py-1 rounded border transition-colors text-[10px] font-bold tracking-wide uppercase shadow-sm",
+                                            pegarAbierto
+                                                ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
+                                                : "bg-white text-blue-700 border-blue-200 hover:bg-blue-50"
+                                        )}
+                                        title="Pegá una lista de números de OT (por ejemplo, la que te devolvió Claude) y se tildan todas de una"
+                                    >
+                                        <ListChecks className="w-3 h-3" /> Pegar lista
+                                    </button>
+                                </PopoverTrigger>
+                                <PopoverContent align="end" className="w-[min(380px,calc(100vw-2rem))] p-3 space-y-2">
+                                    <div className="text-sm font-semibold text-gray-800">Tildar una lista de OT</div>
+                                    <p className="text-[11px] leading-snug text-gray-500">
+                                        Pegá los números separados por coma, espacio o renglón. Si pegás la respuesta entera de Claude, se toma el renglón que empieza con «OT:».
+                                    </p>
+                                    <textarea
+                                        autoFocus
+                                        value={textoPegado}
+                                        onChange={(e) => setTextoPegado(e.target.value)}
+                                        placeholder="OT: 15922, 15842, 15866"
+                                        rows={4}
+                                        className="w-full resize-y rounded border border-gray-200 bg-white px-2 py-1.5 font-mono text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                    />
+                                    <div className="flex justify-end">
+                                        <Button
+                                            size="sm"
+                                            className="h-8 bg-blue-600 hover:bg-blue-700"
+                                            onClick={tildarLaListaPegada}
+                                            disabled={!textoPegado.trim()}
+                                        >
+                                            Tildar
+                                        </Button>
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
+                            {/* Lucas, 23/09: «al lado de limpiar filtros poné un botón de
                                mostrar seleccionadas». Ya existía —el contador de arriba—,
-                               pero nadie lo encontraba ahí. Es el mismo interruptor. */
+                               pero nadie lo encontraba ahí. Es el mismo interruptor. */}
                             <button
                                 type="button"
                                 onClick={alternarSoloTildadas}
@@ -838,6 +954,7 @@ export function PlanningSelectionScreen({
                                     <><Check className="w-3 h-3" /> Ver solo las tildadas ({selectedIds.length})</>
                                 )}
                             </button>
+                            </>
                         }
                     >
                         {/* Misma estética que el resto de filtros: "Categoría: valor"
@@ -991,6 +1108,12 @@ export function PlanningSelectionScreen({
                                             ...(dateSort === "OLDEST_FIRST" ? ["Por fecha de entrada: las más viejas primero"]
                                                 : dateSort === "NEWEST_FIRST" ? ["Por fecha de entrada: las más nuevas primero"] : []),
                                         ],
+                                        rotuloExtras: "Para analizar con Claude",
+                                        extras: [{
+                                            rotulo: "Elegir las OT con Claude (.md)",
+                                            ayuda: "Las OT de la lista, las fechas y quién sabe hacer qué",
+                                            hacer: bajarParaElegirConClaude,
+                                        }],
                                     }}
                                 />
                             </div>

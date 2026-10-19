@@ -30,6 +30,16 @@ def _es_numero_de_ot_repetido(e: Exception) -> bool:
     return "ux_orden_trabajo_id_otvieja" in str(e).lower()
 
 
+def demora_efectiva(del_paso: int | None, del_proveedor: int | None) -> int | None:
+    """Los días que tarda un paso tercerizado: los del paso y, si no dice, los del
+    proveedor. None = no se sabe, y el planificador lo trata como hasta el 17/10/2026
+    (dura lo que dicen sus minutos). Una sola regla para la pantalla y el planificador."""
+    for dias in (del_paso, del_proveedor):
+        if dias is not None:
+            return max(0, int(dias))
+    return None
+
+
 class OrdenTrabajoService:
     def __init__(self, db_session, event_bus: Optional[EventBus] = None):
         self.repository = OrdenTrabajoRepository(db_session)
@@ -884,8 +894,17 @@ class OrdenTrabajoService:
 
     async def editarProceso(self, id_orden: int, id_otp: int, cambios: dict,
                             usuario: dict | None = None):
-        """Edita una pasada de proceso ya cargada en la OT (minutos, máquina, persona)."""
+        """Edita una pasada de proceso ya cargada en la OT (minutos, máquina, persona,
+        proveedor de un tercerizado y sus días)."""
         logger.info(f"Service - Editar pasada {id_otp} de la Orden {id_orden}")
+
+        from backend.domain.Proveedor import Proveedor
+        db = self.repository.db
+        # Un proveedor que no existe se dice con su nombre: la FK lo frenaría igual, pero
+        # con un «error al guardar» que no explica nada.
+        if cambios.get("id_proveedor") is not None:
+            if await db.get(Proveedor, cambios["id_proveedor"]) is None:
+                raise NotFoundException(f"No existe el proveedor {cambios['id_proveedor']}.")
 
         linea = await self.repository.editarProceso(id_orden, id_otp, cambios, usuario=usuario)
         if not linea:
@@ -895,6 +914,16 @@ class OrdenTrabajoService:
         data = jsonable_encoder(linea)
         # Con «para el artículo»: cuántas pasadas de otras OT cambiaron con esta.
         data["otras_del_articulo"] = getattr(linea, "otras_del_articulo", 0)
+        # El proveedor con sus días, para que la pantalla diga al toque «vuelve en 10 días»
+        # sin volver a pedir nada. `demora_efectiva` es la que va a usar el planificador.
+        proveedor = (await db.get(Proveedor, linea.id_proveedor)
+                     if getattr(linea, "id_proveedor", None) else None)
+        data["proveedor"] = (
+            {"id": proveedor.id, "nombre": proveedor.razon_social or proveedor.fantasia,
+             "demora_dias": proveedor.demora_dias}
+            if proveedor else None)
+        data["demora_efectiva"] = demora_efectiva(
+            getattr(linea, "demora_dias", None), proveedor.demora_dias if proveedor else None)
         return ResponseDTO(status=True, data=data)
 
     async def obtenerHistorialProcesos(self, id_articulo: int, excluir_orden_id: int | None = None):

@@ -49,8 +49,15 @@ import { duracionEstimada } from "@/components/planning/ProgresoPlanificacion";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MaterialChip } from "@/components/common/MaterialChip";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { PlanoDeOrden } from "@/components/common/PlanoDeOrden";
 import { AvisoPausadasEnElPlan } from "@/components/pausas/AvisoPausadasEnElPlan";
-import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
+import { exportarReporte, filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
+import { lindo, pedirEquipo, seccionesDelEquipo } from "@/lib/equipo";
+import {
+    bajarTexto, diaCorto, listarNumeros, numerosDeOT, textoDelPlanParaClaude,
+    type PasoDelPlanParaClaude,
+} from "@/lib/paraClaude";
+import { ProveedorDelPaso, demoraEfectiva, type DatosDelProveedor } from "@/components/planning/ProveedorDelPaso";
 import {
     useProcesosEnPlan, contarCambios, resumirCambios, filasVisiblesDeOT, pasadasEnOrden,
 } from "@/components/planning/useProcesosEnPlan";
@@ -108,6 +115,15 @@ interface PlanificacionResult {
     sin_maquinaria: boolean;
     /** Lo hace un tercero: va sin operario y sin máquina a propósito. */
     tercerizado?: boolean;
+    /** Tercerizado: qué proveedor lo hace y cuántos días tarda (reunión del 17/10/2026).
+     *  `demora_dias` es la que usó el plan: la del paso o, si no, la del proveedor. */
+    id_proveedor?: number | null;
+    proveedor_nombre?: string | null;
+    demora_dias?: number | null;
+    demora_del_paso?: number | null;
+    demora_del_proveedor?: number | null;
+    /** El día en que vuelve del proveedor (YYYY-MM-DD), si el plan lo esperó. */
+    vuelve_el?: string;
     /** Operario ADICIONAL del mismo proceso (cant_operarios > 1). Comparte
      *  (OT, proceso, secuencia) con la fila principal: es otra persona en el
      *  mismo trabajo, no otro trabajo. */
@@ -929,6 +945,19 @@ export function PlanningPreviewScreen({
     /** Está abierta la lista de lo agregado a mano. */
     const [verAMano, setVerAMano] = React.useState(false);
 
+    /**
+     * El proveedor y los días elegidos en esta vista para un paso tercerizado, por pasada
+     * (ver ProveedorDelPaso). Ya están guardados en la orden; esto es para que el archivo
+     * que se exporta diga lo mismo que la pantalla antes de recalcular. Un recálculo trae
+     * las filas nuevas con el dato adentro y esto se vacía.
+     */
+    const [proveedorDe, setProveedorDe] = React.useState<Record<number, DatosDelProveedor>>({});
+    React.useEffect(() => { setProveedorDe({}); }, [results]);
+    const conProveedor = (i: PlanificacionResult): PlanificacionResult => {
+        const d = i.id_orden_trabajo_proceso != null ? proveedorDe[i.id_orden_trabajo_proceso] : undefined;
+        return d ? { ...i, ...d, demora_dias: demoraEfectiva(d) } : i;
+    };
+
     // Limpiar selección "para agregar" cuando cambia el set de resultados (ya fueron incluidas).
     React.useEffect(() => {
         setPendingAddIds(new Set());
@@ -970,6 +999,43 @@ export function PlanningPreviewScreen({
             else next.add(id);
             return next;
         });
+    };
+
+    /**
+     * «Pegar lista» (reunión con Lucas del 17/10/2026): la lista de números de OT que
+     * devuelve Claude, tildada de una en vez de buscar y tildar OT por OT. No agrega nada
+     * todavía: tilda, y «Agregar» hace lo de siempre.
+     */
+    const [verPegarLista, setVerPegarLista] = React.useState(false);
+    const [textoPegado, setTextoPegado] = React.useState("");
+    const tildarLaListaPegada = () => {
+        const numeros = numerosDeOT(textoPegado);
+        if (numeros.length === 0) {
+            toast.error("No encontré números de OT en lo que pegaste.");
+            return;
+        }
+        const porNumero = new Map(addableOrders.map(o => [Number(o.id_otvieja || o.id), o.id]));
+        const enElPlan = new Set(results.map(r => Number(r.id_otvieja || r.orden_id)));
+        const tildadas: number[] = [];
+        const yaEstan: number[] = [];
+        const noEstan: number[] = [];
+        for (const n of numeros) {
+            const id = porNumero.get(n);
+            if (id != null) tildadas.push(id);
+            else if (enElPlan.has(n)) yaEstan.push(n);
+            else noEstan.push(n);
+        }
+        setPendingAddIds(prev => new Set([...Array.from(prev), ...tildadas]));
+        setAddSearchTerm("");
+        setTextoPegado("");
+        setVerPegarLista(false);
+        const detalle = [
+            yaEstan.length ? `Ya están en el plan: ${listarNumeros(yaEstan)}.` : "",
+            noEstan.length ? `No están para agregar (no existen, ya se planificaron o no tienen procesos): ${listarNumeros(noEstan)}.` : "",
+        ].filter(Boolean).join(" ");
+        const titulo = `Tildé ${tildadas.length} de ${numeros.length} OT.${tildadas.length ? " Tocá «Agregar» para sumarlas al plan." : ""}`;
+        if (tildadas.length) toast.success(titulo, detalle ? { description: detalle, duration: 9000 } : undefined);
+        else toast.warning(titulo, detalle ? { description: detalle, duration: 9000 } : undefined);
     };
 
     // D1: seleccionar/deseleccionar un proceso suelto de una OT.
@@ -1996,6 +2062,22 @@ export function PlanningPreviewScreen({
         const first = procesosOT[0];
         const reasons: string[] = [];
 
+        // 0) Espera al proveedor (reunión con Lucas del 17/10/2026): la pieza vuelve
+        //    después del último día del plan, así que lo que sigue no puede entrar. No es
+        //    falta de lugar ni de prioridad: las otras razones no van.
+        const hasta = planningRange.fecha_hasta?.slice(0, 10);
+        const afuera = hasta
+            ? results.find(r => r.orden_id === ordenId && r.tercerizado && r.vuelve_el && r.vuelve_el.slice(0, 10) > hasta)
+            : undefined;
+        if (afuera?.vuelve_el && hasta) {
+            const quien = afuera.proveedor_nombre ? `${afuera.proveedor_nombre} la devuelve` : "Vuelve del proveedor";
+            const varios = procesosOT.length > 1;
+            const pasos = procesosOT.map(p => lindo(p.nombre_proceso)).join(", ");
+            return [
+                `${quien} el ${diaCorto(afuera.vuelve_el)}, después del ${formatDate(hasta)} (el último día del plan): ${pasos} ${varios ? "quedan" : "queda"} para cuando vuelva. Con «Ampliar 2 semanas» ${varios ? "entran" : "entra"} en el plan.`,
+            ];
+        }
+
         // 1) Duración total OT vs. capacidad del rango
         const otDurationMin = procesosOT.reduce((a, p) => a + (p.duracion_min || 0), 0);
         if (rangeCapacityMinutes > 0) {
@@ -2852,6 +2934,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         { clave: "cliente", titulo: "Cliente" },
         { clave: "codigo", titulo: "Código" },
         { clave: "articulo", titulo: "Artículo" },
+        // El plano del producto, para abrirlo sin salir del plan (reunión con Lucas del
+        // 17/10/2026: «no puedo abrir el plano acá; faltaría ver el plano acá»).
+        { clave: "plano", titulo: "Plano" },
         // «Cant.» y «Progreso» decían lo mismo (4 y «0 / 4»): Julián, 26/9, pidió una
         // sola columna. Queda la de «entregadas / pedidas» con su barrita, con el nombre
         // «Cantidad» y en el lugar de «Cant.». La clave sigue siendo "progreso" para no
@@ -3248,7 +3333,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 está confirmado, y el archivo lo dice. */}
                             {results.length > 0 && (() => {
                                 const nombreOperario = (i: PlanificacionResult) => {
-                                    if (i.tercerizado) return "Tercerizado";
+                                    if (i.tercerizado) return i.proveedor_nombre ? `Afuera: ${i.proveedor_nombre}` : "Tercerizado";
                                     const op = availableOperators.find((o: any) => o.id === i.id_operario);
                                     return op ? `${op.nombre ?? ""} ${op.apellido ?? ""}`.trim() : (i.operario_nombre || "Sin asignar");
                                 };
@@ -3258,6 +3343,54 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     if (m) return m.nombre;
                                     if (i.maquinaria_nombre) return i.maquinaria_nombre;
                                     return i.usa_maquina === false ? "No necesita" : "Sin asignar";
+                                };
+                                /**
+                                 * El archivo para Claude (reunión con Lucas del 17/10/2026, ver
+                                 * lib/paraClaude): el plan que se está mirando, con los retoques,
+                                 * lo que hace cada persona día por día y las habilidades de todos,
+                                 * con el pedido arriba. Lo que quedó afuera va marcado.
+                                 */
+                                const pasoParaClaude = (i: PlanificacionResult, afuera: boolean): PasoDelPlanParaClaude => {
+                                    const conDatos = conProveedor(i);
+                                    const persona = conDatos.tercerizado || !conDatos.id_operario ? null : nombreOperario(conDatos);
+                                    const maquina = conDatos.tercerizado || (!conDatos.id_maquinaria && !conDatos.maquinaria_nombre)
+                                        ? null : nombreMaquina(conDatos);
+                                    return {
+                                        ot: conDatos.id_otvieja ?? conDatos.orden_id,
+                                        cliente: nombreLindo(conDatos.cliente) || conDatos.cliente,
+                                        articulo: conDatos.articulo,
+                                        codigo: conDatos.codigo,
+                                        prioridad: getPriorityLabel(conDatos.id_prioridad, conDatos.prioridad_descripcion),
+                                        prometida: conDatos.fecha_prometida,
+                                        paso: conDatos.secuencia ?? null,
+                                        proceso: conDatos.slot_extra ? `${conDatos.nombre_proceso} (acompaña)` : conDatos.nombre_proceso,
+                                        persona,
+                                        maquina,
+                                        usaMaquina: conDatos.usa_maquina,
+                                        inicio: conDatos.fecha_inicio_estimada,
+                                        fin: conDatos.fecha_fin_estimada,
+                                        minutos: conDatos.duracion_min,
+                                        tercerizado: !!conDatos.tercerizado,
+                                        proveedor: conDatos.proveedor_nombre ?? null,
+                                        demoraDias: conDatos.demora_dias ?? null,
+                                        vuelveEl: conDatos.vuelve_el ?? null,
+                                        afuera,
+                                    };
+                                };
+                                const periodoParaClaude = spanPlan
+                                    ? `${diaCorto(spanPlan.desde)} al ${diaCorto(spanPlan.hasta)} (${spanPlan.habiles} ${spanPlan.habiles === 1 ? "día hábil" : "días hábiles"})${planningRange.fecha_hasta ? `, elegido hasta el ${diaCorto(planningRange.fecha_hasta)}` : ", sin fecha tope"}`
+                                    : null;
+                                const bajarParaClaude = async () => {
+                                    const equipo = await pedirEquipo();
+                                    const pasos = [
+                                        ...results.map(i => pasoParaClaude(getEffectiveItem(i), false)),
+                                        ...displayedExcedentes.map(i => pasoParaClaude(i, true)),
+                                    ];
+                                    const avisos = (diagnosticos ?? []).map(d => d.titulo).filter(Boolean);
+                                    return bajarTexto(
+                                        textoDelPlanParaClaude({ pasos, equipo, periodo: periodoParaClaude, avisos }),
+                                        "plan_para_claude",
+                                    );
                                 };
                                 const columnas: ColumnaExport<PlanificacionResult>[] = [
                                     { titulo: "OT", tipo: "id", valor: (i) => i.id_otvieja ?? i.orden_id },
@@ -3270,6 +3403,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     { titulo: "Minutos", tipo: "entero", valor: (i) => i.duracion_min },
                                     { titulo: "Recurso humano", valor: nombreOperario },
                                     { titulo: "Recurso maquinaria", valor: nombreMaquina },
+                                    // Lo tercerizado: cuándo vuelve del proveedor (17/10/2026).
+                                    { titulo: "Vuelve del proveedor", tipo: "fecha", valor: (i) => i.vuelve_el ?? null, formatos: ["xlsx", "csv"] },
                                     { titulo: "Prometida", tipo: "fecha", valor: (i) => i.fecha_prometida },
                                     {
                                         titulo: "Termina tarde",
@@ -3279,7 +3414,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     },
                                 ];
                                 // En el mismo orden que la tabla: se exporta lo que se está mirando.
-                                const filas = otsEnOrden.flatMap(({ items }) => items.map(i => getEffectiveItem(i)));
+                                const filas = otsEnOrden.flatMap(({ items }) => items.map(i => conProveedor(getEffectiveItem(i))));
                                 return (
                                     <ExportarMenu
                                         titulo="Vista previa del plan (sin confirmar)"
@@ -3294,6 +3429,26 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                             ...(filtros.sinMaquina ? ["Sólo con procesos sin recurso maquinaria"] : []),
                                         ]}
                                         disabled={isCalculating}
+                                        rotuloExtras="Para analizar con Claude"
+                                        extras={[
+                                            {
+                                                rotulo: "Plan + habilidades para Claude (.md)",
+                                                ayuda: "El plan entero, persona por persona, y quién sabe hacer qué",
+                                                hacer: bajarParaClaude,
+                                            },
+                                            {
+                                                rotulo: "Habilidades del equipo (Excel)",
+                                                ayuda: "Para comparar con el plan: por persona y por proceso",
+                                                hacer: async () => {
+                                                    return exportarReporte("xlsx", {
+                                                        titulo: "Habilidades del equipo",
+                                                        archivo: "habilidades_del_equipo",
+                                                        filtros: null,
+                                                        secciones: seccionesDelEquipo(await pedirEquipo()),
+                                                    });
+                                                },
+                                            },
+                                        ]}
                                     />
                                 );
                             })()}
@@ -3551,16 +3706,55 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                 Sueltos sólo se pueden agregar los de <strong>paso 1 o 2</strong>: un proceso posterior necesita que la pieza haya pasado por los anteriores.
                                             </p>
                                         </div>
-                                        <div className="p-2 border-b bg-white">
-                                            <div className="relative">
-                                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                                                <Input
-                                                    placeholder="Buscar por OT, cliente, código..."
-                                                    value={addSearchTerm}
-                                                    onChange={(e) => setAddSearchTerm(e.target.value)}
-                                                    className="pl-8 h-8 text-xs"
-                                                />
+                                        <div className="p-2 border-b bg-white space-y-2">
+                                            <div className="flex items-center gap-1.5">
+                                                <div className="relative flex-1">
+                                                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                                    <Input
+                                                        placeholder="Buscar por OT, cliente, código..."
+                                                        value={addSearchTerm}
+                                                        onChange={(e) => setAddSearchTerm(e.target.value)}
+                                                        className="pl-8 h-8 text-xs"
+                                                    />
+                                                </div>
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant={verPegarLista ? "secondary" : "outline"}
+                                                    className="h-8 shrink-0 gap-1 px-2 text-xs"
+                                                    onClick={() => setVerPegarLista(v => !v)}
+                                                    title="Pegá una lista de números de OT (por ejemplo, la que te devolvió Claude) y se tildan todas de una"
+                                                >
+                                                    <ListChecks className="w-3.5 h-3.5" />
+                                                    Pegar lista
+                                                </Button>
                                             </div>
+                                            {verPegarLista && (
+                                                <div className="space-y-1.5 rounded-md border border-blue-100 bg-blue-50/50 p-2">
+                                                    <textarea
+                                                        autoFocus
+                                                        value={textoPegado}
+                                                        onChange={(e) => setTextoPegado(e.target.value)}
+                                                        placeholder="OT: 15922, 15842, 15866"
+                                                        rows={3}
+                                                        className="w-full resize-y rounded border border-gray-200 bg-white px-2 py-1.5 font-mono text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                                    />
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="text-[11px] leading-snug text-gray-500">
+                                                            Separadas por coma, espacio o renglón. Si pegás la respuesta entera de Claude, se toma el renglón «OT:».
+                                                        </span>
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            className="h-7 shrink-0 bg-blue-600 px-2.5 text-xs hover:bg-blue-700"
+                                                            onClick={tildarLaListaPegada}
+                                                            disabled={!textoPegado.trim()}
+                                                        >
+                                                            Tildar
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                         {/* Lista scrolleable: overflow-auto nativo en vez de ScrollArea de Radix
                                             (que dentro de un Popover a veces no respeta max-height y bloquea el scroll). */}
@@ -4528,6 +4722,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                             {ve("cliente") && <th className="px-4 py-3">Cliente</th>}
                                             {ve("codigo") && <th className="px-4 py-3">Código</th>}
                                             {ve("articulo") && <th className="px-4 py-3 min-w-[300px]">Artículo</th>}
+                                            {ve("plano") && <th className="px-4 py-3 text-center">Plano</th>}
                                             {ve("progreso") && <th className="px-4 py-3 text-center">Cantidad</th>}
                                             {ve("material") && <th className="px-4 py-3 text-center">Mat.</th>}
                                             {ve("prioridad") && <th className="px-4 py-3 text-center">Prioridad</th>}
@@ -4706,6 +4901,14 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                 >
                                                                     {firstItem.articulo ? capitalize(firstItem.articulo) : "-"}
                                                                 </span>
+                                                            </td>
+                                                        )}
+                                                        {/* El plano se abre acá mismo, en el visor, sin desplegar la
+                                                            fila ni salir del plan: la celda corta el click (ver
+                                                            PlanoDeOrden). Es la misma celda de las listas de OT. */}
+                                                        {ve("plano") && (
+                                                            <td className="px-2 py-2 text-center whitespace-nowrap">
+                                                                <PlanoDeOrden ordenId={ordenId} compacto />
                                                             </td>
                                                         )}
                                                         {ve("progreso") && (
@@ -5081,6 +5284,29 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                             })()}
                                                                                         </div>
 
+                                                                                        {/* Tercerizado (reunión con Lucas del 17/10/2026): en vez de
+                                                                                            «Recurso humano» y «Recurso maquinaria», que no los usa,
+                                                                                            qué proveedor lo hace y cuántos días tarda. Ocupa las dos
+                                                                                            columnas: es un solo dato. */}
+                                                                                        {effectiveItem.tercerizado ? (
+                                                                                            <div className="col-span-2 px-4 py-2 border-b flex items-center bg-violet-50/30">
+                                                                                                <ProveedorDelPaso
+                                                                                                    ordenId={ordenId}
+                                                                                                    lineaId={lineaId}
+                                                                                                    datos={{
+                                                                                                        id_proveedor: effectiveItem.id_proveedor ?? null,
+                                                                                                        proveedor_nombre: effectiveItem.proveedor_nombre ?? null,
+                                                                                                        demora_del_paso: effectiveItem.demora_del_paso ?? null,
+                                                                                                        demora_del_proveedor: effectiveItem.demora_del_proveedor ?? null,
+                                                                                                    }}
+                                                                                                    vuelveEl={effectiveItem.vuelve_el ?? null}
+                                                                                                    finDelPlan={planningRange.fecha_hasta ?? null}
+                                                                                                    bloqueado={noSeEdita}
+                                                                                                    onGuardado={(d) => lineaId != null && setProveedorDe(prev => ({ ...prev, [lineaId]: d }))}
+                                                                                                    onRecalcular={onRecalculate ? () => handleRecalculate() : undefined}
+                                                                                                />
+                                                                                            </div>
+                                                                                        ) : (<>
                                                                                         <div className="px-4 py-2 border-b flex items-center">
                                                                                             <Select
                                                                                                 value={effectiveItem.id_operario?.toString() || "0"}
@@ -5160,6 +5386,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                 </SelectContent>
                                                                                             </Select>
                                                                                         </div>
+                                                                                        </>)}
 
                                                                                         <div className="px-4 py-2 border-b flex items-center">
                                                                                             <Input

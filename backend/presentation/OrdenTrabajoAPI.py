@@ -20,7 +20,7 @@ async def get_db():
 from fastapi import FastAPI, APIRouter, Depends, Form, File, UploadFile, Request
 from typing import List
 # Arriba de todo: `EstadoMasivo` se declara antes que el import de más abajo.
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ... imports ...
 
@@ -341,8 +341,16 @@ class EditarProcesoRequest(BaseModel):
     # Con `no_lleva_maquina`: la misma decisión para ese proceso en las otras OT abiertas
     # del mismo artículo. Es la memoria por artículo que pidió Lucas el 29/9/2026: si el
     # roscado de este eje va a mano, va a mano en todas sus OT, y el importador la copia
-    # a las que lleguen del sistema viejo (ver importar_ot_legacy).
+    # a las que lleguen del sistema viejo (ver importar_ot_legacy). Vale igual con
+    # `id_proveedor`.
     para_el_articulo: bool | None = None
+    # Un paso tercerizado (reunión con Lucas del 17/10/2026): qué proveedor lo hace y
+    # cuántos días de calendario tarda en devolverlo. `null` borra el dato.
+    id_proveedor: int | None = None
+    demora_dias: int | None = Field(default=None, ge=0, le=365)
+    # Los días de siempre del proveedor elegido (proveedor.demora_dias), para que la
+    # próxima vez que se lo elija ya venga con su demora. `null` los borra.
+    demora_del_proveedor: int | None = Field(default=None, ge=0, le=365)
 
 
 @router.put("/ordenes/{id_orden}/procesos/linea/{id_otp}")

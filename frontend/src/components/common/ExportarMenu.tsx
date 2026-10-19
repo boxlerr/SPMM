@@ -86,6 +86,25 @@ export interface ExportarMenuProps<T> {
     disabled?: boolean;
     align?: "start" | "end";
     className?: string;
+    /**
+     * Otros archivos que salen de la misma pantalla y no son una tabla: van abajo de los
+     * tres formatos, con su propio rótulo. El primero fue el texto para pegarle a Claude
+     * (reunión con Lucas del 17/10/2026, ver `lib/paraClaude`).
+     */
+    extras?: ExtraExportar[];
+    /** El rótulo de la parte de `extras` («Para analizar con Claude»). */
+    rotuloExtras?: string;
+    /** Lo que dice el botón, si no es «Exportar» (p. ej. «Exportar habilidades»). */
+    textoBoton?: string;
+}
+
+/** Un archivo más del menú «Exportar» (ver `extras`). */
+export interface ExtraExportar {
+    rotulo: string;
+    ayuda: string;
+    Icono?: typeof FileText;
+    /** Arma y baja el archivo; lo que devuelve es el nombre, para el aviso de «listo». */
+    hacer: () => Promise<string>;
 }
 
 const OPCIONES: { formato: FormatoExport; rotulo: string; ayuda: string; Icono: typeof FileText }[] = [
@@ -114,8 +133,11 @@ export function ExportarMenu<T>({
     disabled = false,
     align = "end",
     className,
+    extras,
+    rotuloExtras,
+    textoBoton,
 }: ExportarMenuProps<T>) {
-    const [ocupado, setOcupado] = useState<FormatoExport | null>(null);
+    const [ocupado, setOcupado] = useState<FormatoExport | "extra" | null>(null);
 
     const total = filas ? filas.length : cantidad;
     const vacio = total === 0;
@@ -162,6 +184,21 @@ export function ExportarMenu<T>({
         }
     };
 
+    const hacerExtra = async (extra: ExtraExportar) => {
+        if (ocupado) return;
+        setOcupado("extra");
+        try {
+            const nombre = await extra.hacer();
+            toast.success(`Listo: se bajó ${nombre}`);
+        } catch (e) {
+            console.error("No se pudo armar el archivo:", e);
+            const explicado = e instanceof Error && (e as Error & { paraMostrar?: boolean }).paraMostrar;
+            toast.error(explicado ? (e as Error).message : "No se pudo armar el archivo. Probá de nuevo en unos segundos.");
+        } finally {
+            setOcupado(null);
+        }
+    };
+
     /** Al abrir el menú se van pidiendo las librerías: el click que sigue ya no espera. */
     const precargar = (abierto: boolean) => {
         if (!abierto) return;
@@ -178,8 +215,8 @@ export function ExportarMenu<T>({
                     size="sm"
                     disabled={disabled || !!ocupado}
                     className={cn("h-8 shrink-0 gap-1.5 bg-white", soloIcono ? "w-8 px-0" : "px-2 sm:px-2.5", className)}
-                    title="Exportar lo que estás viendo a PDF, Excel o CSV"
-                    aria-label="Exportar"
+                    title={textoBoton ? `${textoBoton}: PDF, Excel o CSV` : "Exportar lo que estás viendo a PDF, Excel o CSV"}
+                    aria-label={textoBoton ?? "Exportar"}
                 >
                     {ocupado
                         ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -187,7 +224,7 @@ export function ExportarMenu<T>({
                     {!soloIcono && (
                         <>
                             <span className="hidden sm:inline text-xs font-medium">
-                                {ocupado ? "Armando…" : "Exportar"}
+                                {ocupado ? "Armando…" : (textoBoton ?? "Exportar")}
                             </span>
                             <ChevronDown className="hidden sm:inline h-3 w-3 opacity-60" />
                         </>
@@ -223,6 +260,33 @@ export function ExportarMenu<T>({
                     <>
                         <DropdownMenuSeparator />
                         <p className="px-2 py-1.5 text-[11px] leading-snug text-amber-700">{aviso}</p>
+                    </>
+                )}
+                {extras && extras.length > 0 && (
+                    <>
+                        <DropdownMenuSeparator />
+                        {rotuloExtras && (
+                            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                                {rotuloExtras}
+                            </DropdownMenuLabel>
+                        )}
+                        {extras.map((extra) => {
+                            const Icono = extra.Icono ?? FileText;
+                            return (
+                                <DropdownMenuItem
+                                    key={extra.rotulo}
+                                    disabled={!!ocupado}
+                                    onSelect={() => void hacerExtra(extra)}
+                                    className="gap-2.5 py-2"
+                                >
+                                    <Icono className="h-4 w-4 shrink-0 text-gray-500" />
+                                    <span className="flex flex-col">
+                                        <span className="text-sm font-medium">{extra.rotulo}</span>
+                                        <span className="text-[11px] text-muted-foreground">{extra.ayuda}</span>
+                                    </span>
+                                </DropdownMenuItem>
+                            );
+                        })}
                     </>
                 )}
             </DropdownMenuContent>

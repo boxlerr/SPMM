@@ -177,6 +177,18 @@ async def estimar_plan_endpoint(
         raise HTTPException(status_code=500, detail="No se pudo calcular cuánto tarda lo tildado.")
 
 
+# 🔹 Las habilidades de todo el equipo y las máquinas, de una (reunión con Lucas del
+#    17/10/2026): el botón «Exportar habilidades» de Recursos y el archivo «Para Claude»
+#    del planificador salen de acá. Es lo que ve el planificador —quién PUEDE hacer cada
+#    proceso y a quién PREFIERE— y no escribe nada. Ver EquipoService.
+@router.get("/planificacion/equipo")
+async def equipo_endpoint(db=Depends(get_db), _u=Depends(get_current_user)):
+    from backend.application.EquipoService import armar_equipo
+    from backend.commons.ResponseDTO import ResponseDTO
+    logger.info("API - Inicio GET /planificacion/equipo")
+    return ResponseDTO(status=True, errorDescription="", data=await armar_equipo(db))
+
+
 @router.get("/planificacion/borradores")
 async def listar_borradores(db = Depends(get_db), _u = Depends(get_current_user)):
     """Los borradores guardados, del más nuevo al más viejo. Sin el contenido:

@@ -79,6 +79,25 @@ class OrdenTrabajoProceso(Base):
     # corrida ANTES de desplegar. El sync (sync_db.py) no la pisa.
     id_operario = Column(Integer, ForeignKey("operario.id"), nullable=True)
 
+    # QUIÉN HACE AFUERA un paso tercerizado, y cuántos días tarda en devolverlo.
+    #
+    # Reunión con Lucas del 17/10/2026: en la vista previa un paso tercerizado decía
+    # «Recurso maquinaria» y «Recurso humano», cuando lo que hay que decir es qué
+    # proveedor lo hace (el que vulcaniza, por ejemplo). Y el plan lo daba por hecho en
+    # el momento: mandaba a vulcanizar el frente de carro el 19 y seguía con el
+    # ensamblaje el 20, cuando el proveedor lo devuelve el 29.
+    #
+    #   - id_proveedor NULL = no se dijo quién (el paso sale «Tercerizado», como antes).
+    #   - demora_dias  NULL = los días del proveedor (proveedor.demora_dias); si tampoco
+    #     tiene, el paso dura lo que dice tiempo_proceso, como antes.
+    #
+    # Son DÍAS DE CALENDARIO: «tarda 10 días» y vuelve el 29 si salió el 19 (la cuenta
+    # que hizo Lucas). Un proveedor no se borra (se pone inactivo), así que la FK no
+    # necesita cascada. Requiere migrations/2026-10-19_tercerizado_proveedor_y_demora.sql
+    # (la aplica sola infrastructure/migraciones.py al arrancar).
+    id_proveedor = Column(Integer, ForeignKey("proveedor.id"), nullable=True)
+    demora_dias = Column(Integer, nullable=True)
+
     # New fields for real time tracking
     inicio_real = Column(DateTime, nullable=True)
     fin_real = Column(DateTime, nullable=True)

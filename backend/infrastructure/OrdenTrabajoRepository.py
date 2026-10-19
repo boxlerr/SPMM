@@ -11,6 +11,7 @@ from datetime import datetime, date
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.Proceso import Proceso
+from backend.domain.Proveedor import Proveedor
 from backend.domain.Cliente import Cliente
 from backend.infrastructure.AuditoriaRepository import nombre_de
 from backend.infrastructure import auditoria_procesos as auditoria_proc
@@ -1428,6 +1429,29 @@ class OrdenTrabajoRepository:
                         otra.no_lleva_maquina = va_a_mano
                         if va_a_mano:
                             otra.id_maquinaria = None
+
+            # El proveedor de un paso tercerizado (reunión con Lucas del 17/10/2026). Con
+            # «para el artículo», el mismo proveedor para ese paso en las OT abiertas del
+            # producto: si Cerámica Lourdes le vulcaniza este frente de carro, se lo
+            # vulcaniza en todas sus OT, como pasa con «va a mano». `None` lo saca.
+            if "id_proveedor" in cambios:
+                linea.id_proveedor = cambios["id_proveedor"]
+                if cambios.get("para_el_articulo"):
+                    for otra in (otras_del_articulo
+                                 or await self._mismo_paso_del_articulo(id_orden, linea)):
+                        otra.id_proveedor = cambios["id_proveedor"]
+                        if otra not in otras_del_articulo:
+                            otras_del_articulo.append(otra)
+            # Los días de ESTE trabajo. Sólo de esta pasada: lo que vale para todas es el
+            # dato del proveedor (abajo).
+            if "demora_dias" in cambios:
+                linea.demora_dias = cambios["demora_dias"]
+            # Los días de siempre del proveedor, si se pidió recordarlos: la próxima vez que
+            # se lo elija ya viene con su demora.
+            if "demora_del_proveedor" in cambios and linea.id_proveedor is not None:
+                proveedor = await self.db.get(Proveedor, linea.id_proveedor)
+                if proveedor is not None:
+                    proveedor.demora_dias = cambios["demora_del_proveedor"]
 
             await self._sellar_modificacion(id_orden, usuario)
             for id_otra_ot in sorted({o.id_orden_trabajo for o in otras_del_articulo}):

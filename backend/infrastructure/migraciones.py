@@ -1469,6 +1469,35 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "vuelve a traer el año (a veces se decreta un feriado nuevo en el año).'",
         ],
     ),
+    (
+        # Reunión con Lucas del 17/10/2026: el proveedor de un paso tercerizado y cuántos
+        # días tarda. Tres columnas NULL y nada más. Hace falta ANTES de la primera
+        # lectura: SQLAlchemy pide id_proveedor y demora_dias en cada SELECT de pasos de OT
+        # —la lista de órdenes, el planificador— y demora_dias en el de proveedores. No
+        # toca filas: todo paso tercerizado sigue igual hasta que le elijan el proveedor.
+        "2026-10-19_tercerizado_proveedor_y_demora",
+        [
+            "ALTER TABLE proveedor "
+            "ADD COLUMN IF NOT EXISTS demora_dias SMALLINT",
+            "ALTER TABLE orden_trabajo_proceso "
+            "ADD COLUMN IF NOT EXISTS id_proveedor INTEGER REFERENCES proveedor (id), "
+            "ADD COLUMN IF NOT EXISTS demora_dias INTEGER",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON COLUMN proveedor.demora_dias IS "
+            "'Cuántos días de calendario tarda en devolver un trabajo tercerizado. Lo usa el "
+            "planificador cuando el paso no dice otra cosa. NULL = no se sabe; nunca un valor "
+            "inventado. Dato de SPMM: el sistema viejo no lo tiene y el espejo no lo pisa.'",
+            "COMMENT ON COLUMN orden_trabajo_proceso.id_proveedor IS "
+            "'Qué proveedor hace este paso, si es tercerizado. NULL = no se dijo (el plan lo muestra "
+            "como «Tercerizado», igual que antes del 19/10/2026).'",
+            "COMMENT ON COLUMN orden_trabajo_proceso.demora_dias IS "
+            "'Días de calendario que tarda el proveedor en devolver ESTE trabajo. NULL = los de "
+            "proveedor.demora_dias. El planificador no arranca el paso que sigue hasta que vuelve.'",
+            "CREATE INDEX IF NOT EXISTS ix_otp_proveedor "
+            "ON orden_trabajo_proceso (id_proveedor) "
+            "WHERE id_proveedor IS NOT NULL",
+        ],
+    ),
 ]
 
 

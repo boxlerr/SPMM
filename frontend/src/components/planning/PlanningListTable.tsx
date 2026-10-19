@@ -63,7 +63,7 @@ import { API_URL } from "@/config";
 import { usePermisos } from "@/hooks/usePermisos";
 import { MaterialChip } from "@/components/common/MaterialChip";
 import { rankMaterial, resumirMaterial } from "@/lib/materialOT";
-import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { ExportarMenu, type ExtraExportar } from "@/components/common/ExportarMenu";
 import { MarcaPausada } from "@/components/pausas/MarcaPausada";
 import { filtroBusqueda, type SeccionExport } from "@/lib/exportar";
 import {
@@ -180,7 +180,11 @@ interface PlanningListTableProps {
      * pasos, y si hay plan, con el horario, el recurso humano y la maquinaria de cada uno.
      * `filtros` son los de afuera de la tabla (qué plan, qué semana, qué día).
      */
-    exportar?: { titulo: string; archivo: string; filtros?: string[] };
+    exportar?: {
+        titulo: string; archivo: string; filtros?: string[];
+        /** Otros archivos del mismo menú (el de Claude, en el Paso 1): ver ExportarMenu. */
+        extras?: ExtraExportar[]; rotuloExtras?: string;
+    };
     /**
      * RF-29. Filtro por recurso humano y por máquina de lo planificado. Lo guarda el
      * padre y no la tabla para que siga puesto al pasar de Pendientes a Semanal o a
@@ -1643,6 +1647,8 @@ function _PlanningListTable({
                 ...filtroOrden(sortConfig.key ? ROTULOS_ORDEN[sortConfig.key] : null, sortConfig.direction),
             ]}
             className={compacto ? undefined : "h-10"}
+            extras={exportar.extras}
+            rotuloExtras={exportar.rotuloExtras}
         />
     ) : null;
 

@@ -32,6 +32,12 @@ class Proveedor(Base):
     observaciones = Column(Text, nullable=True)
     # Un proveedor al que no se le compra más no se borra: lo nombran compras viejas.
     inactivo = Column(SmallInteger, nullable=False, default=0, server_default="0")
+    # Cuántos DÍAS DE CALENDARIO tarda en devolver un trabajo tercerizado (reunión con
+    # Lucas del 17/10/2026). Es lo que el planificador usa cuando el paso no dice otra
+    # cosa (orden_trabajo_proceso.demora_dias). NULL = no se sabe; nunca un valor
+    # inventado. Dato de SPMM: el viejo no lo tiene y el espejo de materias primas sólo
+    # actualiza las columnas que trae de allá, así que no lo pisa.
+    demora_dias = Column(SmallInteger, nullable=True)
     # Hora local AR sin zona; quién, tomado del token. NULL = vino del viejo o de un
     # script: nunca un autor inventado.
     creado_en = Column(DateTime, nullable=True)

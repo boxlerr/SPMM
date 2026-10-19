@@ -96,10 +96,14 @@ def estimar_plan(
     ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None,
     preseleccion_op=None, maquinas_por_proceso=None, inicio_base: datetime | None = None,
     *, nombres_operario: dict | None = None, numero_ot: dict | None = None,
-    detalle: bool = False,
+    detalle: bool = False, demoras: dict | None = None,
 ) -> dict:
     """Recibe EXACTAMENTE lo mismo que `_resolver_planificacion` y devuelve la estimación
-    (ver el contrato de POST /planificacion/estimar)."""
+    (ver el contrato de POST /planificacion/estimar).
+
+    `demoras` ({(orden_id, secuencia): días}): los pasos que hace un proveedor. Salen
+    cuando termina el paso anterior y vuelven a los N días de calendario
+    (PS.tabla_de_vuelta), igual que en el solver: lo que sigue de la OT espera."""
     from ortools.linear_solver import pywraplp
     from ortools.sat.python import cp_model
 
@@ -117,6 +121,10 @@ def estimar_plan(
     carga_min = sum(max(0, int(p[5] or 0)) * max(1, int(cant_op_map.get((p[0], p[2]), 1) or 1))
                     for p in procesos)
     procesos_sin_tiempo = sum(1 for p in procesos if not p[5] or int(p[5]) <= 0)
+    # Los pasos que esperan a un proveedor duran un minuto, como en el solver. La carga de
+    # arriba se cuenta antes, con los minutos de la OT: el cartel del Paso 1 no cambia.
+    demoras = {k: int(v) for k, v in (demoras or {}).items() if v is not None and int(v) >= 1}
+    procesos = PS._procesos_con_demora_a_un_minuto(procesos, demoras)
     base = {
         "carga_min": int(carga_min),
         "procesos_sin_tiempo": procesos_sin_tiempo,
@@ -135,6 +143,7 @@ def estimar_plan(
     # Qué trabajo prepara cada preparación (hereda quién lo tiene cargado a mano), igual
     # que en el solver.
     setup_de = PS._setup_hereda_de(pn, partes)
+    demora_pn = PS._demoras_al_modelo(demoras, partes)
     # Los dominios salen de la misma función del solver, sobre un modelo descartable. Los
     # dos conjuntos de rangos que pide sólo pesan en la penalización del solver, no en
     # quién puede hacer qué (ver _resolver_planificacion).
@@ -142,7 +151,7 @@ def estimar_plan(
      maq_to_familia, op_dom, maq_dom, _, _) = PS._crear_variables_y_dominios(
         cp_model.CpModel(), pn, operarios, maquinarias, {1, 11}, {8, 14}, nativas_off, cant2,
         presel_maq2, op_planos, ots_con_plano, skills_manuales, presel_op2, maquinas_por_proceso,
-        setup_de=setup_de)
+        setup_de=setup_de, demoras_modelo=demora_pn)
     # Los acompañantes (pasos de a 2 o más) salen del MISMO conjunto que usa el solver:
     # el del principal ANTES de la persona elegida a mano (`operarios_para_acompanantes`
     # en _crear_variables_y_dominios). Con la persona elegida, el dominio del principal es
@@ -209,9 +218,13 @@ def estimar_plan(
     reales_de = {k: _con_gente(k) for k in pares}
 
     # ---- COTA: cadena más larga y LP por recursos ----
+    # Lo que se espera a un proveedor también es cadena: la OT no sigue hasta que vuelve.
+    # En jornadas hábiles (5 de cada 7 días de calendario), redondeando para abajo para
+    # que siga siendo un piso.
     cadena = defaultdict(int)
     for p in pn:
-        cadena[p[0]] += p[5]
+        dias = demora_pn.get((p[0], p[2]))
+        cadena[p[0]] += p[5] if dias is None else (dias * 5 // 7) * PS.MIN_LABORAL_DIA
     cadena_max = max(cadena.values()) if cadena else 0
 
     grupos = defaultdict(list)
@@ -284,17 +297,26 @@ def estimar_plan(
     min_semana = 5 * PS.MIN_LABORAL_DIA + (PS.MIN_LABORAL_SABADO if hay_sabado else 0)
     total = sum(dur_map.values())
     semanas = math.ceil(total / min_semana) + 3   # tope holgado: todo en fila por una persona
+    # Más lo que se espera a los proveedores, como si fuera en fila.
+    semanas += math.ceil(sum(demora_pn.values()) / 7)
 
     por_ot = defaultdict(list)
     for p in pn:
         por_ot[p[0]].append((p[0], p[2]))
     for lista in por_ot.values():
         lista.sort(key=lambda k: k[1])
+    # Lo que falta de cada OT desde cada paso. Lo que se espera al proveedor también es
+    # camino que falta: sus días de calendario, en minutos de trabajo como los cuenta el
+    # plan (una semana de calendario es una semana de trabajo). Sin esto una OT que va diez
+    # días afuera parecía corta, salía última en «cadena» y la pieza volvía después de la
+    # fecha prometida (medido el 19/10/2026 con el plan del 17/10).
     resto = {}
     for lista in por_ot.values():
         acum = 0
         for k in reversed(lista):
             acum += dur_map[k]
+            if k in demora_pn:
+                acum += demora_pn[k] * min_semana // 7
             resto[k] = acum
 
     # Qué trabajo sólo puede hacer UNA persona. Sirve para no gastarle las horas en cosas
@@ -317,6 +339,9 @@ def estimar_plan(
         ventanas = PS.construir_ventanas_semanales(n_semanas, start_date, list(feriados),
                                                    fecha_hasta=None, incluir_sabado=hay_sabado)
         v_ini = [v.ini for v in ventanas]
+        # Cuándo vuelve lo que sale a un proveedor, por ventana de salida (la misma tabla
+        # que usa el solver).
+        vueltas = {d: PS.tabla_de_vuelta(ventanas, d) for d in set(demora_pn.values())}
         agenda = defaultdict(_Agenda)
         ocupado = defaultdict(int)
         fin_de = {}
@@ -406,6 +431,26 @@ def estimar_plan(
             dur = dur_map[k]
             gente = max(1, int(cant2.get(k, 1) or 1))
             desde = listo[k]
+
+            # Lo hace un proveedor: sale en cuanto puede y la OT sigue cuando vuelve. No
+            # ocupa a nadie del taller ni una máquina.
+            if k in demora_pn:
+                sale = primer_hueco(desde, 1, [], [])
+                if sale is None:
+                    return None
+                vuelve = vueltas[demora_pn[k]][max(0, bisect_right(v_ini, sale) - 1)]
+                if vuelve is None:
+                    return None   # vuelve después de lo armado: se prueba con más semanas
+                fin_de[k] = vuelve
+                asignado[k] = (sale, None, None, [])
+                lista = por_ot[k[0]]
+                i = lista.index(k)
+                if i + 1 < len(lista):
+                    sig = lista[i + 1]
+                    listo[sig] = vuelve
+                    heapq.heappush(cola, (prioridad(sig), sig))
+                continue
+
             g = raiz(k)
             # Si es una preparación que va pegada a su trabajo, los dos van en bloque
             # (ver pegada_con). Sólo si hay pares que sirvan para los dos: si no, el que

@@ -1731,7 +1731,9 @@ def _trabajo_tercerizado(procesos, nombre_rango=None):
         "detalle": (
             f"{_concuerda(_nombres_terc, 'Va', 'Van')} sin operario ni máquina a propósito: "
             f"{_concuerda(_nombres_terc, 'lo hace', 'los hace')} alguien de afuera y el plan "
-            "solo les guarda el lugar en la secuencia de la OT. Nada que corregir."
+            "solo les guarda el lugar en la secuencia de la OT. En la fila de cada paso se "
+            "elige qué proveedor lo hace y cuántos días tarda: con eso, lo que sigue de la "
+            "OT espera a que vuelva."
         ),
         "impacto": {
             "procesos": cuantos,

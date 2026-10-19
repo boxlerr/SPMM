@@ -351,6 +351,28 @@ def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dat
     return ventanas
 
 
+def _dia_prometido(fecha_prometida) -> date | None:
+    """El día de la fecha prometida, o None si no hay, no se entiende o es de relleno
+    (antes de 1970: las OT viejas traen 01/01/1950)."""
+    if not fecha_prometida:
+        return None
+    try:
+        if isinstance(fecha_prometida, str):
+            dia = datetime.fromisoformat(fecha_prometida[:19]).date()
+        elif isinstance(fecha_prometida, datetime):
+            dia = fecha_prometida.date()
+        elif isinstance(fecha_prometida, date):
+            dia = fecha_prometida
+        else:
+            return None
+    except (TypeError, ValueError) as e:
+        logger.warning(f"Fecha prometida ilegible ({fecha_prometida!r}): {e}. Sin atraso.")
+        return None
+    if dia < date(1970, 1, 1):
+        return None
+    return dia
+
+
 def minuto_de_entrega(fecha_prometida, ventanas) -> int | None:
     """La fecha prometida de una OT, en minutos del plan: el CIERRE de la jornada de ese día.
 
@@ -369,21 +391,8 @@ def minuto_de_entrega(fecha_prometida, ventanas) -> int | None:
     es una fecha de relleno (antes de 1970) o cae después del horizonte: ahí nada de lo
     que entra en el plan puede llegar tarde.
     """
-    if not fecha_prometida:
-        return None
-    try:
-        if isinstance(fecha_prometida, str):
-            dia = datetime.fromisoformat(fecha_prometida[:19]).date()
-        elif isinstance(fecha_prometida, datetime):
-            dia = fecha_prometida.date()
-        elif isinstance(fecha_prometida, date):
-            dia = fecha_prometida
-        else:
-            return None
-    except (TypeError, ValueError) as e:
-        logger.warning(f"Fecha prometida ilegible ({fecha_prometida!r}): {e}. Sin atraso.")
-        return None
-    if dia < date(1970, 1, 1):
+    dia = _dia_prometido(fecha_prometida)
+    if dia is None:
         return None
     con_fecha = [v for v in ventanas if v.fecha is not None]
     if not con_fecha or dia > con_fecha[-1].fecha:
@@ -394,6 +403,138 @@ def minuto_de_entrega(fecha_prometida, ventanas) -> int | None:
             break
         cierre = max(cierre, v.fin)
     return cierre
+
+
+# ------------------------------------------------------------
+# Lo que tarda el PROVEEDOR de un paso tercerizado
+# ------------------------------------------------------------
+#
+# Reunión con Lucas del 17/10/2026, sobre el frente de carro que se manda a vulcanizar:
+# «cuando se manda a tercerizar habría que ponerle cuándo te lo va a devolver el
+# proveedor. Si tarda 10 días, vos le terminaste de hacer el 19, recién volvería al 29»,
+# y lo que sigue de la OT (el ensamblaje) se corre hasta ese día.
+#
+# Hasta acá un paso tercerizado era un paso más de la OT que duraba sus minutos, sin
+# persona ni máquina: el plan lo daba por hecho en el momento y el ensamblaje arrancaba
+# al otro día.
+#
+# Ahora, si el paso tiene proveedor con días (los del paso o los del proveedor, ver
+# OrdenTrabajoService.demora_efectiva), el paso SALE cuando termina el anterior y VUELVE
+# el día de calendario que corresponde, a la apertura del taller: el paso que sigue no
+# puede arrancar antes. Los días son de CALENDARIO, como los contó Lucas; si el día de
+# vuelta es domingo, feriado o un sábado que no se trabaja, vuelve el próximo que se
+# trabaje.
+
+def fecha_de_vuelta(fecha_envio: date, dias: int, blocked_dates=(),
+                    incluir_sabado: bool = True) -> date:
+    """El día en que vuelve un trabajo que salió el `fecha_envio` y tarda `dias` días de
+    calendario: el primero que se trabaja desde `fecha_envio + dias`."""
+    vuelta = fecha_envio + timedelta(days=int(dias))
+    bloqueados = set(blocked_dates or ())
+    while (vuelta.weekday() == 6 or (vuelta.weekday() == 5 and not incluir_sabado)
+           or vuelta.strftime("%Y-%m-%d") in bloqueados):
+        vuelta += timedelta(days=1)
+    return vuelta
+
+
+def tabla_de_vuelta(ventanas, dias: int) -> list:
+    """Para cada ventana del plan, el minuto en que vuelve un trabajo que SALE en ella:
+    la apertura del primer día con ventanas desde `fecha + dias`. None = vuelve después
+    del último día del plan.
+
+    Es la MISMA regla que `fecha_de_vuelta`, contada sobre las ventanas: los domingos, los
+    feriados y los sábados sin gente no tienen ventanas, así que el primer día con
+    ventanas es el primero que se trabaja.
+    """
+    salida = []
+    j = 0
+    for v in ventanas:
+        objetivo = v.fecha + timedelta(days=int(dias))
+        # Las ventanas van en orden y `objetivo` nunca baja: el puntero no vuelve atrás.
+        while j < len(ventanas) and ventanas[j].fecha < objetivo:
+            j += 1
+        salida.append(ventanas[j].ini if j < len(ventanas) else None)
+    return salida
+
+
+def _minuto_despues_del_plan(dia: date, ventanas, cierre: bool) -> int | None:
+    """El minuto de un día que cae DESPUÉS del último del plan, como si el plan siguiera:
+    lunes a viernes de jornada entera y los sábados sólo si este plan los trabaja. Los
+    feriados de más adelante no se conocen. `cierre`: el fin de ese día; si no, su
+    apertura (que en la línea de tiempo del plan es el cierre del día trabajado anterior).
+    None si las ventanas no tienen fechas."""
+    con_fecha = [v for v in ventanas if v.fecha is not None]
+    if not con_fecha:
+        return None
+    ultimo = con_fecha[-1].fecha
+    minuto = max(v.fin for v in con_fecha if v.fecha == ultimo)
+    sabado = MIN_LABORAL_SABADO if any(v.weekday == 5 for v in con_fecha) else 0
+    d = ultimo + timedelta(days=1)
+    while d < dia or (cierre and d == dia):
+        minuto += MIN_LABORAL_DIA if d.weekday() < 5 else (sabado if d.weekday() == 5 else 0)
+        d += timedelta(days=1)
+    return minuto
+
+
+def _vueltas_extendidas(ventanas, dias: int) -> list:
+    """Como `tabla_de_vuelta`, pero lo que vuelve después del último día del plan también
+    tiene minuto (ver `_minuto_despues_del_plan`): con qué tanto después vuelve se cobra
+    el atraso que el plan ya no ve (ver `_agregar_funcion_objetivo`)."""
+    hay_sabado = any(v.weekday == 5 for v in ventanas)
+    salida = []
+    for v, minuto in zip(ventanas, tabla_de_vuelta(ventanas, dias)):
+        if minuto is None and v.fecha is not None:
+            vuelve = fecha_de_vuelta(v.fecha, dias, (), incluir_sabado=hay_sabado)
+            minuto = _minuto_despues_del_plan(vuelve, ventanas, cierre=False)
+        salida.append(minuto)
+    return salida
+
+
+def _entrega_extendida(fecha_prometida, ventanas) -> int | None:
+    """`minuto_de_entrega`, y si la fecha prometida cae después del plan, su minuto como
+    si el plan siguiera (ver `_minuto_despues_del_plan`)."""
+    entrega = minuto_de_entrega(fecha_prometida, ventanas)
+    if entrega is not None:
+        return entrega
+    dia = _dia_prometido(fecha_prometida)
+    con_fecha = [v for v in ventanas if v.fecha is not None]
+    if dia is None or not con_fecha or dia <= con_fecha[-1].fecha:
+        return None
+    return _minuto_despues_del_plan(dia, ventanas, cierre=True)
+
+
+def _demoras_al_modelo(demoras: dict | None, partes: dict) -> dict:
+    """{clave del MODELO: días} a partir de {(orden_id, secuencia): días}.
+
+    Las claves del modelo son las de los tramos (`_partir_procesos_largos`): un paso que
+    espera al proveedor dura un minuto en el modelo, así que nunca se parte y queda en un
+    solo tramo. Sólo cuentan los días ≥ 1: «vuelve el mismo día» no espera nada y el paso
+    sigue como cualquier otro.
+    """
+    salida = {}
+    for clave, dias in (demoras or {}).items():
+        if dias is None or int(dias) < 1:
+            continue
+        info = (partes or {}).get(clave)
+        if info and info["claves"]:
+            salida[info["claves"][0]] = int(dias)
+    return salida
+
+
+def _procesos_con_demora_a_un_minuto(procesos, demoras: dict | None):
+    """Los pasos que esperan al proveedor duran UN minuto en el modelo: el tiempo que
+    importa es el que tarda en volver (ver `tabla_de_vuelta`), y con sus minutos
+    originales el paso se partiría en tramos o no entraría en ninguno. La pantalla sigue
+    mostrando los minutos de la OT."""
+    if not demoras:
+        return procesos
+    salida = []
+    for p in procesos:
+        dias = demoras.get((p[0], p[2]))
+        if dias is not None and int(dias) >= 1:
+            p = (*p[:5], 1, *p[6:])
+        salida.append(p)
+    return salida
 
 # ------------------------------------------------------------
 # Helpers del solver
@@ -544,6 +685,7 @@ def _crear_variables_y_dominios(
     preseleccion_op=None,
     maquinas_por_proceso=None,
     setup_de=None,
+    demoras_modelo=None,
 ):
     """
     Crea variables de inicio/fin/intervalos, dominios de operarios/maquinarias
@@ -551,6 +693,10 @@ def _crear_variables_y_dominios(
 
     `setup_de`: {clave de una preparación: id del proceso que prepara} (ver
     _setup_hereda_de). La preparación suma a quienes tienen ESE trabajo cargado a mano.
+
+    `demoras_modelo`: {clave: días} de los pasos que hace un proveedor (ver
+    `tabla_de_vuelta`). No los hace nadie del taller ni ocupan máquina, y su largo no es
+    fijo: va de que sale a que vuelve. Lo ata `_agregar_ventanas_horarias`.
 
     `cant_op_map`: dict {(orden_id, secuencia): cantidad_operarios}. Para procesos
     que requieren más de 1 operario se crean variables de operario adicionales
@@ -611,11 +757,28 @@ def _crear_variables_y_dominios(
         # Intervalo base
         start = model.NewIntVar(0, H, f"start_{orden_id}_{secuencia}")
         end   = model.NewIntVar(0, H, f"end_{orden_id}_{secuencia}")
-        itv   = model.NewIntervalVar(start, dur, end, f"int_{orden_id}_{secuencia}")
         dur_map[(orden_id, secuencia)] = dur
 
         # Booleano de presencia: 1 = el proceso entra en el plan, 0 = excedente
         presente_vars[(orden_id, secuencia)] = model.NewBoolVar(f"pres_{orden_id}_{secuencia}")
+
+        # Lo hace un proveedor y vuelve en N días: sin persona ni máquina, y de largo
+        # variable (sale cuando termina el paso anterior, vuelve cuando vuelve).
+        if (orden_id, secuencia) in (demoras_modelo or {}):
+            largo = model.NewIntVar(0, H, f"largo_{orden_id}_{secuencia}")
+            intervalo_vars[(orden_id, secuencia)] = model.NewIntervalVar(
+                start, largo, end, f"int_{orden_id}_{secuencia}")
+            inicio_vars[(orden_id, secuencia)] = start
+            fin_vars[(orden_id, secuencia)] = end
+            op_domain_vals[(orden_id, secuencia)] = [DUMMY_OP_ID]
+            operario_vars[(orden_id, secuencia)] = model.NewIntVarFromDomain(
+                cp_model.Domain.FromValues([DUMMY_OP_ID]), f"op_{orden_id}_{secuencia}")
+            maq_domain_vals[(orden_id, secuencia)] = [DUMMY_MAQ_ID]
+            maq_vars[(orden_id, secuencia)] = model.NewIntVarFromDomain(
+                cp_model.Domain.FromValues([DUMMY_MAQ_ID]), f"maq_{orden_id}_{secuencia}")
+            continue
+
+        itv   = model.NewIntervalVar(start, dur, end, f"int_{orden_id}_{secuencia}")
 
         # ----------------- Operarios válidos -----------------
         # ELEGIBILIDAD = SKILLS NATIVAS + MANUALES. Una nativa es la intersección entre
@@ -1463,6 +1626,8 @@ def _agregar_funcion_objetivo(
     op_extra_vars=None,
     op_to_rangos=None,
     ventanas=None,
+    demoras_modelo=None,
+    vueltas_virtuales=None,
 ):
     """
     Construye la lista total_obj con todos los términos de la función objetivo
@@ -1472,6 +1637,15 @@ def _agregar_funcion_objetivo(
     `ventanas` son las del plan: con ellas la fecha prometida se pasa a minutos de
     TRABAJO (minuto_de_entrega). Sin ventanas no hay contra qué medir el atraso y no se
     cobra: es sólo una guarda, el solver siempre las pasa.
+
+    `demoras_modelo` ({clave: días}): los pasos que hace un proveedor. Lo que la OT
+    espera a que vuelva NO cuenta como OT abierta (escalón 3): esa espera no la puede
+    achicar nadie del taller. Contada, al solver le convenía mandar la pieza un viernes a
+    la tarde —diez días de calendario sobre un fin de semana son menos minutos de trabajo—
+    y atrasaba la OT entera para eso.
+
+    `vueltas_virtuales` (de `_agregar_ventanas_horarias`): lo que vuelve del proveedor
+    DESPUÉS del último día del plan. Ver «Lo que vuelve después del plan», abajo.
     """
     total_obj = []
     ultimo_de_ot = {}
@@ -1670,6 +1844,36 @@ def _agregar_funcion_objetivo(
             model.Add(ausente == 1 - presente)
             total_obj.append((ausente, W_FUERA * peso_exced))
 
+    # --- Lo que vuelve del proveedor después del plan ---
+    # Si la pieza vuelve después del último día del plan, lo que sigue de la OT queda
+    # afuera y el fin del paso es el final de todo: ni el atraso de la OT ni su fin se
+    # movían con el día en que sale, y al solver le daba lo mismo mandarla el lunes o el
+    # jueves. Medido el 19/10/2026 con el plan del 17/10 y 10 días de proveedor en la OT
+    # 15866: la mandaba el jueves 22 y volvía el lunes 2/11, después de la fecha
+    # prometida (30/10); mandada el lunes 19, volvía el 29. Se cobra el atraso que va a
+    # tener —el día que vuelve más lo que le falta hacer, contra la fecha prometida,
+    # contados como si el plan siguiera— y, con el peso de terminar antes, que vuelva
+    # cuanto antes. Sólo si vuelve después del plan: si vuelve adentro, lo que sigue entra
+    # y su atraso ya se cobra como el de cualquier paso. Ese atraso también compite por
+    # ser el de la OT más atrasada (abajo).
+    tardes_de_vuelta = []
+    for clave, (vuelve, afuera, tope) in (vueltas_virtuales or {}).items():
+        orden_id, secuencia = clave
+        paso = next((p for p in procesos_norm if (p[0], p[2]) == clave), None)
+        if paso is None:
+            continue
+        resto = sum(p[5] for p in procesos_norm if p[0] == orden_id and p[2] > secuencia)
+        cuando = model.NewIntVar(0, tope, f"vuelve_despues_min_{orden_id}_{secuencia}")
+        model.Add(cuando >= vuelve).OnlyEnforceIf(afuera)
+        total_obj.append((cuando, W_FIN_OT))
+        entrega = _entrega_extendida(paso[3], ventanas) if ventanas else None
+        if entrega is not None:
+            tarde = model.NewIntVar(0, tope + resto, f"tarde_vuelta_{orden_id}_{secuencia}")
+            model.Add(tarde >= vuelve + resto - entrega).OnlyEnforceIf(afuera)
+            mult = atraso_mult_por_prioridad.get(paso[4], 200)
+            total_obj.append((tarde, mult))
+            tardes_de_vuelta.append((tarde, mult, tope + resto))
+
     # --- Terminar antes, aunque no haya atraso ---
     # Sin esto, lo único que empujaba a terminar temprano era el atraso: con la fecha mal
     # leída casi nada estaba atrasado y el plan se estiraba sin costo (1 punto por minuto
@@ -1686,6 +1890,16 @@ def _agregar_funcion_objetivo(
         fines_por_ot.setdefault(orden_id, []).append(fin_vars[(orden_id, secuencia)])
         if secuencia < primera_de_ot.get(orden_id, (orden_id, secuencia + 1))[1]:
             primera_de_ot[orden_id] = (orden_id, secuencia)
+    # Lo que cada OT espera a sus proveedores (ver `demoras_modelo` arriba). Si el paso
+    # quedó afuera, no espera nada.
+    espera_de_ot = {}
+    for clave in (demoras_modelo or {}):
+        espera = model.NewIntVar(0, H, f"espera_prov_{clave[0]}_{clave[1]}")
+        restr = model.Add(espera == fin_vars[clave] - inicio_vars[clave])
+        if presente_vars is not None:
+            restr.OnlyEnforceIf(presente_vars[clave])
+            model.Add(espera == 0).OnlyEnforceIf(presente_vars[clave].Not())
+        espera_de_ot.setdefault(clave[0], []).append(espera)
     if fines_por_ot:
         fin_plan = model.NewIntVar(0, H, "fin_plan")
         for orden_id, fines in fines_por_ot.items():
@@ -1701,7 +1915,8 @@ def _agregar_funcion_objetivo(
             if OT_DE_CORRIDO and W_OT_DE_CORRIDO:
                 primera = primera_de_ot[orden_id]
                 abierta = model.NewIntVar(0, H, f"abierta_ot_{orden_id}")
-                restr = model.Add(abierta >= fin_ot - inicio_vars[primera])
+                restr = model.Add(abierta >= fin_ot - inicio_vars[primera]
+                                  - sum(espera_de_ot.get(orden_id, [])))
                 if presente_vars is not None:
                     restr.OnlyEnforceIf(presente_vars[primera])
                 total_obj.append((abierta, W_OT_DE_CORRIDO))
@@ -1712,14 +1927,19 @@ def _agregar_funcion_objetivo(
     # como una normal atrasada dos. Con `>=`: al minimizar, el solver lo baja hasta el
     # máximo. Si la OT quedó afuera, su último paso no está: su fin no cuenta (el
     # excedente ya se cobra muy por encima).
-    if ATRASO_MAX_EQUIV and atraso_de_ot:
+    if ATRASO_MAX_EQUIV and (atraso_de_ot or tardes_de_vuelta):
         peor = max(atraso_mult_por_prioridad.values())
-        atraso_max = model.NewIntVar(0, H * peor, "atraso_max_ot")
+        # Lo que vuelve después del plan se cuenta más allá del horizonte: el techo tiene
+        # que alcanzarle, o el modelo no tendría solución.
+        techo = max([H * peor] + [m * cota for (_t, m, cota) in tardes_de_vuelta])
+        atraso_max = model.NewIntVar(0, techo, "atraso_max_ot")
         for orden_id, (fin, entrega_ot, mult_ot) in atraso_de_ot.items():
             ultimo = presente_vars.get((orden_id, ultimo_de_ot[orden_id])) if presente_vars is not None else None
             restriccion = model.Add(atraso_max * 1 >= (fin - entrega_ot) * mult_ot)
             if ultimo is not None:
                 restriccion.OnlyEnforceIf(ultimo)
+        for tarde, mult_ot, _cota in tardes_de_vuelta:
+            model.Add(atraso_max >= tarde * mult_ot)
         total_obj.append((atraso_max, ATRASO_MAX_EQUIV))
 
     model.Minimize(sum(v * c for (v, c) in total_obj))
@@ -1798,7 +2018,7 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None, blocked_
     return tiempo_actual.isoformat()
 
 
-def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None, op_extra_vars=None, partes=None, blocked_dates=None):
+def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None, op_extra_vars=None, partes=None, blocked_dates=None, demoras_modelo=None, incluir_sabado: bool = True, op_override=None):
     """
     Transforma la solución CP-SAT en la lista de dicts que tu servicio guarda en BD.
     Cada resultado incluye `excedente`: True si el proceso no entra en el horizonte (presente=0).
@@ -1811,8 +2031,15 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
     _partir_procesos_largos). Un proceso partido vuelve a salir como UNA fila: arranca
     cuando arranca el primer tramo y termina cuando termina el último. Que por dentro
     hayan sido tres tirones de 250 minutos es cosa del modelo, no del plan que se lee.
+
+    Un paso que hace un proveedor (`demoras_modelo`) sale con el día en que vuelve
+    (`vuelve_el`) y termina a la apertura de ese día: es cuando la pieza está de nuevo
+    en el taller. `op_override` ({clave: operario}) es el reparto por especialidad que
+    se hace con los horarios ya fijos (ver `_reasignar_por_especialidad`).
     """
     resultados = []
+    demoras_modelo = demoras_modelo or {}
+    op_override = op_override or {}
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         if partes is None:
             partes = {
@@ -1828,7 +2055,7 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
             claves = datos["claves"]
             primera = claves[0]
 
-            op_id  = solver.Value(operario_vars[primera])
+            op_id  = op_override.get(primera, solver.Value(operario_vars[primera]))
             maq_id = solver.Value(maq_vars[primera])
 
             inicio_m = min(solver.Value(inicio_vars[k]) for k in claves)
@@ -1848,6 +2075,17 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
             )
             fecha_ini_est = _convertir_minutos_a_fecha(inicio_m, start_time_ref, blocked_dates)
             fecha_fin_est = _convertir_minutos_a_fecha(fin_m, start_time_ref, blocked_dates, es_fin=True)
+
+            # Lo hace un proveedor: el fin es la apertura del día en que vuelve. Se cuenta
+            # en el calendario y no con los minutos del modelo para que valga también
+            # cuando vuelve después del último día del plan.
+            de_proveedor = {}
+            if primera in demoras_modelo:
+                dias = demoras_modelo[primera]
+                envio = datetime.fromisoformat(fecha_ini_est).date()
+                vuelve = fecha_de_vuelta(envio, dias, blocked_dates, incluir_sabado)
+                fecha_fin_est = datetime.combine(vuelve, HORA_APERTURA).isoformat()
+                de_proveedor = {"demora_dias": dias, "vuelve_el": vuelve.isoformat()}
 
             resultados.append({
                 "orden_id": orden_id,
@@ -1878,7 +2116,8 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 # secuencia de la OT y hay que esperarlo— pero no lo hace nadie del
                 # taller, así que salir "sin asignar" no es un problema a resolver:
                 # es lo que corresponde. Sin esta marca se confunde con un hueco.
-                "tercerizado": _get_tipo_proceso(nombre_proceso) == "ADMIN",
+                "tercerizado": _get_tipo_proceso(nombre_proceso) == "ADMIN" or bool(de_proveedor),
+                **de_proveedor,
             })
 
             # Operarios adicionales del proceso (slots extra). Una fila por cada operario
@@ -1949,7 +2188,8 @@ def _ventana_prohibida_para(cal, v: "Ventana") -> bool:
 
 
 def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas, presente_vars=None,
-                               operario_vars=None, calendarios=None):
+                               operario_vars=None, calendarios=None, fin_vars=None,
+                               demoras_modelo=None, vueltas_virtuales=None):
     """
     Obliga a que cada proceso:
     - empiece dentro de una ventana laboral
@@ -1962,14 +2202,34 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
     operario no puede quedar asignado a un proceso que caiga ahí. Solo se generan
     restricciones para quienes tienen un horario distinto del general —hoy es uno
     solo— así que el modelo casi no crece.
+
+    Con `demoras_modelo` ({clave: días}, ver `tabla_de_vuelta`): un paso que hace un
+    proveedor SALE en la ventana donde arranca y su fin es el minuto en que vuelve. Si
+    vuelve después del último día del plan, el fin queda al final de todo y lo que sigue
+    de la OT no entra.
+
+    Con `vueltas_virtuales` (un dict que se llena acá): {clave: (vuelve, afuera, tope)}
+    por cada paso de proveedor. `vuelve` es el minuto en que vuelve aunque caiga después
+    del plan (`_vueltas_extendidas`) y `afuera` dice si cae después: con eso la función
+    objetivo cobra lo que la OT se va a atrasar cuando el plan ya no lo ve.
     """
     calendarios = calendarios or {}
+    demoras_modelo = demoras_modelo or {}
+    vueltas = {dias: tabla_de_vuelta(ventanas, dias) for dias in set(demoras_modelo.values())}
+    extendidas = ({dias: _vueltas_extendidas(ventanas, dias) for dias in vueltas}
+                  if vueltas_virtuales is not None else {})
 
     for (orden_id, proc_id, secuencia, *_resto) in procesos_norm:
         key = (orden_id, secuencia)
         start = inicio_vars[key]
         dur = dur_map[key]
         op_var = (operario_vars or {}).get(key)
+        vuelta = vueltas.get(demoras_modelo[key]) if key in demoras_modelo else None
+        extendida = extendidas.get(demoras_modelo[key]) if key in demoras_modelo else None
+        vuelve_var, tope_vuelve, sale_y_vuelve_despues = None, 0, []
+        if extendida and any(m is not None for m in extendida):
+            tope_vuelve = max(m for m in extendida if m is not None)
+            vuelve_var = model.NewIntVar(0, tope_vuelve, f"vuelve_{orden_id}_{secuencia}")
 
         # Un booleano por ventana donde el proceso podría caber
         en_ventana = []
@@ -1991,11 +2251,26 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
             model.Add(start < v_fin).OnlyEnforceIf(b)
             en_ventana.append(b)
 
+            # Sale en esta ventana: vuelve cuando dice la tabla del proveedor.
+            if vuelta is not None and fin_vars is not None:
+                minuto = vuelta[idx]
+                model.Add(fin_vars[key] == (minuto if minuto is not None else H)).OnlyEnforceIf(b)
+                if vuelve_var is not None and extendida[idx] is not None:
+                    model.Add(vuelve_var == extendida[idx]).OnlyEnforceIf(b)
+                    if minuto is None:
+                        sale_y_vuelve_despues.append(b)
+
             # Nadie que no trabaje en ese horario puede quedarse con este proceso.
             if op_var is not None:
                 for op_id, cal in calendarios.items():
                     if _ventana_prohibida_para(cal, v):
                         model.Add(op_var != op_id).OnlyEnforceIf(b)
+
+        if vuelve_var is not None:
+            # A lo sumo una ventana está prendida: la suma dice si vuelve después del plan.
+            afuera = model.NewBoolVar(f"vuelve_despues_{orden_id}_{secuencia}")
+            model.Add(afuera == sum(sale_y_vuelve_despues))
+            vueltas_virtuales[key] = (vuelve_var, afuera, tope_vuelve)
 
         if presente_vars is not None:
             presente = presente_vars[key]
@@ -2236,7 +2511,7 @@ def reparto_rapido(procesos, operarios, maquinarias, fecha_desde=None, nativas_o
                    cant_op_map=None, preseleccion_maq=None, op_planos=None,
                    ots_con_plano=None, skills_manuales=None, calendarios=None,
                    blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None,
-                   inicio_base: datetime | None = None) -> dict | None:
+                   inicio_base: datetime | None = None, demoras=None) -> dict | None:
     """La cuenta rápida del Paso 1 (EstimacionPlan.estimar_plan) con el detalle del reparto.
 
     Usa la MISMA preparación que el solver y arma un reparto de verdad —respeta el orden
@@ -2253,7 +2528,8 @@ def reparto_rapido(procesos, operarios, maquinarias, fecha_desde=None, nativas_o
         return estimar_plan(
             procesos, operarios, maquinarias, fecha_desde, None, nativas_off, cant_op_map,
             preseleccion_maq, op_planos, ots_con_plano, skills_manuales, calendarios,
-            blocked_dates, preseleccion_op, maquinas_por_proceso, inicio_base, detalle=True)
+            blocked_dates, preseleccion_op, maquinas_por_proceso, inicio_base, detalle=True,
+            demoras=demoras)
     except Exception as e:   # la estimación es una ayuda: sin ella, el horizonte de siempre
         logger.warning(f"PLANIFICADOR: no se pudo hacer el reparto rápido ({e}); va el peor caso.")
         return None
@@ -2430,10 +2706,233 @@ def _completar_semilla(model, max_seg: float = 15.0) -> bool:
     return True
 
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None, cant_ordenes: int | None = None, inicio_base: datetime | None = None):
+# ------------------------------------------------------------
+# Con los horarios ya armados: cada uno en lo suyo
+# ------------------------------------------------------------
+#
+# Reunión con Lucas del 17/10/2026, mirando el plan del lunes 19: «el fresador es
+# Alejandro, Gustavo es tornero», y el plan tenía a Alejandro torneando y a Gustavo en la
+# fresadora a la misma hora. Lo que pidió: «después de las fechas, que los que tienen
+# como habilidad principal el fresado o el torneado se lleven la mayor cantidad de horas
+# en lo suyo».
+#
+# El solver ya prefiere al de SKILL 1, pero poco a propósito (PENAL_SKILL2 = 2.000, menos
+# que un minuto de una OT abierta): que pese más empeoraba todo el plan (ver
+# planificador-ot-de-corrido, 29/9). Y como el peso es por PASO, un fresado de tres horas
+# hecho por el de SKILL 2 costaba lo mismo que uno de diez minutos.
+#
+# Esto va DESPUÉS, con el plan ya resuelto y SIN TOCAR NINGÚN HORARIO NI NINGUNA MÁQUINA:
+# sólo cambia QUIÉN hace cada trabajo entre los que pueden hacerlo en ese mismo horario.
+# Así las fechas son exactamente las del solver —«primero las fechas»— y lo que se ordena
+# son las personas, minuto a minuto: un trabajo de 180 minutos hecho por el que no es de
+# SKILL 1 pesa 180 veces lo que pesa uno de un minuto. Es un problema chico (repartir
+# trabajos con horario fijo) y lo resuelve en segundos.
+#
+# Se respetan las mismas reglas del plan: quién puede hacer cada proceso y en qué máquina
+# (`_pares_permitidos`), la persona elegida a mano en la OT, el horario de cada uno, que la
+# preparación y su trabajo los hace la misma persona, las partes de un trabajo largo
+# también, y que nadie hace dos cosas a la vez. Lo que va de a dos personas, lo que no
+# tiene persona y lo que hace un proveedor quedan como están.
+REPARTO_POR_ESPECIALIDAD = True
+# Segundos para el reparto (de sobra: con las 48 OT del piloto termina en ~1 s).
+REPARTO_ESPECIALIDAD_SEG = 10
+
+
+def _reasignar_por_especialidad(solver, procesos_norm, partes, inicio_vars, fin_vars,
+                                operario_vars, maq_vars, presente_vars, op_extra_vars,
+                                op_domain_vals, pares, calendarios, ventanas, op_to_rangos,
+                                rangos_basicos, penal_overqual, DUMMY_OP_ID,
+                                max_seg: float = REPARTO_ESPECIALIDAD_SEG) -> dict:
+    """{clave del modelo: operario} con el reparto por especialidad (ver arriba).
+
+    Vacío si no hay nada que mejorar o si algo no cierra: el plan del solver queda tal
+    cual. Nunca cambia un horario, una máquina ni la presencia de un paso.
+    """
+    if not REPARTO_POR_ESPECIALIDAD:
+        return {}
+    try:
+        por_clave = {(p[0], p[2]): p for p in procesos_norm}
+        valor = lambda v: solver.Value(v)  # noqa: E731
+        inicio = {k: valor(inicio_vars[k]) for k in por_clave}
+        fin = {k: valor(fin_vars[k]) for k in por_clave}
+        presente = {k: valor(presente_vars[k]) == 1 for k in por_clave}
+        op_actual = {k: valor(operario_vars[k]) for k in por_clave}
+        maq_actual = {k: valor(maq_vars[k]) for k in por_clave}
+
+        # ---- Qué va atado a la misma persona ----
+        padre = {k: k for k in por_clave}
+
+        def raiz(k):
+            while padre[k] != k:
+                padre[k] = padre[padre[k]]
+                k = padre[k]
+            return k
+
+        def unir(a, b):
+            ra, rb = raiz(a), raiz(b)
+            if ra != rb:
+                padre[rb] = ra
+
+        for info in (partes or {}).values():
+            claves = [k for k in info["claves"] if k in padre]
+            for k in claves[1:]:
+                unir(claves[0], k)
+        for claves_setup, claves_prod in _pares_setup_produccion(procesos_norm, partes):
+            a, s = claves_setup[-1], claves_prod[0]
+            # La misma excepción que _agregar_coordinacion_maq_setup: si en la OT se eligió
+            # a alguien a mano para uno de los dos, no se atan.
+            if any(len(op_domain_vals.get(k, ())) == 1 and op_domain_vals[k][0] != DUMMY_OP_ID
+                   for k in (a, s)):
+                continue
+            unir(a, s)
+
+        grupos: dict = {}
+        for k in por_clave:
+            grupos.setdefault(raiz(k), []).append(k)
+
+        # ---- Qué se puede mover y qué queda fijo ----
+        ventana_de = {}
+        for k in por_clave:
+            for idx, v in enumerate(ventanas):
+                if v.ini <= inicio[k] < v.fin:
+                    ventana_de[k] = idx
+                    break
+
+        def puede(o, k) -> bool:
+            if o not in (op_domain_vals.get(k) or ()):
+                return False
+            if [o, maq_actual[k]] not in pares.get(k, ()):
+                return False
+            cal = (calendarios or {}).get(o)
+            idx = ventana_de.get(k)
+            if cal is not None and idx is not None and _ventana_prohibida_para(cal, ventanas[idx]):
+                return False
+            return True
+
+        movibles = {}   # raíz -> (claves, candidatos, actual)
+        fijos = []      # (operario, inicio, fin): lo que no se mueve y ocupa a alguien
+        for g, claves in grupos.items():
+            actuales = {op_actual[k] for k in claves}
+            se_mueve = (
+                all(presente[k] for k in claves)
+                and len(actuales) == 1 and DUMMY_OP_ID not in actuales
+                and not any((op_extra_vars or {}).get(k) for k in claves)
+            )
+            if se_mueve:
+                actual = next(iter(actuales))
+                candidatos = [o for o in sorted({o for k in claves for o in (op_domain_vals.get(k) or ())})
+                              if o != DUMMY_OP_ID and all(puede(o, k) for k in claves)]
+                if actual in candidatos and len(candidatos) > 1:
+                    movibles[g] = (claves, candidatos, actual)
+                    continue
+            # Queda como está: si tiene gente, esa gente está ocupada en ese horario.
+            for k in claves:
+                if not presente[k]:
+                    continue
+                if op_actual[k] != DUMMY_OP_ID:
+                    fijos.append((op_actual[k], inicio[k], fin[k]))
+                for ev in (op_extra_vars or {}).get(k, []):
+                    o = valor(ev)
+                    if o != DUMMY_OP_ID:
+                        fijos.append((o, inicio[k], fin[k]))
+        if not movibles:
+            return {}
+
+        # ---- Cuánto cuesta cada trabajo con cada persona, por minuto ----
+        # La misma escala que la preferencia del solver (`_penal_prioridad` en
+        # _agregar_funcion_objetivo): SKILL 1 < SKILL 2 < sabe por el rango, y la posición
+        # en la lista desempata. Acá se multiplica por los minutos.
+        def penal(entrada) -> int:
+            if not entrada:
+                return 4_000 + 1_500
+            if isinstance(entrada, int):
+                entrada = (entrada, None)
+            nivel, orden = entrada
+            base = 0 if nivel == 1 else 2_000 if nivel == 2 else 4_000
+            return base + (1_500 if orden is None else min(orden * 30, 1_500))
+
+        def costo(o, claves) -> int:
+            total = 0
+            for k in claves:
+                p = por_clave[k]
+                minutos = max(1, fin[k] - inicio[k])
+                c = penal((p[10] or {}).get(o))
+                if p[6] and any(r in rangos_basicos for r in p[6]):
+                    if not ((op_to_rangos or {}).get(o, set()) & rangos_basicos):
+                        c += penal_overqual
+                total += minutos * c
+            return total
+
+        m = cp_model.CpModel()
+        elegir = {}
+        intervalos: dict = {}
+        objetivo = []
+        antes = 0
+        for g, (claves, candidatos, actual) in movibles.items():
+            bools = []
+            for o in candidatos:
+                b = m.NewBoolVar(f"r_{g[0]}_{g[1]}_{o}")
+                elegir[(g, o)] = b
+                bools.append(b)
+                c = costo(o, claves)
+                # A igual costo, que quede el que eligió el solver.
+                objetivo.append(b * (c + (0 if o == actual else 1)))
+                if o == actual:
+                    antes += c
+                    m.AddHint(b, 1)
+                else:
+                    m.AddHint(b, 0)
+                for k in claves:
+                    intervalos.setdefault(o, []).append(m.NewOptionalFixedSizeIntervalVar(
+                        inicio[k], max(1, fin[k] - inicio[k]), b, f"ri_{k[0]}_{k[1]}_{o}"))
+            m.AddExactlyOne(bools)
+        for o, ini, fi in fijos:
+            intervalos.setdefault(o, []).append(
+                m.NewFixedSizeIntervalVar(ini, max(1, fi - ini), f"rf_{o}_{ini}"))
+        for o, ivs in intervalos.items():
+            if len(ivs) > 1:
+                m.AddNoOverlap(ivs)
+        m.Minimize(sum(objetivo))
+
+        s = cp_model.CpSolver()
+        s.parameters.max_time_in_seconds = max_seg
+        s.parameters.num_search_workers = int(os.getenv("SOLVER_WORKERS", "0")) or max(2, min(8, os.cpu_count() or 2))
+        estado = s.Solve(m)
+        if estado not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            logger.warning("PLANIFICADOR: el reparto por especialidad no cerró; queda el del solver.")
+            return {}
+
+        cambios = {}
+        minutos_cambiados = 0
+        despues = 0
+        for g, (claves, candidatos, actual) in movibles.items():
+            elegido = next(o for o in candidatos if s.Value(elegir[(g, o)]))
+            despues += costo(elegido, claves)
+            if elegido != actual:
+                for k in claves:
+                    cambios[k] = elegido
+                    minutos_cambiados += fin[k] - inicio[k]
+        if despues >= antes:
+            return {}
+        logger.info(
+            f"PLANIFICADOR: reparto por especialidad: {len(cambios)} tramo(s) cambian de "
+            f"persona ({minutos_cambiados} min), mismos horarios y máquinas; costo de "
+            f"preferencia {antes} → {despues}")
+        return cambios
+    except Exception as e:   # es una mejora: si algo falla, queda el plan del solver
+        logger.warning(f"PLANIFICADOR: no se pudo hacer el reparto por especialidad ({e})")
+        return {}
+
+
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None, cant_ordenes: int | None = None, inicio_base: datetime | None = None, demoras=None):
     # Los días bloqueados los trae el servicio desde la base (ver DiaBloqueadoRepository).
     blocked_dates = list(blocked_dates or ())
     logger.info(f"PLANIFICADOR: Fechas bloqueadas cargadas: {blocked_dates}")
+    # Los pasos que hace un proveedor y tardan N días ({(orden_id, secuencia): días}, ver
+    # `tabla_de_vuelta`). En el modelo duran un minuto: lo que pesa es cuándo vuelven.
+    demoras = {k: int(v) for k, v in (demoras or {}).items() if v is not None and int(v) >= 1}
+    procesos_entrada = procesos
+    procesos = _procesos_con_demora_a_un_minuto(procesos, demoras)
 
     # El arranque puede venir de afuera: quien llama lo calcula UNA vez y lo usa
     # también para responder y para guardar. Si cada uno lo calcula por su cuenta,
@@ -2473,17 +2972,21 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     # Con fecha tope el reparto también se hace: no decide el calendario, pero lo que
     # entra en el rango sirve de punto de partida (ver _sembrar_reparto).
     corto = None
+    # El reparto rápido recibe la entrada ORIGINAL y las demoras: hace su propia
+    # preparación, igual que acá abajo.
     reparto = reparto_rapido(
-        procesos, operarios, maquinarias, fecha_desde, nativas_off, cant_op_map,
+        procesos_entrada, operarios, maquinarias, fecha_desde, nativas_off, cant_op_map,
         preseleccion_maq, op_planos, ots_con_plano, skills_manuales, calendarios,
-        blocked_dates, preseleccion_op, maquinas_por_proceso, inicio_base)
+        blocked_dates, preseleccion_op, maquinas_por_proceso, inicio_base, demoras=demoras)
     if fecha_hasta is None:
         corto = horizonte_sin_tope(reparto)
 
     # ---- Normalizar procesos ----
     # H_peor es el horizonte de antes: todo el trabajo en fila más una jornada. Queda de
-    # respaldo (sin estimación) y de techo.
+    # respaldo (sin estimación) y de techo. Lo que se espera a un proveedor también es
+    # fila: cada día de calendario cuenta como una jornada entera, que sobra.
     procesos_norm, H_peor = _normalizar_procesos(procesos, prioridad_pesos)
+    H_peor += sum(demoras.values()) * MIN_LABORAL_DIA
 
     # ---- Partir los que no entran en un tramo laboral + SETUP hereda de PRODUCCIÓN ----
     # En una función aparte porque la estimación de días (EstimacionPlan.py) tiene que
@@ -2493,6 +2996,10 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     )
     # Qué trabajo prepara cada preparación: hereda también quién lo tiene cargado a mano.
     setup_de = _setup_hereda_de(procesos_norm, partes)
+    demoras_modelo = _demoras_al_modelo(demoras, partes)
+    if demoras_modelo:
+        logger.info(f"PLANIFICADOR: {len(demoras_modelo)} paso(s) esperan a un proveedor: "
+                    f"{sorted(set(demoras_modelo.values()))} días")
 
     # ¿Trabaja alguien los sábados? Si no, el día no aporta capacidad y hay que contar
     # más semanas para el mismo trabajo; si lo dejáramos como antes, el horizonte se
@@ -2628,6 +3135,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
             preseleccion_op,
             maquinas_por_proceso,
             setup_de=setup_de,
+            demoras_modelo=demoras_modelo,
         )
 
         # El reparto rápido como punto de partida: el solver arranca con todo adentro.
@@ -2676,6 +3184,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         )
 
         # ---- Restricciones de ventanas horarias ----
+        vueltas_virtuales = {}
         _agregar_ventanas_horarias(
             model,
             procesos_norm,
@@ -2685,6 +3194,9 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
             presente_vars=presente_vars,
             operario_vars=operario_vars,
             calendarios=calendarios,
+            fin_vars=fin_vars,
+            demoras_modelo=demoras_modelo,
+            vueltas_virtuales=vueltas_virtuales,
         )
 
         # ---- Función objetivo ----
@@ -2709,6 +3221,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
             op_extra_vars=op_extra_vars,
             op_to_rangos=op_to_rangos,
             ventanas=ventanas,
+            demoras_modelo=demoras_modelo,
+            vueltas_virtuales=vueltas_virtuales,
         )
 
 
@@ -2780,6 +3294,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
                 op_extra_vars=op_extra_vars,
                 partes=partes,
                 blocked_dates=blocked_dates,
+                demoras_modelo=demoras_modelo,
+                incluir_sabado=hay_sabado,
             )
         except PlanificacionException:
             if ultimo_intento:
@@ -2806,6 +3322,23 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         falto_lugar = bool(afuera) or (
             sin_recurso_reparto is not None and sin_recurso > sin_recurso_reparto)
         if not falto_lugar or ultimo_intento:
+            # Con los horarios ya fijos, cada uno en lo suyo (reunión del 17/10/2026, ver
+            # _reasignar_por_especialidad). No cambia fechas ni máquinas: sólo personas.
+            pares_ok = _pares_permitidos(
+                procesos_norm, op_domain_vals, maq_domain_vals, op_to_rango, maq_to_rangos,
+                maq_to_familia, DUMMY_OP_ID, DUMMY_MAQ_ID, op_to_rangos, skills_manuales,
+                setup_de)
+            op_override = _reasignar_por_especialidad(
+                solver, procesos_norm, partes, inicio_vars, fin_vars, operario_vars, maq_vars,
+                presente_vars, op_extra_vars, op_domain_vals, pares_ok, calendarios, ventanas,
+                op_to_rangos, RANGOS_BÁSICOS, PENAL_OVERQUAL, DUMMY_OP_ID)
+            if op_override:
+                resultados = _extraer_resultados(
+                    solver, status, procesos_norm, inicio_vars, fin_vars, operario_vars,
+                    maq_vars, op_to_rango, DUMMY_OP_ID, DUMMY_MAQ_ID, ahora_ref,
+                    presente_vars=presente_vars, op_extra_vars=op_extra_vars, partes=partes,
+                    blocked_dates=blocked_dates, demoras_modelo=demoras_modelo,
+                    incluir_sabado=hay_sabado, op_override=op_override)
             break
         logger.warning(
             f"PLANIFICADOR: con el calendario «{origen}» no entró todo ({len(afuera)} pasos "
@@ -3297,6 +3830,69 @@ def _marcar_lineas(resultados, linea_por_clave, lote_por_clave=None, a_mano=None
     return resultados
 
 
+async def _proveedores_de(db, ordenes) -> dict:
+    """{id: Proveedor} de los proveedores que nombran los pasos de estas OT. Si la tabla
+    todavía no tiene la columna de los días (backend nuevo sobre una base sin migrar), el
+    plan sale como antes: sin proveedores."""
+    ids = {getattr(rel, "id_proveedor", None) for o in ordenes for rel in (o.procesos or [])}
+    ids.discard(None)
+    if not ids:
+        return {}
+    from sqlalchemy import select
+    from backend.domain.Proveedor import Proveedor
+    try:
+        async with db.begin_nested():
+            filas = (await db.execute(select(Proveedor).where(Proveedor.id.in_(ids)))).scalars().all()
+    except Exception as e:
+        logger.warning(f"PLANIFICADOR: no se pudieron leer los proveedores de los tercerizados ({e})")
+        return {}
+    return {p.id: p for p in filas}
+
+
+def _datos_del_proveedor(rel, proveedores: dict) -> dict:
+    """Lo que la fila de un paso tercerizado dice de su proveedor: quién, cuántos días (la
+    regla de OrdenTrabajoService.demora_efectiva) y de dónde salen los días."""
+    from backend.application.OrdenTrabajoService import demora_efectiva
+    prov = proveedores.get(getattr(rel, "id_proveedor", None))
+    del_paso = getattr(rel, "demora_dias", None)
+    del_proveedor = getattr(prov, "demora_dias", None) if prov else None
+    return {
+        "id_proveedor": prov.id if prov else None,
+        # La razón social, como en el buscador de proveedores (el nombre de fantasía a
+        # veces es una nota: «BURGON -RUBBER KING NUEVA FIRMA 30-9-21»).
+        "proveedor_nombre": (prov.razon_social or prov.fantasia) if prov else None,
+        "demora_dias": demora_efectiva(del_paso, del_proveedor),
+        "demora_del_paso": del_paso,
+        "demora_del_proveedor": del_proveedor,
+    }
+
+
+def _marcar_tercerizados(resultados, tercerizados: dict, minutos_de_la_ot: dict):
+    """Le pega a cada fila tercerizada su proveedor y sus días.
+
+    La marca `tercerizado` del solver sale del NOMBRE del proceso; un paso con el rango
+    TERCERIZADO y otro nombre (CILINDRADO DE CHAPA, REPUJADO EN TORNO) quedaba sin ella y
+    la pantalla lo completaba por su cuenta (PanelCargaRecursoHumano). Acá queda para todos.
+
+    Los pasos que esperan al proveedor duran un minuto en el modelo: la fila vuelve a
+    llevar los minutos de la OT, que son los que muestra la pantalla.
+    """
+    for r in resultados or []:
+        clave = (r.get("orden_id"), r.get("secuencia"))
+        datos = tercerizados.get(clave)
+        if datos is None:
+            continue
+        r["tercerizado"] = True
+        demora_del_modelo = r.get("demora_dias")
+        r.update(datos)
+        if demora_del_modelo is not None:
+            r["duracion_min"] = minutos_de_la_ot.get(clave, r.get("duracion_min"))
+        else:
+            # El paso no esperó a nadie (no tiene días): que la fila no diga que vuelve.
+            r.pop("vuelve_el", None)
+    return resultados
+
+
 async def planificar(
     repo_orden: OrdenTrabajoRepository,
     repo_operario: OperarioRepository,
@@ -3469,6 +4065,10 @@ async def planificar(
 
     operarios = await repo_operario.find_with_rangos()
 
+    # 🔹 Los proveedores de los pasos tercerizados, con sus días (reunión con Lucas del
+    #    17/10/2026). Sólo los que nombran estas OT: son pocos y se leen de una vez.
+    proveedores = await _proveedores_de(db, ordenes)
+
     # 🔹 RF-03: lo pausado no se programa. Se lee en un savepoint: si la tabla de pausas
     #    no está (migración sin correr), el plan sale como antes, con todo adentro.
     pausas_ot, pausas_paso = _indexar_pausas(
@@ -3520,6 +4120,10 @@ async def planificar(
     # ajustados: para todos los demás, lo que entra al solver ya es el dato de Recursos,
     # y meterlos acá cambiaría el botón permanente de avisos que hoy están bien.
     rangos_reales_por_proceso = {}
+    # Los pasos tercerizados: (orden_id, secuencia) -> lo que la fila del plan dice del
+    # proveedor. Y los que esperan a su proveedor: (orden_id, secuencia) -> días.
+    tercerizados = {}
+    demoras = {}
 
     # -----------------------
     # Procesar cada orden
@@ -3615,6 +4219,15 @@ async def planificar(
                 nombre_proceso,
                 es_tercerizado=bool(ids_rango_tercerizado & set(rangos_validos)),
             ) and not getattr(rel, "no_lleva_maquina", 0)
+
+            # Lo hace afuera un proveedor: por el rango TERCERIZADO o EXTERNO, o porque
+            # el nombre lo dice. Si tiene días (los del paso o los del proveedor), el paso
+            # que sigue espera a que vuelva (ver `tabla_de_vuelta`).
+            if (ids_rango_tercerizado & set(rangos_validos)) or _get_tipo_proceso(nombre_proceso) == "ADMIN":
+                tercerizados[(orden.id, secuencia)] = _datos_del_proveedor(rel, proveedores)
+                dias = tercerizados[(orden.id, secuencia)]["demora_dias"]
+                if dias is not None and dias >= 1:
+                    demoras[(orden.id, secuencia)] = dias
             #esto funciona
             familia_req = familia_requerida_from_proceso(nombre_proceso) if usa_maquina else ""
 
@@ -3709,6 +4322,7 @@ async def planificar(
             calendarios, blocked_dates, preseleccion_op, maquinas_por_proceso, arranque,
             nombres_operario=nombres,
             numero_ot={o.id: (o.id_otvieja or o.id) for o in ordenes},
+            demoras=demoras,
         )
         con_pasos = {p[0] for p in procesos_para_solver}
         estimacion["ots_sin_procesos"] = sum(1 for o in ordenes if o.id not in con_pasos)
@@ -3738,9 +4352,12 @@ async def planificar(
         # El arranque del plan, calculado una sola vez acá arriba. Es el mismo que
         # viaja a la pantalla y el que se guarda al confirmar.
         arranque,
+        demoras,
     )
 
     _marcar_lineas(resultados, linea_por_clave, lote_por_clave, a_mano=a_mano_por_clave)
+    _marcar_tercerizados(resultados, tercerizados,
+                         {(p[0], p[2]): p[5] for p in procesos_para_solver})
     planificados, excedentes = _split_resultados(resultados)
 
     # Diagnóstico de lo que traba el plan. El import va acá adentro porque el módulo
