@@ -47,6 +47,66 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "cada-uno-en-lo-suyo",
+        fecha: "2026-10-19",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "El plan pone a cada uno en lo suyo: el fresador en la fresadora y el tornero en el torno",
+        detalle:
+            "En el plan del lunes 19/10 Alejandro, que es fresador, estaba torneando mientras Gustavo, que es tornero, estaba en la fresadora. El planificador prefería al de SKILL 1, pero poco, y por paso: un fresado de tres horas pesaba lo mismo que uno de diez minutos. Ahora, con los horarios ya armados, el plan revisa quién hace cada trabajo y lo pasa al de SKILL 1 cuando está libre a esa hora (o cuando puede cambiar un trabajo con otro), contando las horas. No mueve ninguna fecha ni ninguna máquina: primero las fechas, después cada uno en lo suyo. La persona elegida a mano en la OT se respeta siempre.",
+        href: "/operaciones",
+    },
+    {
+        id: "tercerizado-con-proveedor",
+        fecha: "2026-10-19",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Un paso tercerizado dice qué proveedor lo hace, y el plan espera los días que tarda en volver",
+        detalle:
+            "En la vista previa un paso tercerizado decía «Tercerizado» como recurso humano y como recurso maquinaria, y el plan seguía con el paso siguiente al otro día, como si el trabajo volviera en el momento. Ahora en la fila del paso elegís el proveedor (por ejemplo, el que vulcaniza el frente de carro) y cuántos días de calendario tarda: si sale el 19 y tarda 10 días, vuelve el 29, y lo que sigue de la OT arranca ese día. El proveedor queda guardado en la OT y en las otras OT abiertas del mismo producto, y los días se recuerdan para ese proveedor. Después de elegirlo, tocá «Recalcular» para que el plan lo espere. Si vuelve después del último día del plan, lo que sigue queda en «Fuera del plan» con el motivo (con «Ampliar 2 semanas» entra), y la pieza sale a tiempo para volver y terminarse antes de la fecha prometida.",
+        href: "/operaciones",
+    },
+    {
+        id: "plano-en-la-vista-previa",
+        fecha: "2026-10-19",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "En la vista previa del plan ves el plano de cada OT sin salir de la pantalla",
+        detalle:
+            "Revisando el plan no había forma de abrir el plano: había que ir a buscarlo a la OT. Ahora la vista previa tiene la columna «Plano»: dice si hay plano o fotos del producto y, al tocarla, se abre el visor ahí mismo. La columna se puede esconder desde «Columnas».",
+        href: "/operaciones",
+    },
+    {
+        id: "exportar-habilidades",
+        fecha: "2026-10-19",
+        tipo: "nuevo",
+        seccion: "Recursos",
+        titulo: "«Exportar habilidades»: lo que sabe hacer cada persona, de todo el equipo, en un solo archivo",
+        detalle:
+            "Para comparar el plan con las habilidades había que abrir la ficha de cada persona. Ahora en Recursos › Recurso humano está el botón «Exportar habilidades»: PDF, Excel o CSV con una tabla por persona (SKILL 1, SKILL 2, lo que sabe sin marcar y lo apagado), otra por proceso (quién es SKILL 1 y SKILL 2 de cada uno, en orden) y las máquinas con los rangos que las usan. Es lo mismo que mira el planificador.",
+        href: "/recursos",
+    },
+    {
+        id: "exportar-para-claude",
+        fecha: "2026-10-19",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Exportar para analizar con Claude: el plan, las OT y las habilidades del equipo, listos para pegar",
+        detalle:
+            "En el menú «Exportar» de la vista previa está «Plan + habilidades para Claude»: un archivo de texto con el pedido ya escrito, cómo decide el planificador, el plan OT por OT, lo que hace cada persona día por día y lo que sabe hacer cada uno, para preguntarle por qué el plan eligió a alguien y qué cambiaría. En el Paso 1, el mismo menú tiene «Elegir las OT con Claude»: las OT de la lista y las fechas del plan, para que proponga cuáles planificar en la semana y devuelva los números listos para «Pegar lista».",
+        href: "/operaciones",
+    },
+    {
+        id: "pegar-lista-de-ot",
+        fecha: "2026-10-19",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "«Pegar lista»: pegás los números de OT y se tildan todos de una",
+        detalle:
+            "Para planificar una lista de OT había que buscarlas y tildarlas de a una. Ahora, en el Paso 1 (al lado de «Ver solo las tildadas») y en «Agregar OTs» de la vista previa, está «Pegar lista»: pegás los números separados por coma, espacio o renglón —o la respuesta entera de Claude— y se tildan todas. Te dice cuáles no están para planificar.",
+        href: "/operaciones",
+    },
+    {
         id: "feriados-solos",
         fecha: "2026-10-08",
         tipo: "nuevo",
