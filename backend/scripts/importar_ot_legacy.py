@@ -154,18 +154,33 @@ def clave_proceso(nombre) -> str:
 # ---------------------------------------------------------------------------
 # Lógica pura (sin base): es lo que prueban los tests
 # ---------------------------------------------------------------------------
-def lista_del_viejo(filas):
+def lista_del_viejo(filas, repetidas=None):
     """Filas de ZoTProcesos de UNA OT -> [(paso, clave, minutos)], paso = 1..N.
 
     Una fila sin proceso (id 0 o sin descripción en zProcesos) no es un paso: se saltea.
     La clave sale con el nombre de SPMM (ver clave_proceso).
+
+    El MISMO proceso con los MISMOS minutos dos veces en el MISMO paso del viejo (mismo
+    `orden`) es la misma línea cargada dos veces, no dos trabajos: va una sola vez. El
+    20/10/2026 la 15935 traía así sus pasos 1 a 7 (el torno de 1200 min, dos veces), y
+    traerla tal cual era el error de los procesos multiplicados (ver la cabecera). Un
+    proceso repetido en pasos DISTINTOS sí es dato del taller y va como está. Si se pasa
+    `repetidas`, se anota ahí (ot, paso del viejo, nombre) de cada línea que no se trajo.
     """
     salida = []
+    vistas = set()
     for f in sorted(filas, key=lambda x: (x["orden"] or 0, x["id"] or 0)):
         nombre = clave_proceso(f["nombre"])
         if not f["proceso"] or not nombre:
             continue
-        salida.append((len(salida) + 1, nombre, int(f["minutos"] or 0)))
+        minutos = int(f["minutos"] or 0)
+        clave = (f["orden"], f["proceso"], minutos)
+        if clave in vistas:
+            if repetidas is not None:
+                repetidas.append((f.get("ot"), f["orden"], (f["nombre"] or "").strip()))
+            continue
+        vistas.add(clave)
+        salida.append((len(salida) + 1, nombre, minutos))
     return salida
 
 
@@ -375,11 +390,16 @@ async def _leer_por_tandas(sql, ids, tanda=800):
     return filas
 
 
+# Las líneas del viejo cargadas dos veces en el mismo paso, que no se traen (ver
+# lista_del_viejo). Se dicen al final, con los avisos: hay que corregirlas en el viejo.
+REPETIDAS_EN_EL_VIEJO: list = []
+
+
 async def _listas_del_viejo(ids):
     por_ot = defaultdict(list)
     for f in await _leer_por_tandas(Q_LISTA, ids):
         por_ot[f["ot"]].append(f)
-    return {ot: lista_del_viejo(filas) for ot, filas in por_ot.items()}
+    return {ot: lista_del_viejo(filas, REPETIDAS_EN_EL_VIEJO) for ot, filas in por_ot.items()}
 
 
 async def _cabeceras_del_viejo(ids):
@@ -789,6 +809,12 @@ async def main():
                 print(f"   !! al revés, pendientes en el viejo y cerradas acá (NO se tocan; usar --igualar): {no_toca}")
         for a in sorted(set(avisos)):
             print(f"  ! {a}")
+        por_ot_rep = defaultdict(list)
+        for ot, paso, nombre in REPETIDAS_EN_EL_VIEJO:
+            por_ot_rep[ot].append(f"{paso} ({nombre})")
+        for ot, pasos in sorted(por_ot_rep.items()):
+            print(f"  ! OT {ot}: el viejo tiene cargados dos veces los pasos {', '.join(pasos)}: "
+                  "se traen una vez (corregirlo en el viejo)")
 
         if not APLICAR:
             print("\n(en seco — no se escribió nada; agregar --aplicar)")

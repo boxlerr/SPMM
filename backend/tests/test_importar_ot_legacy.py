@@ -39,7 +39,7 @@ def test_lista_del_viejo_ordena_renumera_y_saltea_lo_que_no_es_proceso():
         _z(3, 34, "EMBALADO", 10),
         _z(1, 36, "PROGRAMACION  TORNO CNC", 40),  # doble espacio: mismo proceso
         _z(2, 6, "TORNO CNC", 420, id_=20),
-        _z(2, 6, "TORNO CNC", 420, id_=21),        # mismo paso repetido: van los dos
+        _z(4, 6, "TORNO CNC", 420, id_=21),        # otro paso: es otro trabajo, van los dos
         _z(5, 0, None, 0),                          # fila vacía del viejo
     ]
     # «TORNO CNC» del viejo es TORNEADO CNC en SPMM desde la limpieza del catálogo del
@@ -47,9 +47,25 @@ def test_lista_del_viejo_ordena_renumera_y_saltea_lo_que_no_es_proceso():
     assert imp.lista_del_viejo(filas) == [
         (1, "PROGRAMACION TORNO CNC", 40),
         (2, "TORNEADO CNC", 420),
-        (3, "TORNEADO CNC", 420),
-        (4, "EMBALADO", 10),
+        (3, "EMBALADO", 10),
+        (4, "TORNEADO CNC", 420),
     ]
+
+
+def test_la_misma_linea_dos_veces_en_el_mismo_paso_va_una_vez():
+    """20/10/2026: la 15935 traía sus pasos 1 a 7 cargados dos veces en el viejo (mismo
+    paso, mismo proceso, mismos minutos), igual que la 15523 y la 15630. Traerlos tal cual
+    era volver a los procesos multiplicados: va una vez y queda dicho cuál se salteó."""
+    filas = [_z(1, 27, "DESARMADO", 120, id_=1), _z(1, 27, "DESARMADO", 120, id_=2),
+             _z(5, 5, "TORNO T2", 1200, id_=3), _z(5, 5, "TORNO T2", 1200, id_=4),
+             _z(8, 23, "ENSAMBLAJE", 150, id_=5)]
+    repetidas = []
+    lista = imp.lista_del_viejo(filas, repetidas)
+    assert [n for _, n, _ in lista] == ["DESARMADO", "TORNEADO", "ENSAMBLAJE"]
+    assert [m for _, _, m in lista] == [120, 1200, 150]
+    assert [paso for _, paso, _ in repetidas] == [1, 5]
+    # Con otros minutos en el mismo paso no es la misma línea: van las dos.
+    assert len(imp.lista_del_viejo([_z(2, 5, "TORNO T2", 60, id_=1), _z(2, 5, "TORNO T2", 90, id_=2)])) == 2
 
 
 # ---------------------------------------------------------------------------
