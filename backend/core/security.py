@@ -275,11 +275,28 @@ async def get_usuario_verificado(
     return {**current_user, "id_usuario": usuario.id_usuario, "rol": usuario.rol}
 
 
+# Dónde queda, en el UsuarioActual DEL PEDIDO, lo que ya se resolvió. Ver abajo.
+_PERMISOS_RESUELTOS = "_permisos_resueltos"
+
+
 async def resolver_permisos_actuales(usuario: UsuarioActual, sesiones) -> PermisosUsuario:
     """Los permisos de `usuario`. Al admin no le lee ninguna tabla de permisos (es
     admin en todo por regla). Al resto, las lee con una sesión propia y corta; si no se
-    pueden leer, 503: un permiso que no se pudo leer no abre nada."""
+    pueden leer, 503: un permiso que no se pudo leer no abre nada.
+
+    Una vez por pedido. `require_politica` la llama directo (no como dependencia), así
+    que en las rutas que además piden `get_permisos_actuales` —o en /notificaciones, que
+    la llama otra vez para esconder avisos— se leían las tablas de permisos DOS veces por
+    pedido (5 consultas cada vez, con su sesión). Lo resuelto se guarda en el
+    UsuarioActual, que FastAPI arma UNO por pedido (get_usuario_actual se cachea por
+    pedido): el próximo pedido trae otro y vuelve a leer la base, así que un permiso que
+    cambia sigue valiendo desde el pedido siguiente, como siempre.
+    """
     from backend.infrastructure.PermisosRepository import PermisosRepository
+
+    ya = usuario.__dict__.get(_PERMISOS_RESUELTOS)
+    if ya is not None:
+        return ya
 
     if usuario.es_admin:
         datos = DatosDePermisos(rol=usuario.rol)
@@ -290,7 +307,11 @@ async def resolver_permisos_actuales(usuario: UsuarioActual, sesiones) -> Permis
         except Exception as e:
             logger.error(f"Permisos: no se pudieron leer los de {usuario.username!r}: {e}")
             raise _no_se_pudo_verificar()
-    return permisos_de(datos, usuario.id_usuario, usuario.username)
+    permisos = permisos_de(datos, usuario.id_usuario, usuario.username)
+    # Es un dataclass congelado: el atributo va por fuera de los campos (no cambia ni la
+    # igualdad ni el hash) y muere con el pedido.
+    object.__setattr__(usuario, _PERMISOS_RESUELTOS, permisos)
+    return permisos
 
 
 async def get_permisos_actuales(

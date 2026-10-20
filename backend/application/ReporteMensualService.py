@@ -339,12 +339,15 @@ def _unidad(u) -> str:
 class ReporteMensualService:
     def __init__(self, db_session):
         self.db = db_session
-        self.tiempos = TiemposOperarioService(db_session)
         # El reporte de cada persona (RF-07) se pide DOS veces por persona: este mes y el
         # anterior. Lo pesado de cada pedido es juntar sus pasos de toda la historia (sus
         # elegidos y el plan entero de sus OT), que es lo mismo para los dos meses: se lee
         # una vez por persona y se reusa. La cuenta sigue siendo la de RF-07, sin tocarla.
         self.rendimiento = RendimientoOperarioService(db_session)
+        # UN solo servicio de tiempos para todo el reporte (el de las pausas y el de cada
+        # persona): así los feriados y las personas se leen una vez por pedido y no una
+        # vez por persona y por mes.
+        self.tiempos = self.rendimiento.tiempos
         leer_pasos = self.rendimiento.tiempos.pasos_atribuidos
         ya_leidos: dict[int, list[dict]] = {}
 

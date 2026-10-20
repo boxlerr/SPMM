@@ -11,6 +11,7 @@ import json
 from datetime import date, datetime
 
 from sqlalchemy import text
+from backend.infrastructure.ddl_una_vez import marcar_hecho, ya_hecho
 
 from backend.commons.loggers.logger import logger
 
@@ -66,7 +67,11 @@ class PlanificacionBorradorRepository:
 
     async def _ensure_tabla(self):
         """Self-healing idempotente, igual que planificacion_borrada: la app se
-        despliega a mano y no hay corrida automática de migraciones."""
+        despliega a mano y no hay corrida automática de migraciones.
+
+        Una vez por proceso, no en cada lectura: ver infrastructure/ddl_una_vez.py."""
+        if ya_hecho(self.db, "planificacion_borrador"):
+            return
         try:
             await self.db.execute(text("""
                 CREATE TABLE IF NOT EXISTS planificacion_borrador (
@@ -89,6 +94,7 @@ class PlanificacionBorradorRepository:
                     ON planificacion_borrador (actualizado_en DESC)
             """))
             await self.db.commit()
+            marcar_hecho(self.db, "planificacion_borrador")
         except Exception as e:
             await self.db.rollback()
             logger.warning(f"Repository - No se pudo asegurar planificacion_borrador: {e}")

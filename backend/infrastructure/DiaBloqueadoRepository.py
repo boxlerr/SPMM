@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import text
+from backend.infrastructure.ddl_una_vez import marcar_hecho, ya_hecho
 
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
@@ -31,6 +32,9 @@ class DiaBloqueadoRepository:
         self.db = db
 
     async def _ensure_tabla(self):
+        # Una vez por proceso, no en cada lectura: ver infrastructure/ddl_una_vez.py.
+        if ya_hecho(self.db, "dia_bloqueado"):
+            return
         try:
             await self.db.execute(text("""
                 CREATE TABLE IF NOT EXISTS dia_bloqueado (
@@ -39,18 +43,24 @@ class DiaBloqueadoRepository:
                 )
             """))
             await self.db.commit()
+            marcar_hecho(self.db, "dia_bloqueado")
         except Exception as e:
             await self.db.rollback()
             logger.warning(f"Repository - No se pudo asegurar dia_bloqueado: {e}")
 
     async def _migrar_desde_archivo(self):
         """Importa una única vez lo que haya quedado en el config.json."""
+        # Ya se miró en este proceso: el archivo no cambia con la app andando.
+        if ya_hecho(self.db, "dia_bloqueado_archivo"):
+            return
         try:
             ya_hay = await self.db.scalar(text("SELECT COUNT(*) FROM dia_bloqueado"))
             if ya_hay:
+                marcar_hecho(self.db, "dia_bloqueado_archivo")
                 return
             del_archivo = ConfigRepository().get_blocked_dates()
             if not del_archivo:
+                marcar_hecho(self.db, "dia_bloqueado_archivo")
                 return
             for f in del_archivo:
                 await self.db.execute(
@@ -58,6 +68,7 @@ class DiaBloqueadoRepository:
                     {"f": date.fromisoformat(f[:10])},
                 )
             await self.db.commit()
+            marcar_hecho(self.db, "dia_bloqueado_archivo")
             logger.info(f"Repository - {len(del_archivo)} feriado(s) migrados del archivo a la base.")
         except Exception as e:
             await self.db.rollback()

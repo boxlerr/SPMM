@@ -41,6 +41,7 @@ async def db():
         yield s
     await engine.dispose()
     modulo._FALLO.clear()
+    modulo._SIN_PUBLICAR.clear()
 
 
 def fuente(*listas):
@@ -139,6 +140,22 @@ async def test_no_vuelve_a_pedir_un_anio_traido_hace_poco(db):
     await repo.asegurar_anios([2026])
     await repo.asegurar_anios([2026])
     assert leer.llamadas == [2026]
+
+
+async def test_un_anio_sin_publicar_no_se_pide_en_cada_pedido(db):
+    """El año que viene todavía no tiene feriados (pasa todo octubre): la fuente contesta
+    lista vacía, no queda ninguna fila, y antes cada GET /config/availability volvía a
+    salir a internet a preguntar. Ahora se pregunta de nuevo recién a la hora."""
+    leer = fuente(OCTUBRE)
+    repo = FeriadoRepository(db, leer)
+    await repo.asegurar_anios([2027])
+    await repo.asegurar_anios([2027])
+    await repo.asegurar_anios([2027])
+    assert leer.llamadas == [2027]
+    # Pasada la hora, se vuelve a preguntar (por si ya lo publicaron).
+    modulo._SIN_PUBLICAR[2027] -= modulo.REINTENTO_SEG + 1
+    await repo.asegurar_anios([2027])
+    assert leer.llamadas == [2027, 2027]
 
 
 async def test_sin_la_tabla_el_planificador_mira_solo_dia_bloqueado():

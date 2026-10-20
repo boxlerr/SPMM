@@ -50,6 +50,12 @@ _TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
 # año → time.monotonic() del último intento que falló. Por proceso, a propósito: no
 # vale la pena guardar en la base que un servidor de afuera no contestó.
 _FALLO: dict[int, float] = {}
+# año → time.monotonic() de la última vez que la fuente contestó que ese año todavía no
+# tiene feriados publicados (pasa con el año que viene hasta fin de año). Sin esto, como
+# no queda ninguna fila de ese año, CADA GET /config/availability o /config/feriados
+# volvía a salir a internet a preguntarlo (hasta 6 s, con la conexión a la base tomada).
+# Se vuelve a preguntar a la hora, como después de un fallo.
+_SIN_PUBLICAR: dict[int, float] = {}
 
 
 def _ahora_ar() -> datetime:
@@ -180,11 +186,18 @@ class FeriadoRepository:
                     fallo = _FALLO.get(anio)
                     if fallo is not None and time.monotonic() - fallo < REINTENTO_SEG:
                         continue
+                    vacio = _SIN_PUBLICAR.get(anio)
+                    if vacio is not None and time.monotonic() - vacio < REINTENTO_SEG:
+                        continue
                     ultima = await self._ultima_vez(anio)
                     if ultima is not None and _ahora_ar() - ultima < CADA_CUANTO:
                         continue
-                await self.traer_anio(anio)
+                traidos = await self.traer_anio(anio)
                 _FALLO.pop(anio, None)
+                if traidos:
+                    _SIN_PUBLICAR.pop(anio, None)
+                else:
+                    _SIN_PUBLICAR[anio] = time.monotonic()
             except Exception as e:
                 _FALLO[anio] = time.monotonic()
                 try:

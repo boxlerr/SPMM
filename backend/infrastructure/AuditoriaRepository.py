@@ -2,6 +2,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
+from backend.infrastructure.ddl_una_vez import marcar_hecho, ya_hecho
 
 from backend.commons.loggers.logger import logger
 
@@ -43,6 +44,10 @@ class AuditoriaRepository:
         self.db = db
 
     async def _ensure_tabla(self):
+        # Una vez por proceso, no en cada lectura: el ALTER de abajo pide un lock
+        # exclusivo de la tabla aunque las columnas ya estén. Ver ddl_una_vez.py.
+        if ya_hecho(self.db, "planificacion_intento"):
+            return
         try:
             await self.db.execute(text("""
                 CREATE TABLE IF NOT EXISTS planificacion_intento (
@@ -76,6 +81,7 @@ class AuditoriaRepository:
                 "CREATE INDEX IF NOT EXISTS ix_planificacion_intento_fecha "
                 "ON planificacion_intento (creado_en DESC)"))
             await self.db.commit()
+            marcar_hecho(self.db, "planificacion_intento")
         except Exception as e:
             await self.db.rollback()
             logger.warning(f"Repository - No se pudo asegurar planificacion_intento: {e}")

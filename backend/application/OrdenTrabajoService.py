@@ -333,7 +333,12 @@ class OrdenTrabajoService:
                     # 6. Inject material status
                     dto.estado_material = material_statuses.get(o.id, 'sin_datos')
                     
-                    valid_ordenes.append(jsonable_encoder(dto))
+                    # model_dump directo y no jsonable_encoder: con 1.300 OT y todos sus
+                    # procesos, jsonable_encoder volvía a recorrer en Python cada dict que
+                    # ya había armado pydantic (y FastAPI lo recorre otra vez al responder).
+                    # El JSON que sale es el mismo: el DTO no tiene alias ni Decimal, sólo
+                    # fechas, que los dos escriben igual (comparado contra producción, 20/10).
+                    valid_ordenes.append(dto.model_dump(mode="json", by_alias=True))
                 except ValidationError as e:
                     logger.error(f"Service - Error validando orden ID {o.id}: {e}")
                     continue

@@ -305,11 +305,20 @@ class TiemposOperarioService:
     def __init__(self, db_session):
         self.db = db_session
         self.repository = TiemposOperarioRepository(db_session)
+        # Lo que no depende de la persona ni del período, guardado mientras dure ESTE
+        # servicio (se arma uno por pedido). El reporte mensual pide el rendimiento de
+        # cada persona dos veces —este mes y el anterior— y cada vez se volvían a leer la
+        # persona y los feriados del taller (los pasos ya se reusaban, ver el reporte).
+        self._personas: dict[int, object] = {}
+        self._feriados: list[date] | None = None
 
     async def persona(self, id_operario: int):
+        if id_operario in self._personas:
+            return self._personas[id_operario]
         op = await AusenciaRepository(self.db).find_operario(id_operario)
         if op is None:
             raise NotFoundException(f"No existe la persona {id_operario}.")
+        self._personas[id_operario] = op
         return op
 
     async def pasos_atribuidos(self, id_operario: int) -> list[dict]:
@@ -339,8 +348,9 @@ class TiemposOperarioService:
         """Las pausas de las OT de esos pasos (por OT), si se pudieron leer, y los
         feriados. Sin la tabla de pausas: nada que descontar, y `False` para decirlo."""
         pausas = await self.repository.pausas_sin_romper(sorted({p["id_orden_trabajo"] for p in pasos}))
-        feriados = await self.repository.feriados()
-        return pausas_por_orden(pausas), pausas is not None, feriados
+        if self._feriados is None:
+            self._feriados = await self.repository.feriados()
+        return pausas_por_orden(pausas), pausas is not None, self._feriados
 
     @staticmethod
     def pausas_de(paso: dict, pausas_por_ot: dict[int, list]) -> list:
