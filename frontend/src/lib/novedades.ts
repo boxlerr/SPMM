@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "vista-previa-sin-fecha",
+        fecha: "2026-10-20",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Una OT sin fecha prometida ya no sale «01/01» ni «+28.050 días» de atraso en la vista previa",
+        detalle:
+            "Las OT viejas que en el sistema anterior no tenían fecha prometida vienen con el 01/01/1950. En la vista previa del plan la columna «Prometida» decía «01/01» y «Alertas» marcaba en rojo «+28.050 días», y la OT aparecía en «Solo las que llegan tarde». Ahora la columna dice «Sin fecha», no marca atraso y no sale en ese filtro ni en «Termina tarde» del exportado. El planificador ya las trataba como OT sin fecha. Si tiene una fecha de entrega real, cargala en la OT.",
+        href: "/operaciones",
+    },
+    {
         id: "cada-uno-en-lo-suyo",
         fecha: "2026-10-19",
         tipo: "mejora",
