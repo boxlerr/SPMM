@@ -51,7 +51,7 @@ import { MaterialChip } from "@/components/common/MaterialChip";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { PlanoDeOrden } from "@/components/common/PlanoDeOrden";
 import { AvisoPausadasEnElPlan } from "@/components/pausas/AvisoPausadasEnElPlan";
-import { exportarReporte, filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
+import { exportarReporte, filtroBusqueda, partesDeFecha, type ColumnaExport } from "@/lib/exportar";
 import { lindo, pedirEquipo, seccionesDelEquipo } from "@/lib/equipo";
 import { terminosDeBusqueda } from "@/lib/busqueda";
 import {
@@ -362,6 +362,11 @@ const diaDeCalendario = (valor: string | null | undefined): number | null => {
     return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86_400_000;
 };
 
+/** La prometida si es una fecha de verdad; null si está vacía o es la marca de «sin
+ *  fecha» del sistema viejo (1950-01-01), que en la columna salía «01/01». */
+const prometidaReal = (valor: string | null | undefined): string | null =>
+    valor && partesDeFecha(valor) ? valor : null;
+
 /**
  * Cuántos días llega tarde un proceso a la fecha prometida; 0 si llega a tiempo o si
  * falta alguna de las dos fechas. Es la ÚNICA cuenta de atraso de esta pantalla: la
@@ -374,13 +379,13 @@ const diaDeCalendario = (valor: string | null | undefined): number | null => {
  * el día prometido es cumplir; el atraso es la resta de días de calendario (terminar
  * el 3/10 a las 8 es +1, no +0,3 redondeado).
  *
- * La prometida 1950-01-01 (la marca del sistema viejo para «sin fecha») sigue dando
- * atraso como hasta ahora, a propósito: así la OT aparece en el filtro y la alerta de
- * la fila explica que la promesa está sin definir y que hay que cargarla.
+ * La prometida 1950-01-01 (la marca del sistema viejo para «sin fecha») no da atraso:
+ * sin fecha no se puede llegar tarde. Antes daba «+28.050 días» en rojo en la fila y la
+ * OT caía en «Solo las que llegan tarde» (20/10/2026); el planificador ya la ignoraba.
  */
 const diasDeAtraso = (fin: string | null | undefined, prometida: string | null | undefined): number => {
     const diaFin = diaDeCalendario(fin);
-    const diaPrometido = diaDeCalendario(prometida);
+    const diaPrometido = diaDeCalendario(prometidaReal(prometida));
     if (diaFin === null || diaPrometido === null) return 0;
     return Math.max(0, diaFin - diaPrometido);
 };
@@ -3348,7 +3353,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                         articulo: conDatos.articulo,
                                         codigo: conDatos.codigo,
                                         prioridad: getPriorityLabel(conDatos.id_prioridad, conDatos.prioridad_descripcion),
-                                        prometida: conDatos.fecha_prometida,
+                                        prometida: prometidaReal(conDatos.fecha_prometida),
                                         paso: conDatos.secuencia ?? null,
                                         proceso: conDatos.slot_extra ? `${conDatos.nombre_proceso} (acompaña)` : conDatos.nombre_proceso,
                                         persona,
@@ -3761,7 +3766,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                     {selProcs.size} proceso{selProcs.size === 1 ? "" : "s"}
                                                                                 </Badge>
                                                                             )}
-                                                                            {o.fecha_prometida && (
+                                                                            {prometidaReal(o.fecha_prometida) && (
                                                                                 <span className="text-[10px] text-gray-400">
                                                                                     Prom. {formatDate(o.fecha_prometida)}
                                                                                 </span>
@@ -4406,7 +4411,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                     </div>
                                                                     <div className="text-xs text-gray-500 mt-0.5 flex flex-wrap items-center gap-x-2">
                                                                         <span>{items.length} proceso(s) · {formatMinutesShort(otDurationMin)}</span>
-                                                                        {first.fecha_prometida && (
+                                                                        {prometidaReal(first.fecha_prometida) && (
                                                                             <span>· Prometida {formatDate(first.fecha_prometida)}</span>
                                                                         )}
                                                                         <Badge variant="outline" className="border-gray-300 text-gray-700 text-[10px]">
@@ -4744,11 +4749,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                     worstLateItem = i;
                                                 }
                                             }
+                                            // Una OT sin fecha prometida (la marca 1950 del viejo) no llega tarde.
                                             const isOrderLate = maxDelayDays > 0;
-                                            // Detecta placeholder 1950 (significa "sin fecha prometida real"):
-                                            const promesaEsPlaceholder = worstLateItem?.fecha_prometida
-                                                ? new Date(worstLateItem.fecha_prometida).getFullYear() <= 1950
-                                                : false;
                                             // Formato dd/MM/yyyy HH:mm para el tooltip.
                                             const formatFull = (dStr?: string | null) => {
                                                 if (!dStr) return "—";
@@ -4898,7 +4900,12 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                             </Badge>
                                                         </td>
                                                         )}
-                                                        {ve("prometida") && <td className="px-4 py-3 text-center text-inherit opacity-90">{formatDate(firstItem.fecha_prometida)}</td>}
+                                                        {ve("prometida") && (
+                                                        <td className="px-4 py-3 text-center text-inherit opacity-90 whitespace-nowrap">
+                                                            {/* La marca 1950 del viejo salía «01/01»: es una OT sin fecha. */}
+                                                            {prometidaReal(firstItem.fecha_prometida) ? formatDate(firstItem.fecha_prometida) : "Sin fecha"}
+                                                        </td>
+                                                        )}
                                                         {/* Cuándo se toca esta OT: de la primera pieza a la última.
                                                             Estaba solo dentro de cada proceso (12 fechas por OT) y
                                                             no había forma de ver de un vistazo cuándo arranca y
@@ -4946,8 +4953,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                             <div className="p-3 space-y-2 text-xs">
                                                                                 <div className="grid grid-cols-[120px_1fr] gap-x-2 gap-y-1">
                                                                                     <span className="text-gray-500">Fecha prometida</span>
-                                                                                    <span className={cn("font-semibold tabular-nums", promesaEsPlaceholder ? "text-amber-700" : "text-gray-900")}>
-                                                                                        {promesaEsPlaceholder ? "Sin definir" : formatFull(worstLateItem?.fecha_prometida)}
+                                                                                    <span className="font-semibold text-gray-900 tabular-nums">
+                                                                                        {formatFull(worstLateItem?.fecha_prometida)}
                                                                                     </span>
                                                                                     <span className="text-gray-500">Fin estimado</span>
                                                                                     <span className="font-semibold text-gray-900 tabular-nums">
@@ -4960,15 +4967,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                     <span className="text-gray-500">Diferencia</span>
                                                                                     <span className="font-bold text-red-700 tabular-nums">+{maxDelayDays.toLocaleString("es-AR")} {maxDelayDays === 1 ? "día" : "días"}</span>
                                                                                 </div>
-                                                                                {promesaEsPlaceholder ? (
-                                                                                    <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-800 leading-snug">
-                                                                                        <strong>⚠ Sin fecha prometida real:</strong> esta OT tiene <code className="bg-amber-100 px-1 rounded">1950-01-01</code> como placeholder. Por eso la diferencia es absurda. Cargá la fecha de entrega real en el editor de la OT.
-                                                                                    </div>
-                                                                                ) : (
-                                                                                    <div className="mt-2 text-[11px] text-gray-500 leading-snug">
-                                                                                        El motor calculó que el último proceso de esta OT termina <strong className="text-red-700">después</strong> de la fecha que le prometiste al cliente.
-                                                                                    </div>
-                                                                                )}
+                                                                                <div className="mt-2 text-[11px] text-gray-500 leading-snug">
+                                                                                    El motor calculó que el último proceso de esta OT termina <strong className="text-red-700">después</strong> de la fecha que le prometiste al cliente.
+                                                                                </div>
                                                                             </div>
                                                                         </TooltipContent>
                                                                         </TooltipPortal>
