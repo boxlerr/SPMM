@@ -21,7 +21,9 @@
  *    días y termine cerrándolo sin leer.
  *  · Se cierra con Escape o clickeando afuera, como cualquier ventana del sistema.
  *
- * El texto vive en lib/novedades.ts, al lado de las novedades, para que no haya dos
+ * El texto vive en lib/avisoAlEntrar.ts y no junto a las novedades: este cartel está en
+ * el layout y arrastraría la lista entera a todas las pantallas (ver ese archivo). Antes, en
+ * lib/novedades.ts, era para que no hubiera dos
  * lugares donde contar lo mismo.
  */
 
@@ -30,7 +32,7 @@ import Link from "next/link";
 import { Sparkles, ArrowRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { AVISO_AL_ENTRAR, formatFechaNovedad } from "@/lib/novedades";
+import { AVISO_AL_ENTRAR, formatFechaNovedad } from "@/lib/avisoAlEntrar";
 import { abrirAviso, cerrarAviso, tocaAbrirseSolo, useAvisoAlEntrar } from "@/hooks/useAvisoAlEntrar";
 
 /** **negrita** -> <strong>. Lo único que se acepta: el texto lo escribe el equipo. */

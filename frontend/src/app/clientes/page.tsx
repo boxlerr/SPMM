@@ -10,12 +10,17 @@ import { Input } from "@/components/ui/input";
 import { useApi } from "@/hooks/useApi";
 import { useToast } from "@/components/ui/toast";
 import { Cliente } from "./_types";
-import ClienteForm from "./_components/ClienteForm";
+import dynamic from "next/dynamic";
+import { useMontarAlAbrir } from "@/lib/diferido";
 import { API_URL } from "@/config";
 import { usePermisos } from "@/hooks/usePermisos";
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
+
+// El formulario (con zod y react-hook-form, 60 KB comprimidos: dos tercios de lo que
+// bajaba la pantalla) se baja recién al abrir «Nuevo» o «Editar». Ver lib/diferido.ts.
+const ClienteForm = dynamic(() => import("./_components/ClienteForm"), { ssr: false });
 
 /** RF-22: todos los datos del cliente que muestra la tabla (según el ancho, algunos se esconden). */
 const COLUMNAS_EXPORT: ColumnaExport<Cliente>[] = [
@@ -55,6 +60,7 @@ export default function ClientesPage() {
 
     // States for modals
     const [mostrarCrearEditar, setMostrarCrearEditar] = useState(false);
+    const montarForm = useMontarAlAbrir(mostrarCrearEditar);
     const [mostrarEliminar, setMostrarEliminar] = useState(false);
 
     const [clienteSeleccionado, setClienteSeleccionado] = useState<Cliente | null>(null);
@@ -340,7 +346,7 @@ export default function ClientesPage() {
 
 
             {/* Modal Crear/Editar */}
-            <ClienteForm
+            {montarForm && <ClienteForm
                 open={mostrarCrearEditar}
                 onClose={() => setMostrarCrearEditar(false)}
                 onSuccess={() => {
@@ -348,7 +354,7 @@ export default function ClientesPage() {
                     fetchClientes();
                 }}
                 cliente={clienteSeleccionado}
-            />
+            />}
 
             {/* Dialogo Eliminar */}
             <Dialog open={mostrarEliminar} onOpenChange={setMostrarEliminar}>

@@ -59,8 +59,11 @@ import { CartelEspejo, MarcaEspejo, useDuenoMP, useModoMP } from "./_components/
 import { BotonNuevo } from "./_components/NuevoMenu";
 import { MarcaPractica } from "./_components/NuevoComun";
 import { PendientesTab } from "./_components/PendientesTab";
-import { InsumosTab } from "./_components/InsumosTab";
-import { CaneraTab } from "./_components/CaneraTab";
+import dynamic from "next/dynamic";
+// Insumos y Cañera se montan recién la primera vez que se visitan (`montadas`): su código
+// se baja en ese momento y no con la pantalla, que abre en Pendientes.
+const InsumosTab = dynamic(() => import("./_components/InsumosTab").then(m => m.InsumosTab), { ssr: false });
+const CaneraTab = dynamic(() => import("./_components/CaneraTab").then(m => m.CaneraTab), { ssr: false });
 
 type Solapa = "pendientes" | "insumos" | "canera";
 

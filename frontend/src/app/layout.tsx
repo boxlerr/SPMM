@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import LayoutWrapper from "../components/LayoutWrapper";
 import CleanupBrowserExtensions from "../components/CleanupBrowserExtensions";
@@ -10,15 +9,17 @@ import { Toaster } from "sonner";
 import { Analytics } from "@vercel/analytics/next"
 
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+// Sin next/font a propósito (20/10/2026): acá se cargaban Geist y Geist Mono, que se
+// PRECARGABAN en cada pantalla (52 KB) y ningún estilo usaba: `font-sans` es «DM Sans»
+// (globals.css) y `font-mono`, la monoespaciada del sistema.
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// Atributos que les ponen algunas extensiones (bis_skin_checked es de Bitdefender) y
+// que React marcaría como diferencia al hidratar.
+const LIMPIAR_EXTENSIONES = `(function(){var A=['bis_skin_checked','bis_register','__processed_'];
+var oe=console.error;console.error=function(){var m=arguments[0];if(typeof m==='string'&&(m.indexOf('bis_skin_checked')>-1||m.indexOf('bis_register')>-1||m.indexOf('__processed_')>-1||m.indexOf('hydration')>-1||m.indexOf('server rendered HTML')>-1||m.indexOf('A tree hydrated but some attributes')>-1))return;oe.apply(console,arguments);};
+function todo(){document.querySelectorAll('[bis_skin_checked],[bis_register],[__processed_]').forEach(function(e){A.forEach(function(a){e.removeAttribute(a);});});}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',todo);else todo();
+new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){var m=ms[i],e=m.target;if(m.attributeName&&e.hasAttribute&&e.hasAttribute(m.attributeName))e.removeAttribute(m.attributeName);}}).observe(document.documentElement,{attributes:true,subtree:true,attributeFilter:A});})();`;
 
 export const metadata: Metadata = {
   title: "SPMM",
@@ -49,10 +50,15 @@ export default function RootLayout({
     // leía los textos con pronunciación inglesa.
     <html lang="es">
       <head>
-        <script src="/hydration-fix.js" />
+        {/* Antes era <script src="/hydration-fix.js">: un pedido que frenaba la página y un
+            setInterval que barría TODO el DOM 20 veces por segundo, en todas las pantallas
+            y para siempre. Ahora va escrito acá y sólo mira el elemento que la extensión
+            del navegador marca (lo mismo que CleanupBrowserExtensions, pero desde antes
+            de que React hidrate). */}
+        <script dangerouslySetInnerHTML={{ __html: LIMPIAR_EXTENSIONES }} />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className="antialiased"
         suppressHydrationWarning
       >
         <CleanupBrowserExtensions />

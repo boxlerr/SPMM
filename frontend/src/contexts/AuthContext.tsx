@@ -217,7 +217,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // RF-28. Sin la clave es un backend de antes: entra por donde siempre.
         if ('pantalla_inicio' in datos) siguiente.pantalla_inicio = datos.pantalla_inicio;
         else delete siguiente.pantalla_inicio;
-        try { localStorage.setItem('user', JSON.stringify(siguiente)); } catch { /* sin storage: queda en memoria */ }
+        // Lo normal es que no haya cambiado nada. Devolver el MISMO objeto hace que React no
+        // redibuje: con uno nuevo se volvían a dibujar todas las pantallas que usan la sesión
+        // (Operaciones entera, 1.600 componentes) cada vez que se volvía a la pestaña.
+        const json = JSON.stringify(siguiente);
+        if (json === JSON.stringify(previo)) return previo;
+        try { localStorage.setItem('user', json); } catch { /* sin storage: queda en memoria */ }
         return siguiente;
       });
     } catch {
@@ -384,6 +389,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!token) return; // sin sesión, no tiene sentido mantener vivo el backend
     const ping = () => {
+      // Con la pestaña escondida, no: en el taller SPMM queda abierto todo el día en
+      // varias PCs, y cada una mantenía despierta una instancia de Cloud Run (que se
+      // cobra) sin que nadie lo estuviera mirando. Al volver a la pestaña ya corre el
+      // pedido de /auth/me, que lo despierta igual.
+      if (typeof document !== 'undefined' && document.hidden) return;
       // No usamos await: es fire-and-forget. Tampoco queremos que un error
       // (red caída, etc.) escale al usuario.
       try {
@@ -408,7 +418,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // En el taller la gente puede pasar horas sin tocar la PC y la sesión no
   // debería caerse por eso.
 
-  const login = async (username: string, password: string): Promise<ResultadoLogin> => {
+  const login = useCallback(async (username: string, password: string): Promise<ResultadoLogin> => {
     try {
       const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
@@ -467,7 +477,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         error: 'Error de conexión con el servidor'
       };
     }
-  };
+  }, []);
 
   /**
 
@@ -481,20 +491,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
    */
 
-  const refreshUser = () => {
-
+  const refreshUser = useCallback(() => {
     try {
-
       const guardado = localStorage.getItem('user');
-
       if (guardado) setUser(JSON.parse(guardado));
-
     } catch { /* si no se puede leer, queda como estaba */ }
+  }, []);
 
-  };
 
-
-  const logout = () => {
+  const logout = useCallback(() => {
     // RF-25: que la salida quede en Auditoría («Lucas salió del sistema»). Antes el
     // servidor ni se enteraba: se borraba el token acá y listo. Se avisa sin esperar la
     // respuesta (`keepalive`: llega aunque la página se vaya a /login) y si falla no
@@ -520,7 +525,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     auth401CountRef.current = 0;
 
     router.push('/login');
-  };
+  }, [router]);
 
   // RF-24. null = acceso total: el backend no mandó permisos (todavía no tiene RF-24)
   // o vinieron con una forma que no se entiende. Nunca se cierra todo por un campo.
@@ -536,24 +541,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const pantallaFijada = useMemo(() => leerPantallaInicio(user?.pantalla_inicio), [user?.pantalla_inicio]);
   const rutaDeInicio = useMemo(() => rutaInicio(permisos, pantallaFijada), [permisos, pantallaFijada]);
 
+  // Memoizado: con un objeto nuevo en cada render, cualquier render del proveedor
+  // redibujaba a todos los que usan useAuth/usePermisos (41 archivos).
+  const valor = useMemo<AuthContextType>(() => ({
+    user,
+    token,
+    login,
+    logout,
+    isAuthenticated: !!token && !!user,
+    loading,
+    notifySessionExpired,
+    refreshUser,
+    permisos,
+    puede,
+    puedeSeccion,
+    rutaDeInicio,
+    refrescarPermisos,
+  }), [user, token, login, logout, loading, notifySessionExpired, refreshUser, permisos, puede,
+    puedeSeccion, rutaDeInicio, refrescarPermisos]);
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        token,
-        login,
-        logout,
-        isAuthenticated: !!token && !!user,
-        loading,
-        notifySessionExpired,
-        refreshUser,
-        permisos,
-        puede,
-        puedeSeccion,
-        rutaDeInicio,
-        refrescarPermisos,
-      }}
-    >
+    <AuthContext.Provider value={valor}>
       {children}
       {/* Popup "Sesión Expirada" removido a propósito. Antes era un AlertDialog
           modal que aparecía al instante por cualquier 401 (incluido cold-start de

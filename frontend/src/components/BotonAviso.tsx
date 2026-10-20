@@ -21,7 +21,7 @@
 
 import { Megaphone } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { AVISO_AL_ENTRAR } from "@/lib/novedades";
+import { AVISO_AL_ENTRAR } from "@/lib/avisoAlEntrar";
 import { abrirAviso, useAvisoAlEntrar } from "@/hooks/useAvisoAlEntrar";
 
 type Props = {

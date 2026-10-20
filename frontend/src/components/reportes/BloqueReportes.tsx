@@ -23,20 +23,25 @@ import {
     type Ejemplo,
     type ReporteGuardado,
 } from "@/lib/reportes";
+import dynamic from "next/dynamic";
+import { useMontarAlAbrir } from "@/lib/diferido";
 import {
-    ArmadorDeReportes,
     TRABAJO_VACIO,
     trabajoDesdeEjemplo,
     trabajoDesdeGuardado,
     type EstadoCatalogo,
     type TrabajoDeReporte,
-} from "./ArmadorDeReportes";
+} from "./trabajoDeReporte";
+
+// El armador (modal con sus pasos y la vista previa) se baja recién al abrirlo.
+const ArmadorDeReportes = dynamic(() => import("./ArmadorDeReportes").then(m => m.ArmadorDeReportes), { ssr: false });
 
 export function BloqueReportes({ children, className }: { children?: React.ReactNode; className?: string }) {
     const [catalogo, setCatalogo] = useState<Catalogo | null>(null);
     const [estado, setEstado] = useState<EstadoCatalogo>("cargando");
     const [guardados, setGuardados] = useState<ReporteGuardado[]>([]);
     const [abierto, setAbierto] = useState(false);
+    const montarArmador = useMontarAlAbrir(abierto);
     const [trabajo, setTrabajo] = useState<TrabajoDeReporte>(TRABAJO_VACIO);
 
     const cargar = useCallback(async (senal?: AbortSignal) => {
@@ -159,7 +164,7 @@ export function BloqueReportes({ children, className }: { children?: React.React
                 </div>
             )}
 
-            <ArmadorDeReportes
+            {montarArmador && <ArmadorDeReportes
                 abierto={abierto}
                 onCerrar={() => setAbierto(false)}
                 catalogo={catalogo}
@@ -169,7 +174,7 @@ export function BloqueReportes({ children, className }: { children?: React.React
                 setTrabajo={setTrabajo}
                 guardados={guardados}
                 setGuardados={setGuardados}
-            />
+            />}
         </section>
     );
 }

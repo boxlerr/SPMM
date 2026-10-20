@@ -2436,10 +2436,18 @@ export function PlanningPreviewScreen({
     React.useEffect(() => {
         if (!isOpen) return;
         void revisarRef.current();
+        // Volver a la pestaña dispara DOS eventos casi juntos (`visibilitychange` y
+        // `focus`), y cada uno hacía la revisión entera: tres pedidos, el de todas las
+        // personas incluido, dos veces. Con esto, una vuelta es una sola revisión.
+        let ultimaRevision = 0;
         const alVolver = () => {
             // La pestaña oculta no es "volver": el `focus` de una ventana que sigue
             // atrás no debería disparar un recálculo.
-            if (document.visibilityState === "visible") void revisarRef.current();
+            if (document.visibilityState !== "visible") return;
+            const ahora = Date.now();
+            if (ahora - ultimaRevision < 2000) return;
+            ultimaRevision = ahora;
+            void revisarRef.current();
         };
         document.addEventListener("visibilitychange", alVolver);
         window.addEventListener("focus", alVolver);

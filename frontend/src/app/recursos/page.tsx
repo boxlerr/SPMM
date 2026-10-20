@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { useMontarAlAbrir } from "@/lib/diferido";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -9,12 +11,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Eye, Pencil, Trash2, User, RefreshCw, Plus, Factory, Phone, Layers, Search, Target, MapPin, AlertTriangle, Ruler } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
-import OperarioForm from "./_components/OperarioForm";
 import MaquinaForm from "./_components/MaquinaForm";
 import ProcesoForm from "./_components/ProcesoForm";
-import CatalogoSimple from "./_components/CatalogoSimple";
 import RangoComposicion from "./_components/RangoComposicion";
-import DetalleOperario from "./_components/DetalleOperario";
 import DetalleMaquina from "./_components/DetalleMaquina";
 import { EstadoBadge, EstadoMaquinaSelector } from "./_components/EstadoMaquina";
 import { backendConoceEstado, infoEstado, type EstadoOperativo } from "./_maquinaOpciones";
@@ -32,7 +31,6 @@ import EditorMaquinasDe from "./_components/EditorMaquinasDe";
 import MaquinasDelProceso from "./_components/MaquinasDelProceso";
 import DesdeAviso from "./_components/DesdeAviso";
 import SinResultados, { type FiltroPuesto } from "./_components/SinResultados";
-import { BibliotecaPlanos } from "@/components/planos/BibliotecaPlanos";
 import { usePermisos } from "@/hooks/usePermisos";
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 import type { SeccionCodigo } from "@/lib/permisos";
@@ -90,12 +88,21 @@ interface LlegadaDesdeAviso {
 }
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
-import { pedirEquipo, seccionesDelEquipo } from "@/lib/equipo";
-import { bajarTexto, textoDelEquipoParaClaude } from "@/lib/paraClaude";
 import { maquinasEnPalabras, origenEnPalabras, resumenDeMaquinas } from "@/lib/maquinasDelProceso";
 import { etiquetaTipo } from "./_maquinaOpciones";
 import { rangoDePeriodo } from "@/lib/asistencia";
 import { type ResumenMaquinas, chipDeLaTabla, fmtHorasUso } from "@/lib/usoMaquina";
+
+// Lo que se abre con un click o vive en otra solapa se baja recién cuando hace falta
+// (ver lib/diferido.ts): el alta/edición de una persona y su ficha (las dos con el editor
+// de habilidades que se arrastra), la biblioteca de planos y la lista de rangos y sectores
+// (que traía la librería de animaciones entera para abrir una fila). Antes viajaban en el
+// JavaScript inicial de Recursos, y el formulario, montado cerrado, pedía al abrir la
+// pantalla los procesos y los rangos que recién usa al abrirse.
+const OperarioForm = dynamic(() => import("./_components/OperarioForm"), { ssr: false });
+const DetalleOperario = dynamic(() => import("./_components/DetalleOperario"), { ssr: false });
+const CatalogoSimple = dynamic(() => import("./_components/CatalogoSimple"), { ssr: false });
+const BibliotecaPlanos = dynamic(() => import("@/components/planos/BibliotecaPlanos").then(m => m.BibliotecaPlanos), { ssr: false });
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -186,6 +193,9 @@ export default function RecursosPage() {
     editar: false,
     cambiarEstado: false,
   });
+  // El alta/edición de una persona se monta la primera vez que se abre (lib/diferido.ts).
+  const formOperarioAbierto = (mostrarDialogo.crear || mostrarDialogo.editar) && tabActiva === "operarios";
+  const montarFormOperario = useMontarAlAbrir(formOperarioAbierto);
   const [itemAEliminar, setItemAEliminar] = useState<{ tipo: "operario" | "maquina" | "proceso"; id: number; nombre: string } | null>(null);
   /**
    * Qué se lleva puesto el borrado, si el backend lo contestó.
@@ -995,7 +1005,10 @@ export default function RecursosPage() {
                   archivo="habilidades_del_equipo"
                   textoBoton="Exportar habilidades"
                   rotulo="Las habilidades de todo el equipo, de una"
-                  cargarSecciones={async () => seccionesDelEquipo(await pedirEquipo())}
+                  cargarSecciones={async () => {
+                    const { pedirEquipo, seccionesDelEquipo } = await import("@/lib/equipo");
+                    return seccionesDelEquipo(await pedirEquipo());
+                  }}
                   filtros={null}
                   subtitulo="Quién puede hacer cada proceso y a quién prefiere el planificador: SKILL 1, después SKILL 2."
                   disabled={api.loading}
@@ -1003,7 +1016,12 @@ export default function RecursosPage() {
                   extras={[{
                     rotulo: "Habilidades para Claude (.md)",
                     ayuda: "Texto para subir al proyecto de Claude",
-                    hacer: async () => bajarTexto(textoDelEquipoParaClaude(await pedirEquipo()), "habilidades_para_claude"),
+                    hacer: async () => {
+                      const [{ pedirEquipo }, { bajarTexto, textoDelEquipoParaClaude }] = await Promise.all([
+                        import("@/lib/equipo"), import("@/lib/paraClaude"),
+                      ]);
+                      return bajarTexto(textoDelEquipoParaClaude(await pedirEquipo()), "habilidades_para_claude");
+                    },
                   }]}
                 />
               </div>
@@ -1886,8 +1904,8 @@ export default function RecursosPage() {
         </DialogContent>
       </Dialog>
 
-      <OperarioForm
-        open={(mostrarDialogo.crear || mostrarDialogo.editar) && tabActiva === "operarios"}
+      {montarFormOperario && <OperarioForm
+        open={formOperarioAbierto}
         editing={!!mostrarDialogo.editar}
         data={itemAEditar as Operario}
         onClose={() => setMostrarDialogo({ ...mostrarDialogo, crear: false, editar: false })}
@@ -1896,7 +1914,7 @@ export default function RecursosPage() {
           setMostrarDialogo({ ...mostrarDialogo, crear: false, editar: false });
         }}
         cleanUrl={cleanUrl}
-      />
+      />}
 
       <MaquinaForm
         open={(mostrarDialogo.crear || mostrarDialogo.editar) && tabActiva === "maquinas"}
@@ -1926,7 +1944,9 @@ export default function RecursosPage() {
         cleanUrl={cleanUrl}
       />
 
-      <DetalleOperario
+      {/* Sólo con alguien elegido: sin persona no dibuja nada, pero montado pedía igual
+          el catálogo de procesos al abrir la pantalla y en cada apertura y cierre. */}
+      {operarioSeleccionado && <DetalleOperario
         key={operarioSeleccionado?.id}
         operario={operarioSeleccionado}
         tasks={operatorTasks}
@@ -1936,7 +1956,7 @@ export default function RecursosPage() {
           fetchOperarios();
           if (operarioSeleccionado) handleVerOperario(operarioSeleccionado);
         }}
-      />
+      />}
 
       <DetalleMaquina
         maquina={maquinaSeleccionada}

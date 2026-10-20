@@ -4,11 +4,16 @@ import { PlusCircle, X, Save, Paperclip, ChevronLeft, ChevronRight } from "lucid
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
 import { API_URL } from "@/config";
-import { tieneMinutos, ProcesosEditor, ProcesoRow, makeEmptyRow } from "@/components/planning/ProcesosEditor";
+import dynamic from "next/dynamic";
+import { tieneMinutos, type ProcesoRow, makeEmptyRow } from "@/components/planning/procesosFilas";
 import { PlanoPanel } from "@/components/common/PlanoPanel";
 import { usePlanosDeOrden } from "@/hooks/usePlanos";
 import type { Plano } from "@/lib/planos";
 import { usePermisos } from "@/hooks/usePermisos";
+
+// El editor (con arrastrar y soltar) se baja recién al tocar «agregar»: esta fila está en
+// todas las listas de Operaciones y no tiene por qué traerlo al abrir la pantalla.
+const ProcesosEditor = dynamic(() => import("@/components/planning/ProcesosEditor").then(m => m.ProcesosEditor), { ssr: false });
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};

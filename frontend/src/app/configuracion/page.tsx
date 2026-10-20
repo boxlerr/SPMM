@@ -11,10 +11,13 @@ import CambiarPassword from '@/components/usuarios/CambiarPassword';
 import { formatNotificationMessage } from '@/lib/utils';
 import { API_URL } from '@/config';
 import { usePermisos } from '@/hooks/usePermisos';
-import CopiasDeSeguridad from '@/components/copias/CopiasDeSeguridad';
 import { ExportarMenu } from '@/components/common/ExportarMenu';
 import type { ColumnaExport } from '@/lib/exportar';
 import type { Notification as Aviso } from '@/contexts/NotificationContext';
+import dynamic from 'next/dynamic';
+
+// Las copias de seguridad son otra solapa (y sólo para admin): se bajan al abrirla.
+const CopiasDeSeguridad = dynamic(() => import('@/components/copias/CopiasDeSeguridad'), { ssr: false });
 
 /** RF-22: el rótulo de cada tipo de aviso, el mismo que el cartelito de la lista. */
 const TIPO_AVISO: Record<string, string> = {
@@ -50,11 +53,38 @@ const COLUMNAS_AVISOS: ColumnaExport<Aviso>[] = [
 ];
 
 
+/**
+ * La fecha y hora de «Información del Sistema», que avanza cada segundo.
+ *
+ * Es un componente aparte a propósito: el reloj vivía en el estado de la página y la
+ * redibujaba ENTERA una vez por segundo (la tabla de usuarios y la matriz de permisos
+ * incluidas), aunque sólo se ve en la solapa Sistema. Así lo único que se redibuja es
+ * este texto, y sólo mientras esa solapa está abierta.
+ */
+function RelojDelSistema() {
+  const [ahora, setAhora] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setAhora(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <>
+      {ahora.toLocaleString('es-ES', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      })}
+    </>
+  );
+}
+
 export default function ConfiguracionPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('usuarios');
-  const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const { notifications, markAsRead, markAllAsRead, clearNotifications, unreadCount } = useNotifications();
   const { user } = useAuth();
 
@@ -78,19 +108,6 @@ export default function ConfiguracionPage() {
   const solapaVisible = (id: string) =>
     (id !== 'usuarios' || veUsuarios) && (id !== 'sistema' || veSistema) && (id !== 'copias' || veCopias);
   const solapaActiva = solapaVisible(activeTab) ? activeTab : 'mi-cuenta';
-
-  // Actualizar fecha y hora cada segundo para tiempo real
-  useEffect(() => {
-    // Actualizar inmediatamente al montar
-    setCurrentDateTime(new Date());
-
-    // Luego actualizar cada segundo
-    const interval = setInterval(() => {
-      setCurrentDateTime(new Date());
-    }, 1000); // Actualizar cada 1 segundo (tiempo real)
-
-    return () => clearInterval(interval);
-  }, []);
 
   // Leer el parámetro 'tab' de la URL al cargar
   useEffect(() => {
@@ -406,14 +423,6 @@ export default function ConfiguracionPage() {
         const systemInfo = {
           version: '1.0.0',
           nombre: 'SPMM - Sistema de Planificación y Mantenimiento de Maquinaria',
-          fechaActual: currentDateTime.toLocaleString('es-ES', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-          }),
         };
 
         return (
@@ -443,7 +452,7 @@ export default function ConfiguracionPage() {
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Fecha y Hora Actual</p>
-                    <p className="text-sm font-medium text-gray-900">{systemInfo.fechaActual}</p>
+                    <p className="text-sm font-medium text-gray-900"><RelojDelSistema /></p>
                   </div>
                 </div>
               </div>

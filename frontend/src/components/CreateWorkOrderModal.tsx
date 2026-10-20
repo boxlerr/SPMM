@@ -19,6 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 
 import { WorkOrder } from "@/lib/types";
 import { API_URL } from "@/config";
+import { pedirArticulos } from "@/lib/catalogoArticulos";
 import { parseApiError } from "@/lib/utils";
 import { ProcesosEditor, pasosSinMinutos, SIN_MAQUINA, ProcesoRow } from "@/components/planning/ProcesosEditor";
 import { PlanoPanel } from "@/components/common/PlanoPanel";
@@ -661,12 +662,13 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [prioridadesRes, procesosRes, operariosRes, maquinariasRes, articulosRes, clientesRes, sectoresRes] = await Promise.all([
+            const [prioridadesRes, procesosRes, operariosRes, maquinariasRes, listaArticulos, clientesRes, sectoresRes] = await Promise.all([
                 fetch(`${API_URL}/prioridades`, { headers: getAuthHeaders() }),
                 fetch(`${API_URL}/procesos`, { headers: getAuthHeaders() }),
                 fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() }),
                 fetch(`${API_URL}/maquinarias`, { headers: getAuthHeaders() }),
-                fetch(`${API_URL}/articulos`, { headers: getAuthHeaders() }),
+                // Guardado unos minutos: ver lib/catalogoArticulos.ts.
+                pedirArticulos(getAuthHeaders()).catch(() => null),
                 fetch(`${API_URL}/clientes`, { headers: getAuthHeaders() }),
                 fetch(`${API_URL}/sectores`, { headers: getAuthHeaders() })
             ]);
@@ -699,10 +701,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 const data = await maquinariasRes.json();
                 setMaquinarias(Array.isArray(data) ? data : (data.data || []));
             }
-            if (articulosRes.ok) {
-                const data = await articulosRes.json();
-                setArticulos(Array.isArray(data) ? data : (data.data || []));
-            }
+            if (listaArticulos) setArticulos(listaArticulos);
             if (sectoresRes.ok) {
                 const data = await sectoresRes.json();
                 const rawData = Array.isArray(data) ? data : (data.data || []);

@@ -3,7 +3,10 @@ import type { PlanificacionItem, WorkOrder } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UnplannedWorkOrdersList } from "./UnplannedWorkOrdersList";
 import { CompletedWorkOrdersList } from "./CompletedWorkOrdersList";
-import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
+import dynamic from "next/dynamic";
+import { useMontarAlAbrir } from "@/lib/diferido";
+// El modal de la OT se baja recién al abrirlo (ver lib/diferido.ts).
+const CreateWorkOrderModal = dynamic(() => import("@/components/CreateWorkOrderModal"), { ssr: false });
 import { toast } from "@/lib/toast";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
@@ -80,6 +83,7 @@ export default function WorkOrdersListWrapper({
     // Edit Modal State
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [orderToEdit, setOrderToEdit] = useState<WorkOrder | null>(null);
+    const montarModalOT = useMontarAlAbrir(isEditModalOpen);
 
     // Delete Confirmation State
     const [deleteOrderId, setDeleteOrderId] = useState<number | null>(null);
@@ -290,7 +294,7 @@ export default function WorkOrdersListWrapper({
                 </TabsContent>
             </Tabs>
 
-            <CreateWorkOrderModal
+            {montarModalOT && <CreateWorkOrderModal
                 isOpen={isEditModalOpen}
                 onClose={() => {
                     setIsEditModalOpen(false);
@@ -298,7 +302,7 @@ export default function WorkOrdersListWrapper({
                 }}
                 onSuccess={handleEditSuccess}
                 orderToEdit={orderToEdit}
-            />
+            />}
             <ConfirmationDialog
                 isOpen={!!deleteOrderId}
                 onClose={() => setDeleteOrderId(null)}

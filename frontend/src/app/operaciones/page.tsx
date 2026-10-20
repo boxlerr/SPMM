@@ -3,14 +3,14 @@
 
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import dynamic from "next/dynamic"
+import { precargarCuandoEsteLibre, useMontarAlAbrir } from "@/lib/diferido"
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
-import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
 import { Tabs, TabsContent, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollableTabsBar } from "@/components/planning/ScrollableTabsBar"
 import { PlanningListTable } from "@/components/planning/PlanningListTable"
 import { SharedOperatorsList } from "@/components/resources/SharedOperatorsList"
-import DetalleOperario from "@/app/recursos/_components/DetalleOperario"
 import CambiarEstado from "@/app/recursos/_components/CambiarEstado"
 import { Operario } from "@/app/recursos/_types"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -24,16 +24,11 @@ import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { usePanelContext } from "@/contexts/PanelContext"
-import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
 import { Button } from "@/components/ui/button"
-import TaskDetailsModal from "@/components/gantt/TaskDetailsModal"
 import { toast } from "@/lib/toast"
 import { convertPlanificacionToGanttTasks } from "@/lib/gantt-utils"
 import { baseDelPlan, finDeLaFila, inicioDeLaFila, minutosDesdeFecha } from "@/lib/plan-fechas"
 import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/types"
-import { PlanningPreviewScreen } from "@/components/planning/PlanningPreviewScreen"
-import { AvailabilityConfigModal } from "@/components/planning/AvailabilityConfigModal"
-import { PlanningSelectionScreen } from "@/components/planning/PlanningSelectionScreen"
 import { ProgresoPlanificacion } from "@/components/planning/ProgresoPlanificacion"
 import { BorradoresPlan } from "@/components/planning/BorradoresPlan"
 import { useBorradorPlan } from "@/hooks/useBorradorPlan"
@@ -52,10 +47,26 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar as CalendarPicker } from "@/components/ui/calendar"
 import { API_URL } from "@/config"
 import { usePermisos } from "@/hooks/usePermisos"
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso"
+
+// Lo que se abre con un click se baja recién cuando hace falta (ver lib/diferido.ts):
+// el planificador, el modal de la OT, el detalle de una persona, la disponibilidad, el
+// calendario de los desplegables y el Gantt (su solapa está apagada). Antes todo eso
+// viajaba en el JavaScript inicial de Operaciones.
+const cargarSeleccion = () => import("@/components/planning/PlanningSelectionScreen")
+const cargarVistaPrevia = () => import("@/components/planning/PlanningPreviewScreen")
+const cargarModalOT = () => import("@/components/CreateWorkOrderModal")
+const cargarCalendario = () => import("@/components/ui/calendar")
+const PlanningSelectionScreen = dynamic(() => cargarSeleccion().then(m => m.PlanningSelectionScreen), { ssr: false })
+const PlanningPreviewScreen = dynamic(() => cargarVistaPrevia().then(m => m.PlanningPreviewScreen), { ssr: false })
+const CreateWorkOrderModal = dynamic(cargarModalOT, { ssr: false })
+const CalendarPicker = dynamic(() => cargarCalendario().then(m => m.Calendar), { ssr: false })
+const AvailabilityConfigModal = dynamic(() => import("@/components/planning/AvailabilityConfigModal").then(m => m.AvailabilityConfigModal), { ssr: false })
+const DetalleOperario = dynamic(() => import("@/app/recursos/_components/DetalleOperario"), { ssr: false })
+const PlanificacionGanttWrapper = dynamic(() => import("@/components/PlanificacionGanttWrapper"), { ssr: false })
+const TaskDetailsModal = dynamic(() => import("@/components/gantt/TaskDetailsModal"), { ssr: false })
 
 type SolapaOperaciones = "gantt" | "work_orders" | "operarios" | "carga"
 
@@ -228,6 +239,14 @@ export default function OperacionesPage() {
   // Refresh Trigger for Children
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isAvailabilityModalOpen, setIsAvailabilityModalOpen] = useState(false);
+  // Montados recién la primera vez que se abren (y después quedan): ver lib/diferido.ts.
+  const montarModalOT = useMontarAlAbrir(isCreateModalOpen)
+  const montarDisponibilidad = useMontarAlAbrir(isAvailabilityModalOpen)
+  // Lo que más se usa desde acá (abrir una OT, planificar, el calendario de los
+  // desplegables) se baja apenas el navegador queda libre: el primer click no espera.
+  useEffect(() => {
+    precargarCuandoEsteLibre(cargarModalOT, cargarSeleccion, cargarVistaPrevia, cargarCalendario)
+  }, [])
 
   // Gantt State
   const [tasks, setTasks] = useState<GanttTask[]>([])
@@ -440,23 +459,50 @@ export default function OperacionesPage() {
 
       let mappedResources: Resource[] = [];
 
-      // 1. Fetch Operarios
-      try {
-        // Los días no laborables, para que la vuelta de fecha a minutos cuente igual
-        // que el backend. Si falla, se sigue sin ellos: es peor no mostrar el plan.
-        fetch(`${API_URL}/config/availability`, { headers: getAuthHeaders() })
-          .then(r => r.ok ? r.json() : { blocked_dates: [] })
-          .then(d => setFeriados(d?.blocked_dates || []))
-          .catch(() => { /* sin feriados, como antes */ });
+      // Los días no laborables, para que la vuelta de fecha a minutos cuente igual
+      // que el backend. Si falla, se sigue sin ellos: es peor no mostrar el plan.
+      fetch(`${API_URL}/config/availability`, { headers: getAuthHeaders() })
+        .then(r => r.ok ? r.json() : { blocked_dates: [] })
+        .then(d => setFeriados(d?.blocked_dates || []))
+        .catch(() => { /* sin feriados, como antes */ });
 
-        const opResponse = await fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() });
-        if (opResponse.status === 401) {
-          if (typeof window !== "undefined") window.location.href = "/login";
-          return filasDelPlan;
+      // Los cuatro pedidos salen JUNTOS. Antes iban de a uno (operarios → plan → máquinas
+      // → órdenes): la pantalla esperaba la suma de los cuatro, con el más pesado
+      // (/ordenes) recién al final. Ahora espera sólo al más lento. Y las respuestas se
+      // aplican todas juntas, en un solo dibujado en vez de cuatro.
+      const pedir = (ruta: string) =>
+        fetch(`${API_URL}${ruta}`, { headers: getAuthHeaders() }).catch((error) => {
+          console.error(`Failed to fetch ${ruta}:`, error);
+          return null;
+        });
+      const respuestas = await Promise.all([
+        pedir("/operarios"), pedir("/planificacion"), pedir("/maquinarias"), pedir("/ordenes"),
+      ]);
+      if (respuestas.some(r => r?.status === 401)) {
+        if (typeof window !== "undefined") window.location.href = "/login";
+        return filasDelPlan;
+      }
+      const leer = async (r: Response | null, nombre: string): Promise<any> => {
+        if (!r) return null;
+        if (!r.ok) {
+          console.error(`Error fetching ${nombre}:`, r.status);
+          return null;
         }
+        try {
+          return await r.json();
+        } catch (error) {
+          console.error(`Error reading ${nombre}:`, error);
+          return null;
+        }
+      };
+      const [opData, planData, maqData, ordenesData] = await Promise.all([
+        leer(respuestas[0], "operarios"), leer(respuestas[1], "planificacion"),
+        leer(respuestas[2], "maquinarias"), leer(respuestas[3], "ordenes"),
+      ]);
 
-        if (opResponse.ok) {
-          const opData = await opResponse.json();
+      // 1. Operarios
+      try {
+        if (opData) {
           const allOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
           const filteredOps = allOps.filter((op: any) => op.sector?.toUpperCase() !== "PRUEBAS");
           setRawOperarios(filteredOps);
@@ -471,24 +517,15 @@ export default function OperacionesPage() {
             hora_fin: op.hora_fin || "16:00",
           }));
           setResources(mappedResources);
-        } else {
-          console.error("Error fetching operarios:", opResponse.status);
         }
       } catch (error) {
         console.error("Failed to fetch operarios:", error);
       }
 
-      // 2. Fetch Planificacion
+      // 2. Planificacion
       try {
-        const planResponse = await fetch(`${API_URL}/planificacion`, { headers: getAuthHeaders() });
-        if (planResponse.status === 401) {
-          if (typeof window !== "undefined") window.location.href = "/login";
-          return filasDelPlan;
-        }
-        if (planResponse.ok) {
-          const planData: PlanificacionItem[] = await planResponse.json();
-
-          const parsedPlanData = planData.map((item) => {
+        if (Array.isArray(planData)) {
+          const parsedPlanData = (planData as PlanificacionItem[]).map((item) => {
             let ranges = item.rangos_permitidos;
             if (typeof ranges === "string") {
               try {
@@ -521,22 +558,14 @@ export default function OperacionesPage() {
           filasDelPlan = parsedPlanData;
           const ganttTasks = convertPlanificacionToGanttTasks(parsedPlanData, mappedResources);
           setTasks(ganttTasks);
-        } else {
-          console.error("Error fetching planificacion:", planResponse.status);
         }
       } catch (error) {
         console.error("Failed to fetch planificacion:", error);
       }
 
-      // 3. Fetch Maquinarias
+      // 3. Maquinarias
       try {
-        const maqResponse = await fetch(`${API_URL}/maquinarias`, { headers: getAuthHeaders() });
-        if (maqResponse.status === 401) {
-          if (typeof window !== "undefined") window.location.href = "/login";
-          return filasDelPlan;
-        }
-        if (maqResponse.ok) {
-          const maqData = await maqResponse.json();
+        if (maqData) {
           const list = Array.isArray(maqData.data) ? maqData.data : (Array.isArray(maqData) ? maqData : []);
           setRawMaquinarias(list);
         }
@@ -544,15 +573,9 @@ export default function OperacionesPage() {
         console.error("Error fetching maquinarias:", error);
       }
 
-      // 4. Fetch Ordenes
+      // 4. Ordenes
       try {
-        const ordenesResponse = await fetch(`${API_URL}/ordenes`, { headers: getAuthHeaders() });
-        if (ordenesResponse.status === 401) {
-          if (typeof window !== "undefined") window.location.href = "/login";
-          return filasDelPlan;
-        }
-        if (ordenesResponse.ok) {
-          const ordenesData = await ordenesResponse.json();
+        if (ordenesData) {
           const ordenesList = Array.isArray(ordenesData) ? ordenesData : (ordenesData.data || []);
           setOrdenesTrabajo(ordenesList);
         }
@@ -655,11 +678,30 @@ export default function OperacionesPage() {
   // decía 0 y la lista de abajo mostraba 24.
 
   // Use filteredPlanificacion for deriving planned orders to reflect the history selection
-  const plannedOrderIds = new Set(filteredPlanificacion.map(p => p.orden_id));
-  const plannedOrdenes = ordenesTrabajo.filter(o => plannedOrderIds.has(o.id));
+  //
+  // Memoizadas: armadas a mano en cada render eran arreglos nuevos cada vez, y todos los
+  // useMemo de abajo (las cuatro listas, la carga, las fechas del calendario) volvían a
+  // calcular en cada render de la pantalla, con 1.300 OT y todas las filas del plan.
+  const plannedOrdenes = React.useMemo(() => {
+    const plannedOrderIds = new Set(filteredPlanificacion.map(p => p.orden_id));
+    return ordenesTrabajo.filter(o => plannedOrderIds.has(o.id));
+  }, [filteredPlanificacion, ordenesTrabajo]);
 
   /** Planificadas ya completadas (entregadas) — van a su propia pestaña. */
-  const completedPlannedOrdenes = plannedOrdenes.filter(isOrderCompleted);
+  const completedPlannedOrdenes = React.useMemo(
+    () => plannedOrdenes.filter(isOrderCompleted), [plannedOrdenes]);
+
+  /** Las filas del plan elegido, agrupadas por OT: sin esto, cada lista recorría todas
+   *  las filas del plan una vez POR CADA OT. */
+  const filasPorOrden = React.useMemo(() => {
+    const m = new Map<number, PlanificacionItem[]>();
+    for (const fila of filteredPlanificacion) {
+      const lista = m.get(fila.orden_id);
+      if (lista) lista.push(fila);
+      else m.set(fila.orden_id, [fila]);
+    }
+    return m;
+  }, [filteredPlanificacion]);
 
   /**
    * LAS CUATRO LISTAS DE LA PANTALLA, cada una en un solo lugar.
@@ -719,19 +761,13 @@ export default function OperacionesPage() {
 
   /** De lo que falta hacer, lo que cae en la semana que se está mirando. */
   const otsDeLaSemana = React.useMemo(() => {
-    return otsPendientes.filter(order => {
-      const procesos = filteredPlanificacion.filter(p => p.orden_id === order.id);
-      return procesos.some(pasoEnLaSemana);
-    });
-  }, [otsPendientes, filteredPlanificacion, pasoEnLaSemana]);
+    return otsPendientes.filter(order => (filasPorOrden.get(order.id) ?? []).some(pasoEnLaSemana));
+  }, [otsPendientes, filasPorOrden, pasoEnLaSemana]);
 
   /** De lo que falta hacer, lo que se toca el día que se está mirando. */
   const otsDelDia = React.useMemo(() => {
-    return otsPendientes.filter(order => {
-      const procesos = filteredPlanificacion.filter(p => p.orden_id === order.id);
-      return procesos.some(pasoEnElDia);
-    });
-  }, [otsPendientes, filteredPlanificacion, pasoEnElDia]);
+    return otsPendientes.filter(order => (filasPorOrden.get(order.id) ?? []).some(pasoEnElDia));
+  }, [otsPendientes, filasPorOrden, pasoEnElDia]);
 
   /**
    * El primer día con trabajo de la planificación elegida, de hoy en adelante.
@@ -810,8 +846,10 @@ export default function OperacionesPage() {
   }, [plannedDates]);
 
   // Calculate REALLY Unplanned Orders (excluding ALL planned orders from ANY batch AND delivered orders)
-  const allPlannedIds = new Set(rawPlanificacion.map(p => p.orden_id));
-  const trulyUnplannedOrders = ordenesTrabajo.filter(o => !allPlannedIds.has(o.id) && !isOrderDelivered(o));
+  const trulyUnplannedOrders = React.useMemo(() => {
+    const allPlannedIds = new Set(rawPlanificacion.map(p => p.orden_id));
+    return ordenesTrabajo.filter(o => !allPlannedIds.has(o.id) && !isOrderDelivered(o));
+  }, [rawPlanificacion, ordenesTrabajo]);
 
 
   const ordersForPlanning = React.useMemo(() => {
@@ -3117,7 +3155,7 @@ export default function OperacionesPage() {
           ocupa el ancho que haya; desde 400px en adelante, igual que siempre. Abajo de
           `xl` se superpone al contenido en vez de correrlo (el `xl:mr-[400px]` de arriba). */}
       <div className={"fixed inset-y-0 right-0 w-[400px] max-w-full bg-white shadow-2xl transform transition-transform duration-300 ease-in-out z-[60] " + ((isDetailsPanelOpen && !planificadorAbierto && activeTab === 'gantt') ? 'translate-x-0' : 'translate-x-full')}>
-        <TaskDetailsModal
+        {activeTab === 'gantt' && <TaskDetailsModal
           isOpen={isDetailsPanelOpen}
           selectedItem={selectedTask}
           onClose={() => setIsDetailsPanelOpen(false)}
@@ -3126,10 +3164,10 @@ export default function OperacionesPage() {
           onOperatorChange={handleOperatorChange}
           onStatusChange={handleStatusChange}
           variant="sidebar"
-        />
+        />}
       </div>
 
-      <CreateWorkOrderModal
+      {montarModalOT && <CreateWorkOrderModal
         isOpen={isCreateModalOpen}
         onClose={() => {
           setIsCreateModalOpen(false)
@@ -3138,11 +3176,13 @@ export default function OperacionesPage() {
         onSuccess={() => {
           setIsCreateModalOpen(false)
           setOrderToEdit(null)
+          // Sólo esto: además se subía `refreshTrigger`, que hace que la lista llame a
+          // este mismo fetchData — todo se recargaba DOS veces, y otra vez cada vez que
+          // se volvía a la solapa de Órdenes de Trabajo.
           fetchData()
-          setRefreshTrigger(prev => prev + 1)
         }}
         orderToEdit={orderToEdit}
-      />
+      />}
 
 
       {/* Va por encima de los modales de planificación: el cálculo se dispara desde
@@ -3154,11 +3194,11 @@ export default function OperacionesPage() {
         modo={calculando.modo}
       />
 
-      <AvailabilityConfigModal
+      {montarDisponibilidad && <AvailabilityConfigModal
         isOpen={isAvailabilityModalOpen}
         onClose={() => setIsAvailabilityModalOpen(false)}
         onFeriadosCambiados={setFeriados}
-      />
+      />}
 
       {/* Vive suelto: lo abre `isStatusConfirmOpen` desde cualquier lista. Estaba
           colgado de la solapa "Planificación", que ya no existe. */}

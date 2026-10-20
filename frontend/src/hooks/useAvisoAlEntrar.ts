@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * El estado del aviso que sale al entrar (AVISO_AL_ENTRAR, en lib/novedades.ts),
+ * El estado del aviso que sale al entrar (AVISO_AL_ENTRAR, en lib/avisoAlEntrar.ts),
  * compartido entre el cartel (components/AvisoAlEntrar.tsx) y el megáfono del menú
  * (components/BotonAviso.tsx).
  *
@@ -39,7 +39,7 @@
  */
 
 import { useSyncExternalStore } from "react";
-import { AVISO_AL_ENTRAR } from "@/lib/novedades";
+import { AVISO_AL_ENTRAR } from "@/lib/avisoAlEntrar";
 
 const CLAVE_VISTO = "spmm_aviso_visto";
 const CLAVE_LEIDO = "spmm_aviso_leido";

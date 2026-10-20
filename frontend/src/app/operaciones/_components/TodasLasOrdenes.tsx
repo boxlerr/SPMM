@@ -24,7 +24,10 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/components/ui/toast";
-import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
+import dynamic from "next/dynamic";
+import { useMontarAlAbrir } from "@/lib/diferido";
+// El modal de la OT se baja recién al abrirlo (ver lib/diferido.ts).
+const CreateWorkOrderModal = dynamic(() => import("@/components/CreateWorkOrderModal"), { ssr: false });
 import { API_URL } from "@/config";
 import { usePermisos } from "@/hooks/usePermisos";
 import { cn } from "@/lib/utils";
@@ -204,6 +207,7 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
     const [control, setControl] = useState<FiltroControl>("ALL");
 
     const [modalAbierto, setModalAbierto] = useState(false);
+    const montarModalOT = useMontarAlAbrir(modalAbierto);
     const [otAEditar, setOtAEditar] = useState<any>(null);
 
     const cargar = async () => {
@@ -576,12 +580,12 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                 </>
             )}
 
-            <CreateWorkOrderModal
+            {montarModalOT && <CreateWorkOrderModal
                 isOpen={modalAbierto}
                 onClose={() => { setModalAbierto(false); setOtAEditar(null); }}
                 onSuccess={() => { setModalAbierto(false); setOtAEditar(null); cargar(); onRefresh?.(); }}
                 orderToEdit={otAEditar}
-            />
+            />}
         </div>
     );
 }

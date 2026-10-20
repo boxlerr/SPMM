@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, createContext, useContext } from "react";
+import React, { useCallback, useEffect, useMemo, useState, createContext, useContext } from "react";
 import { CheckCircle2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { huboSinPermisoReciente } from "@/lib/sinPermiso";
@@ -53,21 +53,25 @@ export const ToastContext = createContext<ToastContextType | undefined>(undefine
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
-  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+  const showToast = useCallback((message: string, type: "success" | "error" | "info" = "success") => {
     // RF-24: si la API acaba de contestar 403 ya está a la vista «No tenés permiso para
     // esto» (lib/sinPermiso.ts). El error genérico de la pantalla no suma nada encima.
     if (type === "error" && huboSinPermisoReciente()) return;
     setToast({ message, type });
-  };
+  }, []);
+  // Siempre el mismo valor: con `{ showToast }` nuevo en cada render, mostrar o cerrar un
+  // aviso redibujaba todo lo que usa useToast (17 archivos), pantallas enteras incluidas.
+  const valor = useMemo(() => ({ showToast }), [showToast]);
+  const cerrar = useCallback(() => setToast(null), []);
 
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={valor}>
       {children}
       {toast && (
         <Toast
           message={toast.message}
           type={toast.type}
-          onClose={() => setToast(null)}
+          onClose={cerrar}
         />
       )}
     </ToastContext.Provider>

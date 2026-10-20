@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useCallback, useContext, useState, useEffect, useMemo, useRef, ReactNode } from "react";
 import { useAuth } from "./AuthContext";
 
 export interface Notification {
@@ -40,6 +40,23 @@ interface NotificationContextType {
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
+/**
+ * ¿La lista que llegó es la misma que ya está? Lo normal en cada vuelta del polling (cada
+ * 30 s) es que no haya llegado nada: guardar igual el arreglo nuevo redibujaba la campanita
+ * y todas las pantallas que usan este contexto (Recursos entera, Configuración) dos veces
+ * por minuto, sin que cambiara nada.
+ */
+function mismaLista(a: Notification[], b: Notification[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i];
+    if (x.id !== y.id || x.read !== y.read || x.message !== y.message || x.type !== y.type
+      || x.motivo !== y.motivo || x.timestamp.getTime() !== y.timestamp.getTime()
+      || x.id_orden_trabajo !== y.id_orden_trabajo || x.id_pieza !== y.id_pieza) return false;
+  }
+  return true;
+}
+
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -50,13 +67,23 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   // «no tenés permiso» detrás de PrimerIngreso.
   const esperaClave = !!user?.debe_cambiar_password;
 
+  // El token y la lista vistos por las funciones del contexto. Con refs las funciones son
+  // siempre las mismas (useCallback sin dependencias) y el valor del contexto cambia sólo
+  // cuando cambian los avisos.
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
+  const esperaClaveRef = useRef(esperaClave);
+  esperaClaveRef.current = esperaClave;
+  const notificationsRef = useRef(notifications);
+  notificationsRef.current = notifications;
+
   // Función auxiliar para obtener headers con autenticación
   const getHeaders = () => {
     const headers: HeadersInit = {
       "Content-Type": "application/json",
     };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
+    if (tokenRef.current) {
+      headers["Authorization"] = `Bearer ${tokenRef.current}`;
     }
     return headers;
   };
@@ -105,8 +132,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, [token, esperaClave]);
 
   // Función para recargar notificaciones manualmente
-  const reloadNotifications = async () => {
-    if (!token || esperaClave) return;
+  const reloadNotifications = useCallback(async () => {
+    if (!tokenRef.current || esperaClaveRef.current) return;
 
     try {
       const response = await fetch(`${API_URL}/notificaciones`, {
@@ -128,13 +155,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             id_orden_trabajo: n.id_orden_trabajo ?? undefined,
             id_pieza: n.id_pieza ?? undefined,
           }));
-          setNotifications(loadedNotifications);
+          setNotifications((prev) => (mismaLista(prev, loadedNotifications) ? prev : loadedNotifications));
         }
       }
     } catch (error) {
       console.error("Error al recargar notificaciones:", error);
     }
-  };
+  }, []);
 
   // 🔹 POLLING DE NOTIFICACIONES
   //
@@ -176,20 +203,20 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [isLoaded, token, esperaClave]);
+  }, [isLoaded, token, esperaClave, reloadNotifications]);
 
   // Exponer la función para recargar manualmente
   useEffect(() => {
     // Agregar función al contexto global para que otros componentes puedan usarla
     (window as any).reloadNotifications = reloadNotifications;
-  }, [token, esperaClave]);
+  }, [reloadNotifications]);
 
-  const addNotification = async (
+  const addNotification = useCallback(async (
     message: string,
     type: Notification["type"],
     motivo?: string
   ) => {
-    if (!token) {
+    if (!tokenRef.current) {
       // Si no hay token, crear notificación local temporal
       const newNotification: Notification = {
         id: `${Date.now()}-${Math.random()}`,
@@ -244,11 +271,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       };
       setNotifications((prev) => [newNotification, ...prev]);
     }
-  };
+  }, []);
 
-  const markAsRead = async (id: string) => {
+  const markAsRead = useCallback(async (id: string) => {
     // Buscar el id_notificacion antes de actualizar
-    const notification = notifications.find((n) => n.id === id);
+    const notification = notificationsRef.current.find((n) => n.id === id);
     const idNotificacion = notification?.id_notificacion;
 
     // Actualizar localmente primero para respuesta inmediata
@@ -257,7 +284,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     );
 
     // Actualizar en el backend si existe id_notificacion
-    if (idNotificacion && token) {
+    if (idNotificacion && tokenRef.current) {
       try {
         await fetch(`${API_URL}/notificaciones/${idNotificacion}/leida`, {
           method: "PUT",
@@ -271,13 +298,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         );
       }
     }
-  };
+  }, []);
 
-  const markAllAsRead = async () => {
+  const markAllAsRead = useCallback(async () => {
     // Actualizar localmente primero
     setNotifications((prev) => prev.map((notif) => ({ ...notif, read: true })));
 
-    if (token) {
+    if (tokenRef.current) {
       try {
         await fetch(`${API_URL}/notificaciones/leer-todas`, {
           method: "PUT",
@@ -287,7 +314,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         console.error("Error al marcar todas como leídas:", error);
       }
     }
-  };
+  }, []);
 
   /**
    * Vacía la campanita de TODO el taller (es una sola para todos), así que desde el 23/09
@@ -295,10 +322,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
    * al toque y, si el servidor dice que no (o no contesta), vuelve a como estaba: antes
    * se vaciaba en la pantalla igual y los avisos reaparecían solos en la próxima vuelta.
    */
-  const clearNotifications = async () => {
-    const antes = notifications;
+  const clearNotifications = useCallback(async () => {
+    const antes = notificationsRef.current;
     setNotifications([]);
-    if (!token) return;
+    if (!tokenRef.current) return;
     try {
       const response = await fetch(`${API_URL}/notificaciones`, {
         method: "DELETE",
@@ -310,22 +337,22 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       console.error("Error al eliminar todas las notificaciones:", error);
       setNotifications(antes);
     }
-  };
+  }, []);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
+
+  const valor = useMemo<NotificationContextType>(() => ({
+    notifications,
+    unreadCount,
+    loading,
+    addNotification,
+    markAsRead,
+    markAllAsRead,
+    clearNotifications,
+  }), [notifications, unreadCount, loading, addNotification, markAsRead, markAllAsRead, clearNotifications]);
 
   return (
-    <NotificationContext.Provider
-      value={{
-        notifications,
-        unreadCount,
-        loading,
-        addNotification,
-        markAsRead,
-        markAllAsRead,
-        clearNotifications,
-      }}
-    >
+    <NotificationContext.Provider value={valor}>
       {children}
     </NotificationContext.Provider>
   );

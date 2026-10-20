@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import {
     BorradorPlan,
@@ -26,7 +26,11 @@ import {
  *    que es lo más cerca que se puede estar de "cerró la ventana".
  */
 export function useBorradorPlan() {
-    const [borradorLocal, setBorradorLocal] = useState<BorradorPlan | null>(null);
+    // Era un useState que nadie leía (la pantalla no lo usa): cada retoque de la vista
+    // previa lo seteaba y redibujaba Operaciones entera, vista previa de 6.000 líneas
+    // incluida, una vez de más. Como ref guarda lo mismo sin redibujar nada.
+    const borradorLocal = useRef<BorradorPlan | null>(null);
+    const setBorradorLocal = (b: BorradorPlan | null) => { borradorLocal.current = b; };
     const idEnBase = useRef<number | null>(null);
     const pendiente = useRef<BorradorPlan | null>(null);
     const timer = useRef<number | null>(null);
@@ -159,5 +163,5 @@ export function useBorradorPlan() {
         };
     }, [subir]);
 
-    return { borradorLocal, registrarCambio, guardarYa, olvidar, adoptar, empezarNuevo, idBorradorEnBase };
+    return { registrarCambio, guardarYa, olvidar, adoptar, empezarNuevo, idBorradorEnBase };
 }

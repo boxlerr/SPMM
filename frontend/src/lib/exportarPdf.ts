@@ -97,9 +97,10 @@ let logoCache: Promise<Logo | null> | null = null;
 /**
  * El logo de la hoja impresa de la OT (`public/longchamps_logo.png`), achicado.
  *
- * El original mide 3956 × 737: meterlo entero en cada PDF son cientos de KB para algo
- * que se imprime de 5 cm. Se dibuja una vez a 900 px de ancho y se reusa. Si no se
- * puede cargar (sin red), el PDF sale igual, con el nombre en letras.
+ * Medía 3956 × 737 (115 KB); desde el 20/10/2026 el archivo es de 1200 × 224 (20 KB),
+ * que sigue sobrando para lo más grande en que se usa (las hojas impresas a 300 dpi). Se
+ * dibuja una vez a 900 px de ancho y se reusa. Si no se puede cargar (sin red), el PDF
+ * sale igual, con el nombre en letras.
  */
 export function cargarLogo(): Promise<Logo | null> {
     if (!logoCache) {

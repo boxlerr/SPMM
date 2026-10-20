@@ -66,41 +66,14 @@ import {
 } from "@/lib/reportes";
 import { ElegirAgrupacion, ElegirColumnas, ElegirFiltros, ElegirFuente, ElegirPeriodo, Paso } from "./PasosDelArmador";
 import { VistaPrevia } from "./VistaPrevia";
+import {
+    TRABAJO_VACIO, trabajoDesdeGuardado, trabajoDesdeEjemplo,
+    type TrabajoDeReporte, type EstadoCatalogo,
+} from "./trabajoDeReporte";
 
-/** Lo que se está armando. Vive en el bloque del Dashboard: cerrar y volver a abrir sigue
- *  donde estaba. */
-export interface TrabajoDeReporte {
-    receta: ConfigReporte | null;
-    nombre: string;
-    descripcion: string;
-    compartido: boolean;
-    /** El guardado que se está editando (si es propio, «Guardar» lo pisa). */
-    guardadoId: number | null;
-    /** Para saber si hay cambios sin guardar. */
-    base: { receta: ConfigReporte | null; nombre: string } | null;
-}
-
-export const TRABAJO_VACIO: TrabajoDeReporte = {
-    receta: null, nombre: "", descripcion: "", compartido: false, guardadoId: null, base: null,
-};
-
-export function trabajoDesdeGuardado(g: ReporteGuardado): TrabajoDeReporte {
-    const receta = g.config ? completarReceta(g.config) : null;
-    return {
-        receta,
-        nombre: g.nombre,
-        descripcion: g.descripcion ?? "",
-        compartido: g.compartido,
-        guardadoId: g.es_mio ? g.id : null,
-        base: { receta, nombre: g.nombre },
-    };
-}
-
-export function trabajoDesdeEjemplo(e: Ejemplo): TrabajoDeReporte {
-    return { ...TRABAJO_VACIO, receta: completarReceta(e.config), nombre: e.nombre, descripcion: e.descripcion };
-}
-
-export type EstadoCatalogo = "cargando" | "listo" | "viejo" | "error";
+// Lo que se está armando vive en trabajoDeReporte.ts (ver por qué ahí); se reexporta.
+export { TRABAJO_VACIO, trabajoDesdeGuardado, trabajoDesdeEjemplo } from "./trabajoDeReporte";
+export type { TrabajoDeReporte, EstadoCatalogo } from "./trabajoDeReporte";
 
 export function ArmadorDeReportes({
     abierto,
