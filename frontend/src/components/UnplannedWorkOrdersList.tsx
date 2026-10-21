@@ -16,32 +16,181 @@ import {
     FileText,
     Settings,
     MessageSquare,
-    PlusCircle
+    PlusCircle,
+    ClipboardList,
+    Check,
+    CheckSquare,
+    Wrench,
+    X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { WorkOrder } from "@/lib/types";
+import type { PlanificacionItem, WorkOrder } from "@/lib/types";
 import { OrderFiles } from "./common/OrderFiles";
 import { cn, getWorkOrderRowColor } from "@/lib/utils";
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
 import { AddProcessRow } from "./planning/AddProcessRow";
 import { useOrdenesConPlano, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
+import { addWorkMinutes, formatDate as formatISODate } from "@/lib/gantt-utils";
+
+/** Una PASADA concreta de un proceso dentro de una OT.
+ *
+ *  `idOtp` (orden_trabajo_proceso.id) es lo que la identifica: el mismo proceso puede
+ *  ir dos veces en la misma OT, así que `procesoId` solo no alcanza para decir cuál de
+ *  las dos se tocó. */
+export type ProcesoRef = {
+    ordenId: number;
+    procesoId: number;
+    idOtp?: number;
+    /** Nombre del proceso, para poder nombrarlo en el cartel de confirmación. */
+    nombre: string;
+};
 
 interface UnplannedWorkOrdersListProps {
     orders: WorkOrder[];
     onEdit: (order: WorkOrder) => void;
     onDelete: (id: number) => void;
     onDataChange?: () => void;
+    /** Planificación de estas OTs. Solo la manda la solapa "Planificadas": es de donde
+     *  salen el horario y la máquina de cada pasada, que no vienen en `orders`. */
+    planificacion?: PlanificacionItem[];
+    /** Cambia el estado de varias pasadas de una ("Marcar completados"). Si no viene,
+     *  no se ofrece la edición rápida. */
+    onProcessStatusChange?: (refs: ProcesoRef[], idEstado: number) => Promise<void> | void;
+    /** Pide borrar una pasada. El padre confirma antes de pegarle al backend. */
+    onProcessDelete?: (ref: ProcesoRef) => void;
     /** Zoom (%) aplicado SOLO a la tabla, no al header ni a los filtros. */
     tableZoom?: number;
+    /** Qué lista es. Cambia SOLO el título, el ícono, el color de acento y el texto
+     *  de "no hay nada": la tabla, los filtros, el orden y las columnas son
+     *  exactamente los mismos en las dos. Pedido de Julián (1/9): la pestaña
+     *  Planificadas tenía un diseño propio (tarjetas plegables) que no se parecía
+     *  en nada al resto de Órdenes de Trabajo. */
+    variante?: "no_planificadas" | "planificadas";
 }
 
-export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange, tableZoom = 100 }: UnplannedWorkOrdersListProps) {
+/** Textos y colores que cambian entre las dos listas. Lo único que cambia. */
+const COPY_VARIANTE = {
+    no_planificadas: {
+        titulo: "Órdenes No Planificadas",
+        bajada: "Estas órdenes requieren configuración de procesos y fechas.",
+        acentoCaja: "bg-orange-50 text-orange-600",
+        acentoOrden: "text-orange-600",
+        badge: "PENDIENTE",
+        badgeClase: "bg-orange-50 text-orange-700 border-orange-100",
+        vacioTitulo: "No hay órdenes pendientes",
+        vacioBajada: "Todas las órdenes de trabajo actuales ya han sido planificadas en el sistema.",
+        vacioFila: "No hay órdenes pendientes.",
+    },
+    planificadas: {
+        titulo: "Órdenes Planificadas",
+        bajada: "Estas órdenes ya tienen procesos y fechas asignadas.",
+        acentoCaja: "bg-red-50 text-red-700",
+        acentoOrden: "text-red-700",
+        badge: "PLANIFICADA",
+        badgeClase: "bg-red-50 text-red-700 border-red-100",
+        vacioTitulo: "No hay órdenes planificadas",
+        vacioBajada: "Todavía no se planificó ninguna orden, o las que había ya se entregaron y pasaron al Historial.",
+        vacioFila: "No hay órdenes planificadas.",
+    },
+} as const;
+
+/** Horario y máquina de una pasada, ya formateados para mostrar. */
+type PlanDePasada = { inicio: string; fin: string; maquina?: string };
+
+/** "09:30" a partir de un Date. */
+const horaDe = (d: Date) => `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+
+/** "25/08" a partir de un "2026-08-25". */
+const diaDe = (iso: string) => {
+    const [, mes, dia] = iso.split("-");
+    return `${dia}/${mes}`;
+};
+
+/**
+ * Cruza la planificación con las pasadas de las OTs para poder mostrar, en cada
+ * proceso, a qué hora entra y en qué máquina.
+ *
+ * La clave es la PASADA (`id_orden_trabajo_proceso`), no el proceso: una OT puede
+ * llevar el mismo proceso dos veces y cada una tiene su horario y su máquina.
+ *
+ * Los planes viejos —guardados antes de que la pasada existiera— traen ese campo en
+ * null. Para esos se cae a `orden + proceso`, pero SOLO cuando ese proceso aparece una
+ * sola vez en el plan de esa OT: si aparece dos veces no hay manera de saber cuál es
+ * cuál, y mostrar el horario de la otra pasada es peor que no mostrar nada.
+ */
+function construirPlanPorPasada(planificacion: PlanificacionItem[]) {
+    const porOtp = new Map<number, PlanDePasada>();
+    const porProceso = new Map<string, PlanDePasada>();
+    const vecesPorProceso = new Map<string, number>();
+    /** Qué procesos figuran en el plan, aunque después no se pueda decir qué pasada es
+     *  cuál. Sirve para no escribir "Sin planificar" sobre algo que sí está planificado. */
+    const procesosEnElPlan = new Set<string>();
+
+    for (const item of planificacion) {
+        // `inicio_min` / `fin_min` son minutos de trabajo contados desde las 9:00 del
+        // día en que se guardó el plan: el mismo criterio que usa el Gantt.
+        const base = item.creado_en ? new Date(item.creado_en) : new Date();
+        base.setHours(9, 0, 0, 0);
+        const desde = addWorkMinutes(base, item.inicio_min);
+        const hasta = addWorkMinutes(base, item.fin_min);
+        const plan: PlanDePasada = {
+            inicio: `${diaDe(formatISODate(desde))} ${horaDe(desde)}`,
+            fin: `${diaDe(formatISODate(hasta))} ${horaDe(hasta)}`,
+            maquina: item.nombre_maquinaria,
+        };
+
+        if (item.id_orden_trabajo_proceso != null) porOtp.set(item.id_orden_trabajo_proceso, plan);
+
+        const clave = `${item.orden_id}-${item.proceso_id}`;
+        procesosEnElPlan.add(clave);
+        vecesPorProceso.set(clave, (vecesPorProceso.get(clave) || 0) + 1);
+        porProceso.set(clave, plan);
+    }
+
+    for (const [clave, veces] of vecesPorProceso) {
+        if (veces > 1) porProceso.delete(clave);
+    }
+
+    return { porOtp, porProceso, procesosEnElPlan };
+}
+
+export function UnplannedWorkOrdersList({
+    orders,
+    onEdit,
+    onDelete,
+    onDataChange,
+    planificacion,
+    onProcessStatusChange,
+    onProcessDelete,
+    tableZoom = 100,
+    variante = "no_planificadas",
+}: UnplannedWorkOrdersListProps) {
+    const copy = COPY_VARIANTE[variante];
     const [searchTerm, setSearchTerm] = useState("");
     const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState);
+
+    // --- Edición rápida: tildar varios procesos y cerrarlos todos juntos ---
+    // Vuelve de la vista de tarjetas que tenía "Planificadas" antes: era el único
+    // cambio de estado masivo del sistema. Sin esto hay que abrir proceso por proceso
+    // en la solapa Planificación.
+    const [modoSeleccion, setModoSeleccion] = useState(false);
+    const [seleccionados, setSeleccionados] = useState<Map<string, ProcesoRef>>(new Map());
+    const [guardandoMasivo, setGuardandoMasivo] = useState(false);
+
+    // Índice de la planificación: solo se recalcula si cambió el plan.
+    const planIndex = React.useMemo(
+        () => construirPlanPorPasada(planificacion || []),
+        [planificacion]
+    );
+    /** ¿Esta lista tiene horario y máquina para mostrar? Solo "Planificadas". */
+    const conPlan = !!planificacion;
+
+    const puedeSeleccionar = !!onProcessStatusChange;
+    const puedeBorrarProceso = !!onProcessDelete;
 
     // OTs con el archivo del plano realmente cargado (la bandera del legacy no alcanza).
     const ordenesConPlano = useOrdenesConPlano();
@@ -81,7 +230,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
 
     const SortIcon = ({ column }: { column: typeof sortConfig.key }) => {
         if (sortConfig.key !== column || !sortConfig.direction) return <span className="ml-1 text-gray-300 opacity-0 group-hover:opacity-50">↕</span>;
-        return <span className="ml-1 text-orange-600 font-bold">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
+        return <span className={cn("ml-1 font-bold", copy.acentoOrden)}>{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
     };
 
     // Observa el scroll horizontal y actualiza `showRightFade` (true cuando hay
@@ -206,38 +355,145 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
         }
     };
 
+    // --- Procesos: identidad, selección y plan ---
+
+    type Proceso = WorkOrder["procesos"][number];
+
+    /** Identifica la fila de un proceso. Va con la PASADA (`proc.id`) porque el mismo
+     *  proceso puede repetirse en la OT; el índice es la red por si la pasada no vino. */
+    const claveProceso = (ordenId: number, proc: Proceso, indice: number) =>
+        `${ordenId}-${proc.id ?? `p${proc.proceso.id}-${indice}`}`;
+
+    const refDeProceso = (ordenId: number, proc: Proceso): ProcesoRef => ({
+        ordenId,
+        procesoId: proc.proceso.id,
+        idOtp: proc.id,
+        nombre: proc.proceso?.nombre || "este proceso",
+    });
+
+    const planDeProceso = (ordenId: number, proc: Proceso): PlanDePasada | undefined =>
+        (proc.id != null ? planIndex.porOtp.get(proc.id) : undefined)
+        ?? planIndex.porProceso.get(`${ordenId}-${proc.proceso.id}`);
+
+    const alternarProceso = (clave: string, ref: ProcesoRef) => {
+        setSeleccionados(prev => {
+            const next = new Map(prev);
+            if (next.has(clave)) next.delete(clave);
+            else next.set(clave, ref);
+            return next;
+        });
+    };
+
+    /** Tilda o destilda de un saque todos los procesos de una OT. */
+    const alternarOrdenCompleta = (order: WorkOrder) => {
+        const procesos = order.procesos || [];
+        const claves = procesos.map((proc, i) => claveProceso(order.id, proc, i));
+        const todosTildados = claves.length > 0 && claves.every(c => seleccionados.has(c));
+        setSeleccionados(prev => {
+            const next = new Map(prev);
+            procesos.forEach((proc, i) => {
+                const clave = claves[i];
+                if (todosTildados) next.delete(clave);
+                else next.set(clave, refDeProceso(order.id, proc));
+            });
+            return next;
+        });
+    };
+
+    const salirDeSeleccion = () => {
+        setModoSeleccion(false);
+        setSeleccionados(new Map());
+    };
+
+    const marcarCompletados = async () => {
+        if (!onProcessStatusChange || seleccionados.size === 0) return;
+        setGuardandoMasivo(true);
+        try {
+            // 3 = Finalizado, el mismo id que usa el combo de estado de Planificación.
+            await onProcessStatusChange(Array.from(seleccionados.values()), 3);
+            salirDeSeleccion();
+        } finally {
+            setGuardandoMasivo(false);
+        }
+    };
+
+    /** Columnas del panel "Producción". Va como estilo y no como clase de Tailwind
+     *  porque cambia según la solapa y las clases dinámicas no sobreviven al build. */
+    const columnasProcesos = React.useMemo(() => {
+        const cols: string[] = [];
+        if (modoSeleccion) cols.push("28px");
+        cols.push("30px", "minmax(130px, 2.5fr)", "95px", "70px", "70px", "minmax(110px, 1.6fr)");
+        if (conPlan) cols.push("minmax(100px, 1.3fr)", "minmax(140px, 1.7fr)");
+        if (puedeBorrarProceso) cols.push("32px");
+        return cols.join(" ");
+    }, [modoSeleccion, conPlan, puedeBorrarProceso]);
+
     return (
         <div className="space-y-4">
             {/* Header & Search */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                 <div className="flex items-center gap-2">
-                    <div className="p-2 bg-orange-50 rounded-lg text-orange-600">
-                        <AlertCircle className="w-5 h-5" />
+                    <div className={cn("p-2 rounded-lg", copy.acentoCaja)}>
+                        {variante === "planificadas" ? <ClipboardList className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
                     </div>
                     <div>
-                        <h3 className="font-bold text-gray-900">Órdenes No Planificadas</h3>
-                        <p className="text-xs text-gray-500">Estas órdenes requieren configuración de procesos y fechas.</p>
+                        <h3 className="font-bold text-gray-900">{copy.titulo}</h3>
+                        <p className="text-xs text-gray-500">{copy.bajada}</p>
                     </div>
                 </div>
-                <div className="relative w-full md:w-96">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <Input
-                        placeholder="Buscar por OT, Cliente o Producto..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10 h-10 bg-gray-50/50 border-gray-200 focus:bg-white transition-all rounded-lg"
-                    />
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    <div className="relative flex-1 md:w-96">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <Input
+                            placeholder="Buscar por OT, Cliente o Producto..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="pl-10 h-10 bg-gray-50/50 border-gray-200 focus:bg-white transition-all rounded-lg"
+                        />
+                    </div>
+                    {puedeSeleccionar && (
+                        <button
+                            type="button"
+                            onClick={() => (modoSeleccion ? salirDeSeleccion() : setModoSeleccion(true))}
+                            title={
+                                modoSeleccion
+                                    ? "Salir de la edición rápida"
+                                    : "Tildar varios procesos y cerrarlos todos juntos. Abrí una orden para ver sus procesos."
+                            }
+                            className={cn(
+                                "h-10 shrink-0 px-3 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-colors",
+                                modoSeleccion
+                                    ? "bg-gray-800 text-white border-gray-800"
+                                    : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300"
+                            )}
+                        >
+                            {modoSeleccion ? <X className="w-3.5 h-3.5" /> : <CheckSquare className="w-3.5 h-3.5" />}
+                            {modoSeleccion ? "Cancelar" : "Edición rápida"}
+                        </button>
+                    )}
                 </div>
             </div>
+
+            {/* En modo selección los procesos se tildan adentro de cada orden, así que
+                hace falta decir dónde están: si no, se ve una tabla sin un solo casillero. */}
+            {modoSeleccion && (
+                <div className="flex items-center gap-2 rounded-lg border border-gray-800/15 bg-gray-800/5 px-3 py-2 text-xs text-gray-600">
+                    <CheckSquare className="w-3.5 h-3.5 shrink-0 text-gray-500" />
+                    <span>
+                        Abrí una orden con la flecha de la izquierda y tildá los procesos que quieras cerrar.
+                        Podés tildar procesos de varias órdenes antes de guardar.
+                    </span>
+                </div>
+            )}
 
             <WorkOrderFilters filters={filters} setFilters={setFilters} orders={orders} />
 
             {filteredOrders.length === 0 ? (
                 <div className="py-20 text-center bg-gray-50/30 rounded-2xl border-2 border-dashed border-gray-100">
                     <Clock className="w-12 h-12 text-gray-200 mx-auto mb-3" />
-                    <h4 className="text-lg font-medium text-gray-900 font-bold">No hay órdenes pendientes</h4>
+                    <h4 className="text-lg font-medium text-gray-900 font-bold">{copy.vacioTitulo}</h4>
                     <p className="text-gray-500 max-w-xs mx-auto text-sm">
-                        Todas las órdenes de trabajo actuales ya han sido planificadas en el sistema.
+                        {copy.vacioBajada}
                     </p>
                 </div>
             ) : (
@@ -250,7 +506,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                     <div className="flex justify-between items-start mb-2">
                                         <div className="flex items-center gap-2">
                                             <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
-                                            <Badge className="bg-orange-50 text-orange-700 border-orange-100 text-[9px]">PENDIENTE</Badge>
+                                            <Badge className={cn("text-[9px]", copy.badgeClase)}>{copy.badge}</Badge>
                                         </div>
                                         <button className="text-gray-400">
                                             {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
@@ -322,7 +578,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                             <div className="text-xs text-gray-400 italic py-2">Sin procesos cargados</div>
                                         )}
                                         <div className="flex gap-2 justify-end pt-2">
-                                            <Button variant="ghost" size="sm" className="h-8 text-orange-600 hover:bg-orange-50 gap-1.5" onClick={() => onEdit(order)}>
+                                            <Button variant="ghost" size="sm" className={cn("h-8 gap-1.5 hover:bg-gray-100", copy.acentoOrden)} onClick={() => onEdit(order)}>
                                                 <Edit2 className="w-3.5 h-3.5" /> Editar
                                             </Button>
                                             <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50" onClick={() => onDelete(order.id)}>
@@ -393,7 +649,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
                                             <td colSpan={19} className="px-4 py-8 text-center text-gray-500">
-                                                {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes pendientes."}
+                                                {searchTerm ? "No se encontraron resultados para la búsqueda." : copy.vacioFila}
                                             </td>
                                         </tr>
                                     ) : (
@@ -556,29 +812,76 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                             <Settings className="w-3.5 h-3.5 text-gray-400" />
                                                                             <span className="text-[10px] font-bold uppercase tracking-tight text-gray-500">Producción</span>
                                                                         </div>
-                                                                        {order.procesos && order.procesos.length > 0 && (
-                                                                            <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                                                                                {order.procesos.length} PASOS
-                                                                            </span>
-                                                                        )}
+                                                                        <div className="flex items-center gap-2">
+                                                                            {modoSeleccion && order.procesos && order.procesos.length > 0 && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => alternarOrdenCompleta(order)}
+                                                                                    className="text-[10px] font-bold uppercase tracking-tight text-gray-500 hover:text-gray-800 underline decoration-dotted underline-offset-2"
+                                                                                >
+                                                                                    {order.procesos.every((proc, i) => seleccionados.has(claveProceso(order.id, proc, i)))
+                                                                                        ? "Destildar todos"
+                                                                                        : "Tildar todos"}
+                                                                                </button>
+                                                                            )}
+                                                                            {order.procesos && order.procesos.length > 0 && (
+                                                                                <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                                                                                    {order.procesos.length} PASOS
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
                                                                     
                                                                     <div className="flex flex-col">
                                                                         {order.procesos && order.procesos.length > 0 ? (
                                                                             <>
-                                                                                <div className="bg-gray-50/30 text-[9px] uppercase text-gray-400 grid grid-cols-[30px_3fr_100px_80px_80px_2fr] gap-3 px-4 py-1.5 font-bold border-b border-gray-100">
+                                                                                <div
+                                                                                    className="bg-gray-50/30 text-[9px] uppercase text-gray-400 grid gap-3 px-4 py-1.5 font-bold border-b border-gray-100"
+                                                                                    style={{ gridTemplateColumns: columnasProcesos }}
+                                                                                >
+                                                                                    {modoSeleccion && <div />}
                                                                                     <div>#</div>
                                                                                     <div>Proceso</div>
                                                                                     <div>Estado</div>
                                                                                     <div className="text-center">Min. Est.</div>
                                                                                     <div className="text-center">Min. Real</div>
                                                                                     <div>Recurso humano</div>
+                                                                                    {conPlan && <div>Máquina</div>}
+                                                                                    {conPlan && <div>Horario</div>}
+                                                                                    {puedeBorrarProceso && <div />}
                                                                                 </div>
-                                                                                {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc, pIdx) => (
-                                                                                    <div key={`${order.id}-${proc.proceso.id}`} className={cn(
-                                                                                        "grid grid-cols-[30px_3fr_100px_80px_80px_2fr] gap-3 px-4 py-2.5 border-b hover:bg-gray-50/80 items-center bg-white transition-colors",
-                                                                                        pIdx === order.procesos!.length - 1 && "border-b-0"
-                                                                                    )}>
+                                                                                {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc, pIdx) => {
+                                                                                    const clave = claveProceso(order.id, proc, pIdx);
+                                                                                    const tildado = seleccionados.has(clave);
+                                                                                    const plan = conPlan ? planDeProceso(order.id, proc) : undefined;
+                                                                                    // Sin horario hay dos motivos distintos y no dan lo mismo: o el proceso
+                                                                                    // se agregó después de planificar (hay que replanificar), o está en el
+                                                                                    // plan pero se repite en la OT y el plan es viejo (no se puede saber
+                                                                                    // qué pasada es cuál). Decir "Sin planificar" en el segundo caso manda
+                                                                                    // a replanificar una OT que ya está planificada.
+                                                                                    const estaEnElPlan = planIndex.procesosEnElPlan.has(`${order.id}-${proc.proceso.id}`);
+                                                                                    return (
+                                                                                    <div
+                                                                                        key={clave}
+                                                                                        className={cn(
+                                                                                            "grid gap-3 px-4 py-2.5 border-b items-center transition-colors",
+                                                                                            tildado ? "bg-red-50/40 hover:bg-red-50/60" : "bg-white hover:bg-gray-50/80",
+                                                                                            modoSeleccion && "cursor-pointer",
+                                                                                            pIdx === order.procesos!.length - 1 && "border-b-0"
+                                                                                        )}
+                                                                                        style={{ gridTemplateColumns: columnasProcesos }}
+                                                                                        onClick={modoSeleccion ? () => alternarProceso(clave, refDeProceso(order.id, proc)) : undefined}
+                                                                                    >
+                                                                                        {modoSeleccion && (
+                                                                                            <div className="flex items-center justify-center">
+                                                                                                <div className={cn(
+                                                                                                    "w-4 h-4 rounded border-2 flex items-center justify-center transition-all",
+                                                                                                    tildado ? "bg-red-500 border-red-500 text-white" : "bg-white border-gray-300"
+                                                                                                )}>
+                                                                                                    {tildado && <Check className="w-2.5 h-2.5" />}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        )}
                                                                                         <div className="text-gray-300 font-mono text-[10px]">{pIdx + 1}</div>
                                                                                         <div className="font-semibold text-xs text-gray-800 truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
                                                                                         <div>
@@ -601,8 +904,61 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                                         <div className="text-gray-500 text-[10px] font-medium truncate flex items-center gap-1.5 border-l border-gray-100 pl-2 h-4">
                                                                                             {proc.operario_nombre ? proc.operario_nombre.toLowerCase().split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : "Sin Asignar"}
                                                                                         </div>
+                                                                                        {/* Máquina y horario salen del plan, no de la OT. Un proceso puede
+                                                                                            estar cargado y todavía no planificado (se agregó después de
+                                                                                            planificar): ahí no hay horario que mostrar. */}
+                                                                                        {conPlan && (
+                                                                                            <div className="text-gray-500 text-[10px] font-medium truncate flex items-center gap-1" title={plan?.maquina || undefined}>
+                                                                                                {plan?.maquina ? (
+                                                                                                    <>
+                                                                                                        <Wrench className="w-2.5 h-2.5 shrink-0 text-indigo-400" />
+                                                                                                        <span className="truncate">{plan.maquina}</span>
+                                                                                                    </>
+                                                                                                ) : (
+                                                                                                    <span className="text-gray-300 italic">Sin máquina</span>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        )}
+                                                                                        {conPlan && (
+                                                                                            <div className="text-[10px] tabular-nums truncate">
+                                                                                                {plan ? (
+                                                                                                    <span className="text-gray-600 font-medium">
+                                                                                                        {plan.inicio} <span className="text-gray-300">→</span> {plan.fin}
+                                                                                                    </span>
+                                                                                                ) : estaEnElPlan ? (
+                                                                                                    <span
+                                                                                                        className="text-gray-400 font-medium"
+                                                                                                        title="Está planificado, pero este proceso va más de una vez en la orden y el plan es anterior al cambio que las distingue: no se puede saber qué horario le toca a cada una. Se acomoda solo la próxima vez que planifiques la OT."
+                                                                                                    >
+                                                                                                        Sin dato
+                                                                                                    </span>
+                                                                                                ) : (
+                                                                                                    <span
+                                                                                                        className="text-amber-600 font-medium"
+                                                                                                        title="Este proceso se agregó después de planificar la orden. Volvé a planificarla para darle horario, operario y máquina."
+                                                                                                    >
+                                                                                                        Sin planificar
+                                                                                                    </span>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        )}
+                                                                                        {puedeBorrarProceso && (
+                                                                                            <div className="flex items-center justify-center">
+                                                                                                {!modoSeleccion && (
+                                                                                                    <button
+                                                                                                        type="button"
+                                                                                                        onClick={(e) => { e.stopPropagation(); onProcessDelete!(refDeProceso(order.id, proc)); }}
+                                                                                                        title="Eliminar este proceso de la orden"
+                                                                                                        className="h-6 w-6 rounded text-gray-300 hover:text-red-600 hover:bg-red-50 flex items-center justify-center transition-colors"
+                                                                                                    >
+                                                                                                        <Trash2 className="w-3 h-3" />
+                                                                                                    </button>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        )}
                                                                                     </div>
-                                                                                ))}
+                                                                                    );
+                                                                                })}
                                                                                 <div className="bg-gray-50/50 border-t border-gray-100">
                                                                                     <AddProcessRow 
                                                                                         orderId={order.id} 
@@ -651,6 +1007,43 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                         />
                     </Card>
                 </>
+            )}
+
+            {/* Barra flotante de la edición rápida. Solo aparece cuando hay algo tildado,
+                para no tapar la tabla mientras se elige. */}
+            {modoSeleccion && seleccionados.size > 0 && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+                    <div className="bg-gray-900 text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-5 border border-gray-700">
+                        <div className="flex items-center gap-2 border-r border-gray-700 pr-5">
+                            <span className="bg-white text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center tabular-nums">
+                                {seleccionados.size}
+                            </span>
+                            <span className="font-medium text-sm">
+                                {seleccionados.size === 1 ? "proceso tildado" : "procesos tildados"}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={marcarCompletados}
+                                disabled={guardandoMasivo}
+                                className="bg-green-600 hover:bg-green-500 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded-full text-sm font-bold transition-colors flex items-center gap-2"
+                            >
+                                <Check className="w-4 h-4" />
+                                {guardandoMasivo ? "Guardando..." : "Marcar completados"}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setSeleccionados(new Map())}
+                                disabled={guardandoMasivo}
+                                className="text-gray-400 hover:text-white disabled:opacity-40 transition-colors p-1"
+                                title="Destildar todo"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

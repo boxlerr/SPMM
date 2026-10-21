@@ -15,8 +15,12 @@ export function capitalizeName(text?: string): string {
 
 /**
  * Extrae el motivo de error del cuerpo (texto) de una respuesta del backend.
- * Soporta el formato ResponseDTO ({ errors: [{ message }] }) y el detail de FastAPI
- * (string u objeto). Devuelve "" si no puede extraer un motivo legible.
+ * Soporta el formato ResponseDTO ({ errors: [{ message }] } y { errorDescription })
+ * y el detail de FastAPI (string u objeto). Devuelve "" si no puede extraer un motivo
+ * legible.
+ *
+ * El orden importa: los handlers de excepciones del backend escriben el motivo en
+ * `errors[0].message` y dejan `errorDescription` en null, así que ese va primero.
  */
 export function parseApiError(bodyText: string): string {
   if (!bodyText) return "";
@@ -24,6 +28,9 @@ export function parseApiError(bodyText: string): string {
     const b = JSON.parse(bodyText);
     if (Array.isArray(b?.errors) && b.errors.length > 0 && b.errors[0]?.message) {
       return String(b.errors[0].message);
+    }
+    if (typeof b?.errorDescription === "string" && b.errorDescription) {
+      return b.errorDescription;
     }
     if (typeof b?.detail === "string") return b.detail;
     if (b?.detail?.message) return String(b.detail.message);
@@ -111,4 +118,39 @@ export function getWorkOrderRowColor(order: any): string {
 
     // 6. GRIS: Completa para pedir Materiales ("sin_stock" o por defecto)
     return "bg-gray-100 hover:bg-gray-200/80"; 
+}
+/**
+ * ¿La OT ya está entregada / finalizada según el legacy?
+ *
+ *   (a) el cron la marcó finalizadototal=1 (regla oficial del legacy: cantidade>=cantidad,
+ *       fc=1, suspendida=1, etc.) — es el caso más común. El cron NO siempre setea
+ *       fecha_entrega porque en el legacy esa fecha queda en '1950-01-01' (sentinel)
+ *       hasta que se facture, así que no podemos depender solo de fecha_entrega.
+ *   (b) o tiene fecha_entrega real (>1950).
+ *
+ * `finalizadototal` es un entero 0/1/null en la base: se compara con Number() y no por
+ * truthiness, para que un null o un "0" que llegue como texto no cuente como finalizada.
+ */
+export function isOrderDelivered(order: any): boolean {
+    if (Number(order?.finalizadototal) === 1) return true;
+    if (!order?.fecha_entrega) return false;
+    const deliveryDate = new Date(order.fecha_entrega);
+    return deliveryDate.getFullYear() > 1950;
+}
+
+/**
+ * "Completada" = ya no tiene sentido verla entre el trabajo pendiente:
+ *    - la marcó el legacy como entregada/finalizada (isOrderDelivered), o
+ *    - se entregó todo lo pedido (lo mismo que muestra la columna Entrega
+ *      como "Entrega completa": cantidad_entregada >= unidades).
+ *
+ * Es el ÚNICO criterio de "completada" del sistema: lo usan la pestaña Completadas de
+ * Planificación y el reparto Planificadas / No Planificadas / Historial de Órdenes de
+ * Trabajo. Si cada pantalla se arma el suyo, los contadores dejan de coincidir.
+ */
+export function isOrderCompleted(order: any): boolean {
+    if (isOrderDelivered(order)) return true;
+    const total = Number(order?.unidades) || 0;
+    const entregado = Number(order?.cantidad_entregada) || 0;
+    return total > 0 && entregado >= total;
 }

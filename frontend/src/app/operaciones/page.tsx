@@ -18,7 +18,7 @@ import { OperatorLoadTab } from "./_components/OperatorLoadTab"
 
 
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
-import { cn } from "@/lib/utils"
+import { cn, isOrderCompleted, isOrderDelivered } from "@/lib/utils"
 import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box, RefreshCw, Trash2, ChevronDown, CheckCircle2 } from "lucide-react"
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
 import { format } from "date-fns"
@@ -55,7 +55,9 @@ const getAuthHeaders = (): HeadersInit => {
 };
 
 export default function OperacionesPage() {
-  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion" | "operarios" | "materia_prima" | "carga">("lista_planificacion")
+  // Operaciones abre SIEMPRE en "Órdenes de Trabajo": es la pantalla desde la que se
+  // arranca el día (ver qué entró y qué falta planificar), no la planificación ya hecha.
+  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion" | "operarios" | "materia_prima" | "carga">("work_orders")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   /** OT pre-seleccionada para editar (viene del query param `?edit_ot=ID` desde
    *  el link "Editar OT ↗" de la vista previa, o de otra parte del sistema). */
@@ -353,34 +355,10 @@ export default function OperacionesPage() {
   }, [rawPlanificacion, selectedLoteId]);
 
 
-  const isOrderDelivered = (order: WorkOrder) => {
-    // Una OT está "entregada / finalizada" si:
-    //   (a) el cron la marcó finalizadototal=1 (regla oficial del legacy: cantidade>=cantidad,
-    //       fc=1, suspendida=1, etc.) — esto es el caso más común. El cron NO siempre setea
-    //       fecha_entrega porque en el legacy esa fecha queda en '1950-01-01' (sentinel)
-    //       hasta que se facture, así que no podemos depender solo de fecha_entrega.
-    //   (b) o tiene fecha_entrega real (>1950).
-    // Bug previo: solo se chequeaba (b), por eso el modal Planificador mostraba 208 OTs
-    // cuando la lista "No Planificadas" mostraba 165 — las 43 de diferencia eran OTs ya
-    // finalizadas (finalizadototal=1) pero con fecha_entrega NULL.
-    if (Number(order.finalizadototal) === 1) return true;
-    if (!order.fecha_entrega) return false;
-    const deliveryDate = new Date(order.fecha_entrega);
-    return deliveryDate.getFullYear() > 1950;
-  };
-
-  /** "Completada" = ya no tiene sentido verla en Planificadas:
-   *    - la marcó el legacy como entregada/finalizada (isOrderDelivered), o
-   *    - se entregó todo lo pedido (lo mismo que muestra la columna Entrega
-   *      como "Entrega completa": cantidad_entregada >= unidades).
-   *  Estas OTs se mueven a la pestaña "Completadas" en vez de seguir mezcladas
-   *  con el trabajo pendiente (pedido de Lucas, 14/08). */
-  const isOrderCompleted = (order: WorkOrder) => {
-    if (isOrderDelivered(order)) return true;
-    const total = Number(order.unidades) || 0;
-    const entregado = Number(order.cantidad_entregada) || 0;
-    return total > 0 && entregado >= total;
-  };
+  // `isOrderDelivered` / `isOrderCompleted` viven en lib/utils: el reparto
+  // Planificadas / No Planificadas / Historial de la solapa "Órdenes de Trabajo" usa
+  // exactamente el mismo criterio. Cuando cada pantalla tenía el suyo, el contador
+  // decía 0 y la lista de abajo mostraba 24.
 
   // Use filteredPlanificacion for deriving planned orders to reflect the history selection
   const plannedOrderIds = new Set(filteredPlanificacion.map(p => p.orden_id));
@@ -1474,6 +1452,13 @@ export default function OperacionesPage() {
           {/* Tabs Navigation */}
           <div className="flex overflow-x-auto pb-1 items-center gap-1 mt-6 border-b border-gray-200 scrollbar-hide">
             <button
+              onClick={() => setActiveTab("work_orders")}
+              className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "work_orders" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
+            >
+              <LayoutList size={18} />
+              Órdenes de Trabajo
+            </button>
+            <button
               onClick={() => setActiveTab("lista_planificacion")}
               className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "lista_planificacion" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
@@ -1504,13 +1489,6 @@ export default function OperacionesPage() {
               Materia Prima
             </button>
 
-            <button
-              onClick={() => setActiveTab("work_orders")}
-              className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "work_orders" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
-            >
-              <LayoutList size={18} />
-              Órdenes de Trabajo
-            </button>
           </div>
         </div>
       </div>
@@ -1572,8 +1550,6 @@ export default function OperacionesPage() {
                 refreshTrigger={refreshTrigger}
                 orders={ordenesTrabajo}
                 planificacion={rawPlanificacion}
-                operarios={rawOperarios}
-                maquinarias={rawMaquinarias}
                 onRefresh={fetchData}
               />
             )}
