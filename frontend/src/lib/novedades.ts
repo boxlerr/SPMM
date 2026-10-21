@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "reporte-ot-pendientes-con-procesos",
+        fecha: "2026-10-21",
+        tipo: "nuevo",
+        seccion: "Dashboard",
+        titulo: "Un reporte de las OT pendientes con sus procesos, por cliente, listo para bajar en Excel",
+        detalle:
+            "En Reportes está «OT pendientes con sus procesos»: elegís uno o varios clientes y sale cada OT que todavía tiene trabajo con su número, cliente, artículo, unidades, prioridad, fecha prometida, los procesos que le faltan en orden (con los minutos de cada uno) y las horas que le quedan, de la más urgente a la menos. Antes el reporte de órdenes no traía los procesos, y el de pasos mostraba también los pasos de OT ya entregadas, porque en el sistema viejo nadie tilda el avance y siguen «Pendiente». Ahora las dos fuentes tienen la columna y el filtro «Situación de la OT» (Pendiente, Terminada en el taller o Entregada), y la de pasos suma la prioridad, las unidades y la fecha prometida de la OT. El «Estado» de antes se llama «Estado del tablero»: es el de las tarjetas, donde «Pendiente» deja afuera las retrasadas y las en curso.",
+        href: "/dashboard",
+    },
+    {
         id: "pantallas-mas-rapidas",
         fecha: "2026-10-21",
         tipo: "mejora",
