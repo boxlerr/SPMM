@@ -47,13 +47,23 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "ot-pendientes-un-proceso-por-fila",
+        fecha: "2026-10-21",
+        tipo: "mejora",
+        seccion: "Dashboard",
+        titulo: "«OT pendientes, un proceso por fila»: el reporte para la IA, como el listado del sistema viejo",
+        detalle:
+            "En Reportes hay un reporte nuevo, primero en la lista: cada proceso que le falta a cada OT con trabajo, en su propia fila, con la OT, el cliente, el código y el artículo, la cantidad, la prioridad, la fecha prometida, el número de paso, el proceso y los minutos. Los procesos de una misma OT salen seguidos y en su orden. Elegís los clientes y lo bajás en Excel. Además, en el reporte de órdenes, «Procesos pendientes» y «Horas pendientes» ahora salen vacíos en una OT ya entregada: antes mostraban los pasos que nadie tildó en el sistema viejo, como si le faltaran.",
+        href: "/dashboard",
+    },
+    {
         id: "recursos-del-taller",
         fecha: "2026-10-21",
         tipo: "nuevo",
         seccion: "Dashboard",
         titulo: "«Recursos del taller»: las personas y las máquinas en un Excel, para organizar la producción con la IA",
         detalle:
-            "En Reportes, al lado de «Reporte mensual», está el botón «Recursos del taller». Baja un Excel con una hoja por persona disponible (sus SKILL 1 y 2 en orden, lo que también sabe y lo que no hace, sus días, su horario y sus horas efectivas por día y por semana, y las ausencias cargadas), otra por máquina (si está operativa, los procesos que hace y quién la puede usar), las habilidades proceso por proceso y los feriados que vienen con lo que eligió el taller. También sale como texto para subir a la IA junto con «OT pendientes con sus procesos». Es lo mismo que mira el planificador: los procesos de cada máquina incluyen los que deduce de su tipo, no sólo los cargados. En Recursos › Recurso humano, «Exportar habilidades» pasó a ser «Exportar recursos» y trae lo mismo.",
+            "En Reportes, al lado de «Reporte mensual», está el botón «Recursos del taller». Baja un Excel con una hoja por persona disponible (sus SKILL 1 y 2 en orden, lo que también sabe y lo que no hace, sus días, su horario y sus horas efectivas por día y por semana, y las ausencias cargadas), otra por máquina (si está operativa, los procesos que hace y quién la puede usar), las habilidades proceso por proceso y los feriados que vienen con lo que eligió el taller. También sale como texto para subir a la IA junto con el reporte de OT pendientes. Es lo mismo que mira el planificador: los procesos de cada máquina incluyen los que deduce de su tipo, no sólo los cargados. En Recursos › Recurso humano, «Exportar habilidades» pasó a ser «Exportar recursos» y trae lo mismo.",
         href: "/dashboard",
     },
     {
