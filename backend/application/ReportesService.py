@@ -591,8 +591,10 @@ def _base(plan: Plan, ctx: Contexto, permisos: PermisosUsuario):
     if fuente.condiciones:
         condiciones += fuente.condiciones(ctx, permisos)
 
+    desempate = fuente.desempate(ctx) if (fuente.desempate and not plan.agrupado) else []
     base = (
         select(*[c.expr(ctx).label(_etiqueta(c.codigo)) for c in necesarias],
+               *[e.label(f"desempate_{i}") for i, e in enumerate(desempate)],
                fuente.clave(ctx).label("clave_fila"))
         .select_from(fuente.origen(ctx))
         .where(*condiciones)
@@ -609,9 +611,10 @@ def armar_consultas(plan: Plan, ctx: Contexto, permisos: PermisosUsuario, limite
     if not plan.agrupado:
         orden = base.c[_etiqueta(plan.orden_por)]
         orden = orden.desc() if plan.orden_desc else orden.asc()
+        desempate = [c for c in base.c if c.name.startswith("desempate_")]
         filas = (
             select(*[base.c[_etiqueta(c.codigo)] for c in plan.columnas])
-            .order_by(orden.nulls_last(), base.c.clave_fila)
+            .order_by(orden.nulls_last(), *desempate, base.c.clave_fila)
             .limit(limite)
         )
         cuenta = select(

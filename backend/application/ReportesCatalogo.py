@@ -520,6 +520,10 @@ class Fuente:
     # máquinas): la CANTIDAD de pasos de cada persona también es confidencial en el resto
     # de la app. Sin esto, sólo lo pide medir una columna con `rendimiento`.
     persona_confidencial: bool = False
+    # Cómo se desempata el orden pedido ANTES de la clave, en una lista sin agrupar. Los
+    # pasos: por OT y por su número de paso, para que los de una misma OT salgan juntos y
+    # en orden (como el listado del sistema viejo) ordenando por lo que sea.
+    desempate: Optional[Callable[[Contexto], list]] = None
 
     def __post_init__(self):
         codigos = [c.codigo for c in self.columnas]
@@ -662,17 +666,22 @@ def _paso_sin_terminar(tabla) -> ColumnElement:
     return func.coalesce(tabla.c.id_estado, 1) != 3
 
 
-def _situacion_ot(ctx: Contexto) -> ColumnElement:
-    """La situación de la OT `ot` (ver SITUACIONES_OT). Sirve en toda fuente que tenga la
-    OT con ese alias."""
-    x = OrdenTrabajoProceso.__table__.alias("otp_s")
-    de_la_ot = x.c.id_orden_trabajo == ot.c.id
-    entregada = or_(
+def _ot_entregada() -> ColumnElement:
+    """SQL: la OT `ot` está entregada (isOrderCompleted, ver SITUACIONES_OT)."""
+    return or_(
         func.coalesce(ot.c.finalizadototal, 0) == 1,
         fecha_real(ot.c.fecha_entrega),
         and_(func.coalesce(ot.c.unidades, 0) > 0,
              func.coalesce(ot.c.cantidad_entregada, 0) >= ot.c.unidades),
     )
+
+
+def _situacion_ot(ctx: Contexto) -> ColumnElement:
+    """La situación de la OT `ot` (ver SITUACIONES_OT). Sirve en toda fuente que tenga la
+    OT con ese alias."""
+    x = OrdenTrabajoProceso.__table__.alias("otp_s")
+    de_la_ot = x.c.id_orden_trabajo == ot.c.id
+    entregada = _ot_entregada()
     terminada = and_(select(x.c.id).where(de_la_ot).exists(),
                      ~select(x.c.id).where(de_la_ot, _paso_sin_terminar(x)).exists())
     return case((entregada, "entregada"), (terminada, "terminada"), else_="pendiente")
@@ -692,7 +701,7 @@ def _procesos_de_la_ot(solo_sin_terminar: bool):
     """Los procesos de la OT en una celda, en el orden de sus pasos y con los minutos
     estimados de cada uno: «TORNEADO (180 min) → EMBALADO (10 min)». Un proceso repetido
     en la OT sale las veces que está (es un dato válido). Vacío: no tiene pasos (o, con
-    `solo_sin_terminar`, no le falta ninguno)."""
+    `solo_sin_terminar`, no le falta ninguno o ya se entregó)."""
     x = OrdenTrabajoProceso.__table__.alias("otp_l")
     p = Proceso.__table__.alias("pc_l")
     nombre = func.coalesce(p.c.nombre, "(sin proceso)")
@@ -703,17 +712,22 @@ def _procesos_de_la_ot(solo_sin_terminar: bool):
     q = (select(lista_en_orden(con_minutos, literal(SEPARADOR_PROCESOS), x.c.orden, x.c.id))
          .select_from(x.outerjoin(p, p.c.id == x.c.id_proceso))
          .where(x.c.id_orden_trabajo == ot.c.id))
-    if solo_sin_terminar:
-        q = q.where(_paso_sin_terminar(x))
-    return q.scalar_subquery()
+    if not solo_sin_terminar:
+        return q.scalar_subquery()
+    # Una OT entregada no tiene nada pendiente aunque sus pasos sigan «Pendiente»: en el
+    # sistema viejo nadie tilda el avance. Lucas, 21/10/2026, armó el reporte sin el filtro
+    # de la situación y le salían «procesos pendientes» en OT entregadas en agosto.
+    return case((_ot_entregada(), None), else_=q.where(_paso_sin_terminar(x)).scalar_subquery())
 
 
 def _horas_sin_terminar():
     """Lo estimado de los pasos que le faltan a la OT, en horas (uno en proceso, entero)."""
     x = OrdenTrabajoProceso.__table__.alias("otp_h")
-    return (select(func.sum(x.c.tiempo_proceso) / 60.0)
-            .where(x.c.id_orden_trabajo == ot.c.id, _paso_sin_terminar(x))
-            .scalar_subquery())
+    q = (select(func.sum(x.c.tiempo_proceso) / 60.0)
+         .where(x.c.id_orden_trabajo == ot.c.id, _paso_sin_terminar(x))
+         .scalar_subquery())
+    # Como los procesos pendientes: una OT entregada no tiene horas pendientes.
+    return case((_ot_entregada(), None), else_=q)
 
 
 def _situacion() -> Columna:
@@ -762,11 +776,12 @@ ORDENES = Fuente(
         C("pasos_terminados", "Pasos terminados", "entero", _pasos_de_la_ot(True), totaliza=True),
         C("procesos_pendientes", "Procesos pendientes", "texto", _procesos_de_la_ot(True),
           ayuda="Lo que le falta hacer, en el orden de la OT y con los minutos estimados de "
-                "cada paso: los pasos pendientes y en proceso. Vacío: no le falta ninguno o no "
-                "tiene pasos cargados."),
+                "cada paso: los pasos pendientes y en proceso. Vacío: no le falta ninguno, ya "
+                "se entregó o no tiene pasos cargados."),
         C("horas_pendientes", "Horas pendientes", "numero", _horas_sin_terminar(), decimales=2,
           totaliza=True,
-          ayuda="Lo estimado en la OT para los pasos que le faltan (uno en proceso cuenta entero)."),
+          ayuda="Lo estimado en la OT para los pasos que le faltan (uno en proceso cuenta "
+                "entero). Vacío si ya se entregó."),
         C("procesos", "Procesos (todos)", "texto", _procesos_de_la_ot(False),
           ayuda="Todos los pasos de la OT, terminados o no, en su orden y con sus minutos estimados."),
         C("fecha_entrada", "Fecha de entrada", "fecha", fecha_limpia(ot.c.fecha_entrada),
@@ -852,6 +867,7 @@ PASOS = Fuente(
         # 21/10/2026): cuánto se pide, para cuándo, con qué prioridad y si le queda trabajo.
         # Sin la situación, los pasos «Pendiente» de OT ya entregadas (en el sistema viejo
         # nadie tilda el avance) se mezclaban con los que faltan de verdad.
+        C("cod_articulo", "Código de artículo", "texto", ar.c.cod_articulo),
         C("unidades", "Unidades de la OT", "entero", ot.c.unidades, medible=False,
           ayuda="La cantidad pedida en la OT (se repite en cada paso: no se suma)."),
         C("prioridad", "Prioridad", "texto", pr.c.descripcion, filtro_expr=ot.c.id_prioridad,
@@ -869,6 +885,9 @@ PASOS = Fuente(
         C("horas_estimadas", "Horas estimadas", "numero", otp.c.tiempo_proceso / 60.0,
           decimales=2, totaliza=True, por_defecto=True, rendimiento=True,
           ayuda="El tiempo cargado en la OT para el paso."),
+        # Lo mismo en minutos, como lo carga el taller y lo lista el sistema viejo.
+        C("minutos", "Minutos estimados", "entero", otp.c.tiempo_proceso, totaliza=True,
+          rendimiento=True, ayuda="El tiempo cargado en la OT para el paso, en minutos."),
         # El código sigue siendo «horas_reales» (los reportes guardados lo nombran), pero NO
         # son las horas reales de la ficha ni del reporte mensual: ésas son EFECTIVAS
         # (jornada menos pausas) y están en la fuente «Personas».
@@ -883,6 +902,7 @@ PASOS = Fuente(
     ),
     periodo=("fin", "inicio"),
     orden_inicial=("fin", "desc"),
+    desempate=lambda ctx: [otp.c.id_orden_trabajo, otp.c.orden],
     # Paso por paso, persona y horas son lo que ya muestra cada OT. Lo confidencial es
     # comparar a las personas: agrupar o filtrar por persona, con CUALQUIER cuenta. No sólo
     # las horas: la CANTIDAD de pasos de cada una es la tarjeta /dashboard/rendimiento-
@@ -1422,6 +1442,30 @@ def puede_rendimiento(permisos: PermisosUsuario) -> bool:
 # quien puede leer su fuente.
 
 EJEMPLOS: tuple[dict, ...] = (
+    # El mismo pedido, como lo prefirió Lucas al verlo (21/10/2026, 11:18): «estaría bueno
+    # que los procesos los exporte por fila», como el listado del sistema viejo (OT,
+    # cliente, código, artículo, proceso, minutos; los pasos de cada OT seguidos y en su
+    # orden: ver el `desempate` de PASOS). Sólo los pasos que faltan de las OT que tienen
+    # trabajo, con el filtro de clientes abierto para elegir.
+    {
+        "codigo": "ot_pendientes_por_proceso",
+        "nombre": "OT pendientes, un proceso por fila",
+        "descripcion": ("Cada proceso que les falta a las OT con trabajo, en su fila: OT, cliente, "
+                        "código y artículo, cantidad, prioridad, fecha prometida, paso, proceso y "
+                        "minutos, como el listado del sistema viejo. Elegí los clientes y bajalo en "
+                        "Excel (por ejemplo, para la IA)."),
+        "config": {
+            "fuente": "pasos",
+            "columnas": ["numero", "cliente", "cod_articulo", "articulo", "unidades", "prioridad",
+                         "fecha_prometida", "paso", "proceso", "minutos"],
+            "filtros": [{"columna": "situacion", "op": "en", "valores": ["pendiente"]},
+                        {"columna": "estado", "op": "en", "valores": [1, 2]},
+                        {"columna": "cliente", "op": "en", "valores": []}],
+            "agrupar": [],
+            "medidas": [],
+            "orden": {"por": "fecha_prometida", "direccion": "asc"},
+        },
+    },
     # Lo que pidió Lucas el 21/10/2026 para pasárselo a la IA y que organice la producción.
     # Arranca con el filtro de clientes ABIERTO y vacío: la pantalla lo muestra para elegir
     # y no lo manda hasta que tenga alguno (ver ReportesService.sin_filtros_a_medio_cargar).

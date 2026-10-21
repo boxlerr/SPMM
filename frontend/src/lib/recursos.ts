@@ -218,7 +218,7 @@ export function textoDeRecursosParaClaude(r: Recursos): string {
     const renglones: string[] = [
         "# Recursos de Metalúrgica Longchamps: personas y máquinas",
         "",
-        "Para organizar la producción. Va junto con el archivo de las OT pendientes y sus procesos (Metlosys › Dashboard › Reportes › «OT pendientes con sus procesos»): con los dos se puede ver la capacidad, repartir los trabajos, asignar personas y máquinas y proponer un cronograma. Los tiempos de cada proceso están en el de las OT.",
+        "Para organizar la producción. Va junto con el archivo de las OT pendientes y sus procesos (Metlosys › Dashboard › Reportes › «OT pendientes, un proceso por fila» o «OT pendientes con sus procesos»): con los dos se puede ver la capacidad, repartir los trabajos, asignar personas y máquinas y proponer un cronograma. Los minutos de cada proceso están en el de las OT.",
         "",
         "## Para tener en cuenta",
         "",

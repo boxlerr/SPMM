@@ -340,9 +340,10 @@ def test_el_catalogo_no_trae_datos_personales_ni_secretos():
 
 
 def test_los_ejemplos_son_utiles_y_pasan_la_validacion():
-    assert 4 <= len(cat.EJEMPLOS) <= 7
+    assert 4 <= len(cat.EJEMPLOS) <= 8
     nombres = {e["nombre"] for e in cat.EJEMPLOS}
-    for pedido in ("OT pendientes con sus procesos", "OT entregadas por cliente este mes",
+    for pedido in ("OT pendientes, un proceso por fila", "OT pendientes con sus procesos",
+                   "OT entregadas por cliente este mes",
                    "Horas por persona y proceso", "Consumo de material por OT",
                    "No conformidades por persona"):
         assert pedido in nombres
@@ -1479,3 +1480,61 @@ def test_un_filtro_a_medio_cargar_es_el_mismo_que_en_la_pantalla():
     ]}
     assert [f.get("valores", f.get("valor", f.get("desde"))) for f in
             rs.sin_filtros_a_medio_cargar(config)["filtros"]] == [[None], "eje", False, 0]
+
+
+async def test_una_ot_entregada_no_tiene_procesos_pendientes(base):
+    """Lo que le pasó a Lucas (21/10, 11:08): armó el reporte sin el filtro de la situación
+    y las OT entregadas en agosto traían «procesos pendientes», porque en el sistema viejo
+    nadie tilda el avance y sus pasos siguen «Pendiente». Entregada: no le falta nada."""
+    await _agregar_ots(base, [_ot(41, finalizada=1, entrega=d(8, 11)), _ot(42, entrega=d(8, 28))],
+                       [_paso(511, 41, 150, 1, minutos=60), _paso(512, 42, 160, 1, minutos=30)])
+    r = await correr(base, _cfg("ordenes", ["numero", "estado", "situacion", "procesos_pendientes",
+                                            "horas_pendientes", "procesos"],
+                                filtros=[{"columna": "cliente", "op": "en", "valores": [1]}],
+                                orden={"por": "numero"}))
+    por_ot = {f["numero"] - 15000: f for f in r["filas"]}
+    for n in (41, 42):
+        assert por_ot[n]["situacion"] == "Entregada"
+        assert (por_ot[n]["procesos_pendientes"], por_ot[n]["horas_pendientes"]) == (None, None)
+    # Los procesos que tuvo, sí.
+    assert por_ot[41]["procesos"] == "TORNO CNC (60 min)"
+    assert por_ot[41]["estado"] == "Completada"
+
+
+async def test_ot_pendientes_un_proceso_por_fila_el_ejemplo(base):
+    """«Que los procesos los exporte por fila», como el sistema viejo: cada paso que falta en
+    su fila, los de una OT seguidos y en su orden aunque se ordene por fecha prometida."""
+    await _agregar_ots(base, [
+        _ot(50, cliente=2, prometida=d(10, 5), prio=2),
+        _ot(51, cliente=2, prometida=d(10, 5)),
+        _ot(52, cliente=2, finalizada=1, entrega=d(9, 1), prometida=d(9, 30)),
+    ], [
+        # Cargados desordenados: los ids no siguen el orden de los pasos.
+        _paso(603, 50, 160, 1, minutos=40),
+        _paso(601, 50, 150, 2, minutos=420),
+        _paso(602, 50, 160, 3, estado=3, minutos=15),   # ya terminado: no va
+        _paso(604, 51, 150, 2, minutos=60),
+        _paso(600, 51, 160, 1, estado=2, minutos=10),   # en proceso: va
+        _paso(605, 52, 150, 1, minutos=99),             # OT entregada: no va
+    ])
+    ejemplo = next(e for e in rs.catalogo(SUPERVISOR)["ejemplos"] if e["codigo"] == "ot_pendientes_por_proceso")
+    assert ejemplo["config"]["filtros"][-1] == {"columna": "cliente", "op": "en", "valores": []}
+    config = rs.sin_filtros_a_medio_cargar(ejemplo["config"])
+    config["filtros"].append({"columna": "cliente", "op": "en", "valores": [2]})
+    r = await correr(base, config, SUPERVISOR)
+    assert [c["nombre"] for c in r["columnas"]] == [
+        "N° de OT", "Cliente", "Código de artículo", "Artículo", "Unidades de la OT", "Prioridad",
+        "Fecha prometida", "Paso", "Proceso", "Minutos estimados"]
+    assert [(f["numero"] - 15000, f["paso"], f["proceso"], f["minutos"]) for f in r["filas"]] == [
+        # Primero la retrasada (prometida el 10/09); después las dos del 05/10, cada una
+        # entera y en el orden de sus pasos aunque los ids estén desordenados.
+        (13, 1, "TORNO CNC", 60),
+        (50, 1, "SOLDADURA", 40), (50, 2, "TORNO CNC", 420),
+        (51, 1, "SOLDADURA", 10), (51, 2, "TORNO CNC", 60),
+    ]
+    fila = r["filas"][1]
+    assert (fila["cliente"], fila["cod_articulo"], fila["articulo"], fila["unidades"], fila["prioridad"],
+            fila["fecha_prometida"]) == ("Beta SA", "A-1", "Eje", 5, "Urgente", "2026-10-05")
+    assert r["totales"] == {"minutos": 60 + 40 + 420 + 10 + 60}
+    assert r["criterios"]["lineas"][2:5] == [
+        "Situación de la OT: Pendiente", "Estado del paso: Pendiente, En proceso", "Cliente: Beta SA"]
