@@ -84,6 +84,8 @@ export type BorradorPlan = {
 
 export type BorradorResumen = {
     id: number;
+    /** Quién lo dejó. Es lo que permite avisar "este no es tuyo" antes de borrarlo. */
+    id_usuario?: number | null;
     nombre_usuario?: string | null;
     cantidad_ots: number;
     cantidad_procesos: number;

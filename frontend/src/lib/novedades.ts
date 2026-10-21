@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "borrar-un-borrador-de-planificacion",
+        fecha: "2026-09-11",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Ya podés sacar un plan sin confirmar de la lista de «Retomar borrador»",
+        detalle:
+            "Cada vez que calculás una planificación y no la confirmás queda un borrador guardado, así que la lista se iba llenando sola con planes de hace días que ya no le servían a nadie. Ahora cada uno tiene una cruz al costado para borrarlo. Antes había una, pero sólo aparecía cuando le pasabas el mouse por encima y era muy difícil de encontrar; ahora se ve siempre. Y si el borrado falla —por ejemplo, si se te cortó la conexión— te lo dice, en vez de quedarse sin hacer nada. Antes de borrar te avisa qué te estás por perder: cuántas órdenes y procesos tiene ese plan, de cuándo es, y si lo dejó otra persona te lo aclara con el nombre. El aviso es sólo un aviso: si igual lo querés borrar, lo borrás.",
+        href: "/operaciones",
+    },
+    {
         id: "la-descripcion-del-producto-ya-no-pisa-la-observacion",
         fecha: "2026-09-11",
         tipo: "arreglo",
