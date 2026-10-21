@@ -340,13 +340,14 @@ def test_el_catalogo_no_trae_datos_personales_ni_secretos():
 
 
 def test_los_ejemplos_son_utiles_y_pasan_la_validacion():
-    assert 4 <= len(cat.EJEMPLOS) <= 6
+    assert 4 <= len(cat.EJEMPLOS) <= 7
     nombres = {e["nombre"] for e in cat.EJEMPLOS}
-    for pedido in ("OT entregadas por cliente este mes", "Horas por persona y proceso",
-                   "Consumo de material por OT", "No conformidades por persona"):
+    for pedido in ("OT pendientes con sus procesos", "OT entregadas por cliente este mes",
+                   "Horas por persona y proceso", "Consumo de material por OT",
+                   "No conformidades por persona"):
         assert pedido in nombres
     for e in cat.EJEMPLOS:
-        rs.validar(e["config"], ADMIN, AHORA.date())
+        rs.validar(rs.sin_filtros_a_medio_cargar(e["config"]), ADMIN, AHORA.date())
 
 
 def test_los_atajos_del_periodo():
@@ -859,7 +860,7 @@ async def test_pausas_por_motivo_el_ejemplo(base):
 async def test_todos_los_ejemplos_corren_con_quien_los_ve(base):
     for quien in (ADMIN, SUPERVISOR, OPERARIO, SOLO_TABLERO, AUDITOR):
         for e in rs.catalogo(quien)["ejemplos"]:
-            r = await correr(base, e["config"], quien)
+            r = await correr(base, rs.sin_filtros_a_medio_cargar(e["config"]), quien)
             assert r["filas"] is not None
 
 
@@ -893,7 +894,7 @@ async def test_los_criterios_dichos_en_castellano(base):
         "Artículo contiene «eje»",
         "Unidades: de 1 a 1.000,5",
         "Con reclamo: No",
-        "Agrupado por Estado · Cuentas: Cantidad",
+        "Agrupado por Estado del tablero · Cuentas: Cantidad",
         "Ordenado por Cantidad (de mayor a menor)",
     ]
 
@@ -1309,3 +1310,172 @@ async def test_no_conformidades_con_paso_piezas_controladas_y_destino_de_rf12(ba
             fila["disposicion"]) == (15010, 1, 2, 50, "Se retrabaja")
     assert fila["porcentaje_rechazo"] == pytest.approx(4.0)
     assert all(f["porcentaje_rechazo"] is None for f in r["filas"][1:])
+
+
+# ─────────────────── las OT pendientes con sus procesos (Lucas, 21/10/2026) ───────────────────
+#
+# «Quise armar un reporte con las OT pendientes de 4 o 5 clientes, incluyendo los procesos de
+# cada trabajo, para exportarlo y pasárselo a la IA»: en Órdenes no estaban los procesos y en
+# Pasos no se podía dejar afuera lo ya entregado (en el sistema viejo nadie tilda el avance, y
+# los pasos de una OT entregada siguen «Pendiente»).
+
+
+async def _agregar_ots(Sesion, ordenes, pasos=()):
+    async with Sesion() as s:
+        s.add_all(ordenes)
+        await s.flush()
+        s.add_all(pasos)
+        await s.commit()
+
+
+def _ot(id_, cliente=1, finalizada=0, unidades=5, entregadas=0, entrega=None, prometida=d(10, 15), prio=1):
+    return OrdenTrabajo(id=id_, id_otvieja=15000 + id_, id_cliente=cliente, id_prioridad=prio,
+                        id_sector=1, id_articulo=1, unidades=unidades, cantidad_entregada=entregadas,
+                        finalizadototal=finalizada, fecha_orden=d(9, 1), fecha_entrada=d(9, 1),
+                        fecha_prometida=prometida,
+                        fecha_entrega=entrega)
+
+
+def _paso(id_, ot_, proceso, orden, estado=1, minutos=None):
+    return OrdenTrabajoProceso(id=id_, id_orden_trabajo=ot_, id_proceso=proceso, orden=orden,
+                               id_estado=estado, tiempo_proceso=minutos)
+
+
+async def test_la_situacion_de_la_ot_es_la_de_ordenes_de_trabajo(base):
+    """Entregada = isOrderCompleted (finalizada, con entrega real o con todo entregado);
+    Terminada en el taller = todos los pasos tildados; lo demás tiene trabajo."""
+    await _agregar_ots(base, [
+        _ot(20, entrega=d(9, 18)),                 # sin finalizar, con entrega real
+        _ot(21, unidades=3, entregadas=3),         # sin finalizar, con todo entregado
+        _ot(22, unidades=0, entregadas=0),         # sin unidades: no cuenta como entregada
+        _ot(23),                                   # todos los pasos tildados
+        _ot(24),                                   # uno tildado y otro no
+    ], [
+        _paso(301, 23, 150, 1, estado=3), _paso(302, 23, 160, 2, estado=3),
+        _paso(303, 24, 150, 1, estado=3), _paso(304, 24, 160, 2, estado=1),
+    ])
+    r = await correr(base, _cfg("ordenes", ["numero", "estado", "situacion"], orden={"por": "numero"}))
+    assert [(f["numero"] - 15000, f["estado"], f["situacion"]) for f in r["filas"]] == [
+        (10, "Completada", "Entregada"), (11, "Completada", "Entregada"),
+        (12, "Completada", "Entregada"),
+        # Retrasada y en curso en el tablero: para el trabajo que queda, pendientes las dos.
+        (13, "Retrasada", "Pendiente"), (14, "En curso", "Pendiente"),
+        # Sin pasos cargados: tiene trabajo (no está «terminada»).
+        (15, "Pendiente", "Pendiente"),
+        (16, "Completada", "Entregada"),
+        (20, "Pendiente", "Entregada"), (21, "Pendiente", "Entregada"), (22, "Pendiente", "Pendiente"),
+        (23, "En curso", "Terminada en el taller"), (24, "En curso", "Pendiente"),
+    ]
+    r = await correr(base, _cfg("ordenes", ["numero"], orden={"por": "numero"},
+                                filtros=[{"columna": "situacion", "op": "en", "valores": ["pendiente"]}]))
+    assert [n - 15000 for n in _col(r, "numero")] == [13, 14, 15, 22, 24]
+    r = await correr(base, _cfg("ordenes", agrupar=["situacion"], orden={"por": "situacion"}))
+    assert {f["situacion"]: f["m0"] for f in r["filas"]} == {
+        "Entregada": 6, "Pendiente": 5, "Terminada en el taller": 1}
+
+
+async def test_los_procesos_de_la_ot_en_orden_y_en_una_celda(base):
+    await _agregar_ots(base, [_ot(30)], [
+        # Cargados desordenados, con un proceso repetido y dos pasos en el mismo lugar (el
+        # orden no es único: desempata el paso más viejo).
+        _paso(404, 30, 160, 3, minutos=15),
+        _paso(401, 30, 150, 1, estado=3, minutos=120),
+        _paso(403, 30, 150, 3),                    # sin minutos cargados
+        _paso(402, 30, 160, 2, estado=2, minutos=45),
+    ])
+    r = await correr(base, _cfg("ordenes", ["numero", "procesos_pendientes", "horas_pendientes", "procesos"],
+                                orden={"por": "numero"}))
+    por_ot = {f["numero"] - 15000: f for f in r["filas"]}
+    assert por_ot[30]["procesos_pendientes"] == "SOLDADURA (45 min) → TORNO CNC → SOLDADURA (15 min)"
+    assert por_ot[30]["procesos"] == ("TORNO CNC (120 min) → SOLDADURA (45 min) → TORNO CNC → "
+                                      "SOLDADURA (15 min)")
+    assert por_ot[30]["horas_pendientes"] == pytest.approx(1.0)
+    # Todo terminado: no le falta nada (vacío, no cero).
+    assert (por_ot[10]["procesos_pendientes"], por_ot[10]["horas_pendientes"]) == (None, None)
+    assert por_ot[10]["procesos"] == "TORNO CNC (120 min) → SOLDADURA (60 min)"
+    # El paso en proceso cuenta entero.
+    assert (por_ot[14]["procesos_pendientes"], por_ot[14]["horas_pendientes"]) == (
+        "TORNO CNC (30 min)", pytest.approx(0.5))
+    assert por_ot[15]["procesos"] is None
+    assert r["totales"] == {"horas_pendientes": pytest.approx(1.0 + 0.5 + 1.0)}
+
+    # «Por cliente y proceso»: las OT a las que les falta soldar.
+    r = await correr(base, _cfg("ordenes", ["numero"], orden={"por": "numero"}, filtros=[
+        {"columna": "procesos_pendientes", "op": "contiene", "valor": "solda"}]))
+    assert [n - 15000 for n in _col(r, "numero")] == [30]
+
+
+async def test_los_pasos_de_las_ot_pendientes_con_lo_de_la_ot(base):
+    """El caso de la captura de Lucas: los pasos de una OT ya entregada siguen «Pendiente»
+    porque nadie tilda el avance. Filtrando por la situación de la OT quedan afuera."""
+    await _agregar_ots(base, [_ot(40, cliente=2, finalizada=1, entrega=d(9, 10))],
+                       [_paso(501, 40, 150, 1, minutos=60)])
+    filtro = {"columna": "situacion", "op": "en", "valores": ["pendiente"]}
+    columnas = ["numero", "proceso", "estado", "unidades", "prioridad", "fecha_prometida", "situacion"]
+    r = await correr(base, _cfg("pasos", columnas, orden={"por": "numero", "direccion": "asc"}))
+    assert (15040, "Pendiente") in [(f["numero"], f["estado"]) for f in r["filas"]]
+    r = await correr(base, _cfg("pasos", columnas, filtros=[filtro], orden={"por": "numero", "direccion": "asc"}))
+    assert [(f["numero"], f["proceso"], f["estado"], f["unidades"], f["prioridad"], f["fecha_prometida"],
+             f["situacion"]) for f in r["filas"]] == [
+        (15013, "TORNO CNC", "Pendiente", 7, "Normal", "2026-09-10", "Pendiente"),
+        (15014, "TORNO CNC", "En proceso", 1, "Urgente", "2026-10-01", "Pendiente"),
+    ]
+    # Las unidades de la OT se repiten en cada paso: no van a la fila de totales.
+    assert "unidades" not in r["totales"]
+    # Varios clientes a la vez, con la prioridad de la OT.
+    r = await correr(base, _cfg("pasos", ["numero"], filtros=[
+        {"columna": "situacion", "op": "en", "valores": ["pendiente", "entregada"]},
+        {"columna": "cliente", "op": "en", "valores": [1, 2]},
+        {"columna": "prioridad", "op": "en", "valores": [1]},
+    ], orden={"por": "numero", "direccion": "asc"}))
+    assert _col(r, "numero") == [15010, 15010, 15012, 15013, 15040]
+    async with base() as s:
+        opciones = await rs.opciones(s, "pasos", ADMIN)
+    assert opciones["situacion"] == [{"valor": "pendiente", "texto": "Pendiente"},
+                                     {"valor": "terminada", "texto": "Terminada en el taller"},
+                                     {"valor": "entregada", "texto": "Entregada"}]
+
+
+async def test_ot_pendientes_con_procesos_el_ejemplo(base):
+    """El ejemplo arranca con el filtro de clientes abierto y vacío: la pantalla lo muestra
+    para elegir y no lo manda hasta que tenga alguno (limpiarConfig)."""
+    ejemplo = next(e for e in rs.catalogo(SUPERVISOR)["ejemplos"] if e["codigo"] == "ot_pendientes_con_procesos")
+    assert ejemplo["config"]["filtros"][1] == {"columna": "cliente", "op": "en", "valores": []}
+    with pytest.raises(BusinessException, match="elegí al menos un valor"):
+        rs.validar(ejemplo["config"], ADMIN, AHORA.date())
+
+    config = rs.sin_filtros_a_medio_cargar(ejemplo["config"])
+    r = await correr(base, config, SUPERVISOR)
+    # Lo que pidió: número de OT, cliente, artículo, cantidad, prioridad, fecha prometida y los
+    # procesos pendientes (más sus horas).
+    assert [c["nombre"] for c in r["columnas"]] == [
+        "N° de OT", "Cliente", "Artículo", "Unidades", "Prioridad", "Fecha prometida",
+        "Procesos pendientes", "Horas pendientes"]
+    # Lo más urgente arriba; lo que no tiene fecha prometida, al final.
+    assert [(f["numero"], f["fecha_prometida"], f["procesos_pendientes"]) for f in r["filas"]] == [
+        (15013, "2026-09-10", "TORNO CNC (60 min)"),
+        (15014, "2026-10-01", "TORNO CNC (30 min)"),
+        (15015, None, None),
+    ]
+    # Con los clientes elegidos (varios).
+    config["filtros"].append({"columna": "cliente", "op": "en", "valores": [2, 3]})
+    r = await correr(base, config, SUPERVISOR)
+    assert _col(r, "numero") == [15013, 15015]
+    assert r["criterios"]["lineas"][:4] == [
+        "Datos: Órdenes de trabajo", "Período: todas las fechas",
+        "Situación de la OT: Pendiente", "Cliente: Beta SA, Cien Real"]
+
+
+def test_un_filtro_a_medio_cargar_es_el_mismo_que_en_la_pantalla():
+    config = {"fuente": "ordenes", "columnas": ["numero"], "filtros": [
+        {"columna": "cliente", "op": "en", "valores": []},
+        {"columna": "cliente", "op": "en", "valores": [None]},
+        {"columna": "articulo", "op": "contiene", "valor": "  "},
+        {"columna": "articulo", "op": "contiene", "valor": "eje"},
+        {"columna": "reclamo", "op": "es", "valor": None},
+        {"columna": "reclamo", "op": "es", "valor": False},
+        {"columna": "unidades", "op": "entre", "desde": "", "hasta": None},
+        {"columna": "unidades", "op": "entre", "desde": 0},
+    ]}
+    assert [f.get("valores", f.get("valor", f.get("desde"))) for f in
+            rs.sin_filtros_a_medio_cargar(config)["filtros"]] == [[None], "eje", False, 0]

@@ -58,6 +58,7 @@ from sqlalchemy import (
     and_,
     bindparam,
     case,
+    cast,
     func,
     literal,
     or_,
@@ -311,6 +312,35 @@ def _mes_pg(elemento, compilador, **kw):
 @compiles(mes_de, "sqlite")
 def _mes_sqlite(elemento, compilador, **kw):
     return f"strftime('%Y-%m', {compilador.process(elemento.clauses, **kw)})"
+
+
+class lista_en_orden(FunctionElement):
+    """Los textos de un grupo en UNA celda, separados por `separador` y en el orden de las
+    columnas que siguen: lista_en_orden(texto, separador, orden1, orden2...). Es
+    string_agg en Postgres y group_concat en SQLite (que acepta el ORDER BY adentro desde
+    la 3.44)."""
+
+    type = String()
+    name = "lista_en_orden"
+    inherit_cache = True
+
+
+def _partes_de_la_lista(elemento, compilador, **kw) -> tuple[str, str, str]:
+    texto, separador, *orden = list(elemento.clauses)
+    return (compilador.process(texto, **kw), compilador.process(separador, **kw),
+            ", ".join(compilador.process(o, **kw) for o in orden))
+
+
+@compiles(lista_en_orden)
+def _lista_pg(elemento, compilador, **kw):
+    texto, separador, orden = _partes_de_la_lista(elemento, compilador, **kw)
+    return f"string_agg({texto}, {separador} ORDER BY {orden})"
+
+
+@compiles(lista_en_orden, "sqlite")
+def _lista_sqlite(elemento, compilador, **kw):
+    texto, separador, orden = _partes_de_la_lista(elemento, compilador, **kw)
+    return f"group_concat({texto}, {separador} ORDER BY {orden})"
 
 
 class dia_de(FunctionElement):
@@ -603,6 +633,50 @@ ESTADOS_OT = {
 }
 ESTADOS_PASO = {1: "Pendiente", 2: "En proceso", 3: "Terminado"}
 
+# ¿Le queda trabajo a la OT? Es OTRA pregunta que la del estado del tablero, y la que hizo
+# Lucas el 21/10/2026: «las OT pendientes de 4 o 5 clientes, con sus procesos, para
+# pasárselo a la IA y que organice la producción». En el tablero, «Pendiente» es sólo lo
+# que no arrancó y no está vencido: filtrar por ese estado dejaba afuera las retrasadas y
+# las en curso, que son justamente las primeras que hay que hacer.
+#
+# El criterio es el de la pantalla de Órdenes de Trabajo y de Planificación (no una regla
+# nueva): «Entregada» es isOrderCompleted (frontend/src/lib/utils.ts: finalizada por el
+# legacy, con entrega real o con todo lo pedido entregado; es la que manda una OT al
+# Historial), y «Terminada en el taller» es la solapa del mismo nombre de Planificación
+# (todos los pasos tildados, todavía sin entregar). Lo demás tiene trabajo: «Pendiente».
+# La entrega real usa la regla de fechas del servidor (`fecha_real`); la pantalla mira el
+# año > 1950. El 21/10/2026 no había ninguna OT donde eso diera distinto (ninguna entrega
+# en 1950 ni en 3000) y las 1.191 entregadas eran todas finalizadototal = 1.
+SITUACIONES_OT = {
+    "pendiente": "Pendiente",
+    "terminada": "Terminada en el taller",
+    "entregada": "Entregada",
+}
+
+# Cómo se separan los procesos de una OT en una celda: se lee como una ruta.
+SEPARADOR_PROCESOS = " → "
+
+
+def _paso_sin_terminar(tabla) -> ColumnElement:
+    """El paso todavía tiene trabajo: pendiente o en proceso (sin estado, pendiente)."""
+    return func.coalesce(tabla.c.id_estado, 1) != 3
+
+
+def _situacion_ot(ctx: Contexto) -> ColumnElement:
+    """La situación de la OT `ot` (ver SITUACIONES_OT). Sirve en toda fuente que tenga la
+    OT con ese alias."""
+    x = OrdenTrabajoProceso.__table__.alias("otp_s")
+    de_la_ot = x.c.id_orden_trabajo == ot.c.id
+    entregada = or_(
+        func.coalesce(ot.c.finalizadototal, 0) == 1,
+        fecha_real(ot.c.fecha_entrega),
+        and_(func.coalesce(ot.c.unidades, 0) > 0,
+             func.coalesce(ot.c.cantidad_entregada, 0) >= ot.c.unidades),
+    )
+    terminada = and_(select(x.c.id).where(de_la_ot).exists(),
+                     ~select(x.c.id).where(de_la_ot, _paso_sin_terminar(x)).exists())
+    return case((entregada, "entregada"), (terminada, "terminada"), else_="pendiente")
+
 
 # ── 1. Órdenes de trabajo ──
 
@@ -612,6 +686,43 @@ def _pasos_de_la_ot(solo_terminados: bool):
     if solo_terminados:
         q = q.where(x.c.id_estado == 3)
     return q.scalar_subquery()
+
+
+def _procesos_de_la_ot(solo_sin_terminar: bool):
+    """Los procesos de la OT en una celda, en el orden de sus pasos y con los minutos
+    estimados de cada uno: «TORNEADO (180 min) → EMBALADO (10 min)». Un proceso repetido
+    en la OT sale las veces que está (es un dato válido). Vacío: no tiene pasos (o, con
+    `solo_sin_terminar`, no le falta ninguno)."""
+    x = OrdenTrabajoProceso.__table__.alias("otp_l")
+    p = Proceso.__table__.alias("pc_l")
+    nombre = func.coalesce(p.c.nombre, "(sin proceso)")
+    con_minutos = case(
+        (x.c.tiempo_proceso.isnot(None), nombre + " (" + cast(x.c.tiempo_proceso, String()) + " min)"),
+        else_=nombre,
+    )
+    q = (select(lista_en_orden(con_minutos, literal(SEPARADOR_PROCESOS), x.c.orden, x.c.id))
+         .select_from(x.outerjoin(p, p.c.id == x.c.id_proceso))
+         .where(x.c.id_orden_trabajo == ot.c.id))
+    if solo_sin_terminar:
+        q = q.where(_paso_sin_terminar(x))
+    return q.scalar_subquery()
+
+
+def _horas_sin_terminar():
+    """Lo estimado de los pasos que le faltan a la OT, en horas (uno en proceso, entero)."""
+    x = OrdenTrabajoProceso.__table__.alias("otp_h")
+    return (select(func.sum(x.c.tiempo_proceso) / 60.0)
+            .where(x.c.id_orden_trabajo == ot.c.id, _paso_sin_terminar(x))
+            .scalar_subquery())
+
+
+def _situacion() -> Columna:
+    return C("situacion", "Situación de la OT", "texto", _situacion_ot, opciones="situaciones_ot",
+             etiquetas=SITUACIONES_OT,
+             ayuda="Si a la OT le queda trabajo. Pendiente: no se entregó y le falta algún paso "
+                   "(también las retrasadas y las en curso del tablero). Terminada en el taller: "
+                   "todos los pasos tildados, sin entregar. Entregada: la que está en el Historial "
+                   "de Órdenes de Trabajo.")
 
 
 ORDENES = Fuente(
@@ -636,14 +747,28 @@ ORDENES = Fuente(
         C("prioridad", "Prioridad", "texto", pr.c.descripcion, filtro_expr=ot.c.id_prioridad,
           opciones="prioridades", por_defecto=True),
         C("sector", "Sector", "texto", se.c.nombre, filtro_expr=ot.c.id_sector, opciones="sectores"),
-        C("estado", "Estado", "texto", _estado_ot, opciones="estados_ot", etiquetas=ESTADOS_OT,
+        # «del tablero» desde que existe la situación (abajo): las dos tienen un «Pendiente»
+        # y no quieren decir lo mismo. El código sigue siendo «estado».
+        C("estado", "Estado del tablero", "texto", _estado_ot, opciones="estados_ot", etiquetas=ESTADOS_OT,
           por_defecto=True,
           ayuda="El mismo estado de las tarjetas del Dashboard: completada, en curso (algún "
-                "paso arrancado), retrasada (vencida sin arrancar) o pendiente."),
-        C("unidades", "Unidades", "entero", ot.c.unidades, totaliza=True, por_defecto=True),
+                "paso arrancado), retrasada (vencida sin arrancar) o pendiente (ni arrancada "
+                "ni vencida). Para saber si le queda trabajo, «Situación de la OT»."),
+        _situacion(),
+        C("unidades", "Unidades", "entero", ot.c.unidades, totaliza=True, por_defecto=True,
+          ayuda="La cantidad pedida."),
         C("entregadas", "Unidades entregadas", "entero", ot.c.cantidad_entregada, totaliza=True),
         C("pasos", "Pasos", "entero", _pasos_de_la_ot(False), totaliza=True),
         C("pasos_terminados", "Pasos terminados", "entero", _pasos_de_la_ot(True), totaliza=True),
+        C("procesos_pendientes", "Procesos pendientes", "texto", _procesos_de_la_ot(True),
+          ayuda="Lo que le falta hacer, en el orden de la OT y con los minutos estimados de "
+                "cada paso: los pasos pendientes y en proceso. Vacío: no le falta ninguno o no "
+                "tiene pasos cargados."),
+        C("horas_pendientes", "Horas pendientes", "numero", _horas_sin_terminar(), decimales=2,
+          totaliza=True,
+          ayuda="Lo estimado en la OT para los pasos que le faltan (uno en proceso cuenta entero)."),
+        C("procesos", "Procesos (todos)", "texto", _procesos_de_la_ot(False),
+          ayuda="Todos los pasos de la OT, terminados o no, en su orden y con sus minutos estimados."),
         C("fecha_entrada", "Fecha de entrada", "fecha", fecha_limpia(ot.c.fecha_entrada),
           filtro_expr=ot.c.fecha_entrada),
         C("fecha_prometida", "Fecha prometida", "fecha", fecha_limpia(ot.c.fecha_prometida),
@@ -700,6 +825,7 @@ PASOS = Fuente(
         .outerjoin(mq, mq.c.id == MAQUINA_DEL_PASO)
         .outerjoin(cl, cl.c.id == ot.c.id_cliente)
         .outerjoin(ar, ar.c.id == ot.c.id_articulo)
+        .outerjoin(pr, pr.c.id == ot.c.id_prioridad)
     ),
     clave=lambda ctx: otp.c.id,
     columnas=(
@@ -722,6 +848,17 @@ PASOS = Fuente(
           etiquetas=ESTADOS_PASO, por_defecto=True),
         _cliente(),
         _articulo(),
+        # Lo de la OT que hace falta para organizar la producción paso por paso (Lucas,
+        # 21/10/2026): cuánto se pide, para cuándo, con qué prioridad y si le queda trabajo.
+        # Sin la situación, los pasos «Pendiente» de OT ya entregadas (en el sistema viejo
+        # nadie tilda el avance) se mezclaban con los que faltan de verdad.
+        C("unidades", "Unidades de la OT", "entero", ot.c.unidades, medible=False,
+          ayuda="La cantidad pedida en la OT (se repite en cada paso: no se suma)."),
+        C("prioridad", "Prioridad", "texto", pr.c.descripcion, filtro_expr=ot.c.id_prioridad,
+          opciones="prioridades"),
+        C("fecha_prometida", "Fecha prometida", "fecha", fecha_limpia(ot.c.fecha_prometida),
+          filtro_expr=ot.c.fecha_prometida),
+        _situacion(),
         C("inicio", "Arranque", "fechaHora", fecha_limpia(otp.c.inicio_real),
           filtro_expr=otp.c.inicio_real, por_defecto=True),
         C("fin", "Fin", "fechaHora", fecha_limpia(otp.c.fin_real), filtro_expr=otp.c.fin_real,
@@ -1245,6 +1382,7 @@ OPCIONES_DE_TABLA: dict[str, tuple] = {
 OPCIONES_FIJAS: dict[str, dict] = {
     "estados_ot": ESTADOS_OT,
     "estados_paso": ESTADOS_PASO,
+    "situaciones_ot": SITUACIONES_OT,
     "motivos_ausencia": MOTIVOS_AUSENCIA,
     "estados_maquina": ESTADOS_OPERATIVOS,
     "tipos_nc": TIPOS_NC,
@@ -1284,6 +1422,27 @@ def puede_rendimiento(permisos: PermisosUsuario) -> bool:
 # quien puede leer su fuente.
 
 EJEMPLOS: tuple[dict, ...] = (
+    # Lo que pidió Lucas el 21/10/2026 para pasárselo a la IA y que organice la producción.
+    # Arranca con el filtro de clientes ABIERTO y vacío: la pantalla lo muestra para elegir
+    # y no lo manda hasta que tenga alguno (ver ReportesService.sin_filtros_a_medio_cargar).
+    # Sin período: una OT pendiente puede haber entrado hace meses.
+    {
+        "codigo": "ot_pendientes_con_procesos",
+        "nombre": "OT pendientes con sus procesos",
+        "descripcion": ("Las OT que todavía tienen trabajo, con sus procesos pendientes en orden, "
+                        "cantidad, prioridad y fecha prometida. Elegí los clientes y bajalo en Excel "
+                        "(por ejemplo, para pasárselo a la IA y organizar la producción)."),
+        "config": {
+            "fuente": "ordenes",
+            "columnas": ["numero", "cliente", "articulo", "unidades", "prioridad", "fecha_prometida",
+                         "procesos_pendientes", "horas_pendientes"],
+            "filtros": [{"columna": "situacion", "op": "en", "valores": ["pendiente"]},
+                        {"columna": "cliente", "op": "en", "valores": []}],
+            "agrupar": [],
+            "medidas": [],
+            "orden": {"por": "fecha_prometida", "direccion": "asc"},
+        },
+    },
     {
         "codigo": "ot_entregadas_por_cliente",
         "nombre": "OT entregadas por cliente este mes",

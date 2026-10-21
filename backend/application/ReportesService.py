@@ -1049,9 +1049,28 @@ def _columna_para_pantalla(c: Columna, sin_persona: bool = False) -> dict:
     }
 
 
+def _filtro_completo(f: dict) -> bool:
+    """Espejo de filtroCompleto (frontend/src/lib/reportes.ts)."""
+    op = f.get("op")
+    if op == "en":
+        return bool(f.get("valores"))
+    if op == "contiene":
+        return bool(str(f.get("valor") or "").strip())
+    if op == "es":
+        return isinstance(f.get("valor"), bool)
+    return any(f.get(k) not in (None, "") for k in ("desde", "hasta"))
+
+
+def sin_filtros_a_medio_cargar(config: dict) -> dict:
+    """La receta sin los filtros que todavía no tienen valor, como la manda la pantalla
+    (limpiarConfig). Un ejemplo puede traer uno así para que se vea abierto al elegirlo —el
+    de clientes de «OT pendientes con sus procesos»—: corre (y se valida) sin él."""
+    return {**config, "filtros": [f for f in config.get("filtros", []) if _filtro_completo(f)]}
+
+
 def ejemplo_disponible(ejemplo: dict, permisos: PermisosUsuario) -> bool:
     try:
-        validar(ejemplo["config"], permisos)
+        validar(sin_filtros_a_medio_cargar(ejemplo["config"]), permisos)
         return True
     except (BusinessException, ReporteSinPermiso):
         return False
