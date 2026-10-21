@@ -48,7 +48,7 @@ export type Novedad = {
 export const NOVEDADES: Novedad[] = [
     {
         id: "pantallas-mas-rapidas",
-        fecha: "2026-10-20",
+        fecha: "2026-10-21",
         tipo: "mejora",
         seccion: "Todo el sistema",
         titulo: "Las pantallas abren más rápido, sobre todo Operaciones",
