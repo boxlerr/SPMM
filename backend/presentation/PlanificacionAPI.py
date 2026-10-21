@@ -189,6 +189,18 @@ async def equipo_endpoint(db=Depends(get_db), _u=Depends(get_current_user)):
     return ResponseDTO(status=True, errorDescription="", data=await armar_equipo(db))
 
 
+# 🔹 Los recursos del taller para organizar la producción con una IA (Lucas, 21/10/2026):
+#    las personas con sus habilidades y sus horas, las máquinas con sus procesos y quién
+#    las usa, la jornada y los feriados. El botón «Recursos del taller» (Dashboard ›
+#    Reportes y Recursos) sale de acá. No escribe nada. Ver RecursosService.
+@router.get("/planificacion/recursos")
+async def recursos_endpoint(db=Depends(get_db), _u=Depends(get_current_user)):
+    from backend.application.RecursosService import armar_recursos
+    from backend.commons.ResponseDTO import ResponseDTO
+    logger.info("API - Inicio GET /planificacion/recursos")
+    return ResponseDTO(status=True, errorDescription="", data=await armar_recursos(db))
+
+
 @router.get("/planificacion/borradores")
 async def listar_borradores(db = Depends(get_db), _u = Depends(get_current_user)):
     """Los borradores guardados, del más nuevo al más viejo. Sin el contenido:

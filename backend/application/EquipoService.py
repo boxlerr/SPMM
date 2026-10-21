@@ -52,9 +52,13 @@ def prioridad_de(nivel, apagada: bool) -> str:
     return "Sabe (sin marcar)"
 
 
-async def armar_equipo(db) -> dict:
+async def armar_equipo(db, todos_los_operarios: list | None = None) -> dict:
+    """`todos_los_operarios`: los de la base, si quien llama ya los leyó (RecursosService
+    los necesita también para el horario): así no se leen dos veces en el mismo pedido."""
     repo_op = OperarioRepository(db)
-    operarios = [o for o in await repo_op.find_all() if o.disponible]
+    if todos_los_operarios is None:
+        todos_los_operarios = await repo_op.find_all()
+    operarios = [o for o in todos_los_operarios if o.disponible]
     rangos_de: dict[int, set[int]] = {}
     for id_op, id_rango in await repo_op.find_with_rangos():
         rangos_de.setdefault(id_op, set()).add(id_rango)

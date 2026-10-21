@@ -87,6 +87,7 @@ interface LlegadaDesdeAviso {
   hecho: boolean;
 }
 import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { ExportarRecursos } from "@/components/reportes/ExportarRecursos";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 import { maquinasEnPalabras, origenEnPalabras, resumenDeMaquinas } from "@/lib/maquinasDelProceso";
 import { etiquetaTipo } from "./_maquinaOpciones";
@@ -996,34 +997,12 @@ export default function RecursosPage() {
             <div className="flex items-center gap-2">
               <User className="h-5 w-5 text-muted-foreground" />
               <h2 className="text-lg font-semibold">Recurso humano</h2>
-              {/* Las habilidades de TODOS de una (reunión con Lucas del 17/10/2026): para
-                  comparar con el plan sin abrir la ficha de cada uno, y para pasárselas a
-                  Claude. Sale de lo mismo que mira el planificador (lib/equipo). */}
+              {/* Los recursos de todo el taller de una (Lucas, 21/10/2026): las habilidades de
+                  cada uno —lo que antes era «Exportar habilidades», reunión del 17/10—, sus
+                  horas, las máquinas con sus procesos y los feriados, para pasárselo a la IA
+                  junto con el reporte de OT pendientes. Ver components/reportes/ExportarRecursos. */}
               <div className="ml-auto">
-                <ExportarMenu
-                  titulo="Habilidades del equipo"
-                  archivo="habilidades_del_equipo"
-                  textoBoton="Exportar habilidades"
-                  rotulo="Las habilidades de todo el equipo, de una"
-                  cargarSecciones={async () => {
-                    const { pedirEquipo, seccionesDelEquipo } = await import("@/lib/equipo");
-                    return seccionesDelEquipo(await pedirEquipo());
-                  }}
-                  filtros={null}
-                  subtitulo="Quién puede hacer cada proceso y a quién prefiere el planificador: SKILL 1, después SKILL 2."
-                  disabled={api.loading}
-                  rotuloExtras="Para analizar con Claude"
-                  extras={[{
-                    rotulo: "Habilidades para Claude (.md)",
-                    ayuda: "Texto para subir al proyecto de Claude",
-                    hacer: async () => {
-                      const [{ pedirEquipo }, { bajarTexto, textoDelEquipoParaClaude }] = await Promise.all([
-                        import("@/lib/equipo"), import("@/lib/paraClaude"),
-                      ]);
-                      return bajarTexto(textoDelEquipoParaClaude(await pedirEquipo()), "habilidades_para_claude");
-                    },
-                  }]}
-                />
+                <ExportarRecursos textoBoton="Exportar recursos" disabled={api.loading} />
               </div>
             </div>
             <p className="text-sm text-muted-foreground mt-1">Gestión del recurso humano</p>

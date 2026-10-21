@@ -18,6 +18,7 @@ import { usePermisos } from "@/hooks/usePermisos"
 import { tarjetasVisibles, type TarjetaCodigo } from "@/lib/permisos"
 
 import { BloqueReportes } from "@/components/reportes/BloqueReportes"
+import { ExportarRecursos } from "@/components/reportes/ExportarRecursos"
 
 import PriorityOrdersModal from "@/components/dashboard/PriorityOrdersModal"
 import StatusOrdersModal from "@/components/dashboard/StatusOrdersModal"
@@ -140,9 +141,14 @@ export default function DashboardPage() {
         {/* RF-23: los reportes. El armador es de todo el que ve el Dashboard (cada fuente
             pide adentro lo suyo). Es el bloque de los reportes: el «Reporte mensual» de
             RF-21 (un mes, por defecto el que cerró, en su pantalla) va como hijo, al lado
-            de «Armar un reporte». */}
+            de «Armar un reporte». También «Recursos del taller» (21/10/2026): las personas
+            y las máquinas para pasarle a la IA junto con «OT pendientes con sus procesos». */}
         <BloqueReportes>
           <BotonReporteMensual />
+          <ExportarRecursos
+            align="end"
+            className="h-auto rounded-xl border-white/30 bg-white/10 px-5 py-3 text-white shadow-none hover:-translate-y-0.5 hover:bg-white/20 hover:text-white [&_span]:inline [&_span]:text-sm [&_span]:font-bold"
+          />
         </BloqueReportes>
 
         {visibles.length === 0 && (
