@@ -47,6 +47,46 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "plan-mas-rapido-y-tiempo-estimado",
+        fecha: "2026-10-23",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "El plan sale en menos de la mitad del tiempo, y la barra dice cuánto falta",
+        detalle:
+            "Un plan de 54 OT tardaba unos 5 minutos; ahora tarda alrededor de un minuto y medio. El cálculo seguía buscando mejoras que casi no cambiaban el plan: ahora corta cuando deja de mejorar de verdad. Mientras calcula, la pantalla muestra el tiempo estimado (y lo máximo que puede tardar) y cuánto falta.",
+        href: "/operaciones",
+    },
+    {
+        id: "planificar-sacando-ot-sin-procesos",
+        fecha: "2026-10-23",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Si tildaste una OT sin procesos, se saca de un toque y se planifica el resto",
+        detalle:
+            "Al tocar «Planificar» con alguna OT que no tiene procesos cargados, antes salía un error y había que buscarla en la lista para destildarla. Ahora el aviso tiene el botón «Sacarla y seguir»: la saca de lo tildado y sigue con las demás.",
+        href: "/operaciones",
+    },
+    {
+        id: "reportes-elegir-las-ot",
+        fecha: "2026-10-23",
+        tipo: "nuevo",
+        seccion: "Dashboard",
+        titulo: "En un reporte ahora elegís qué OT entran, una por una",
+        detalle:
+            "En Reportes, después de filtrar por período y cliente, en «Período y filtros» está «Qué OT entran»: tocás «Elegir las OT una por una» y aparece la lista con su cliente para tildar o destildar (con «Tildar todas» y «Destildar todas» y un buscador). También podés destildar una OT directamente en la tabla de la vista previa. Lo elegido se guarda con el reporte y sale en el Excel y el PDF. Las OT no se tocan ni se borran en el sistema: sólo dejan de salir en ese reporte.",
+        href: "/dashboard",
+    },
+    {
+        id: "reportes-nombres-mas-claros",
+        fecha: "2026-10-23",
+        tipo: "mejora",
+        seccion: "Dashboard",
+        titulo: "Los dos reportes de OT pendientes ahora dicen cuál es cuál",
+        detalle:
+            "«OT pendientes con sus procesos» pasó a llamarse «OT pendientes, una fila por OT» (los procesos de cada OT juntos en una celda), para no confundirlo con «OT pendientes, un proceso por fila» (como el listado del sistema viejo). Y si abrís el de una fila por OT, arriba de la tabla aparece un botón para pasar al de un proceso por fila.",
+        href: "/dashboard",
+    },
+    {
         id: "ot-pendientes-un-proceso-por-fila",
         fecha: "2026-10-21",
         tipo: "mejora",
