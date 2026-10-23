@@ -8,7 +8,7 @@
  * arriba): nada de una ruedita que tape la tabla a cada cambio.
  */
 
-import { AlertTriangle, Info, Loader2, SearchX, Sigma, TableProperties } from "lucide-react";
+import { AlertTriangle, Check, Info, Loader2, SearchX, Sigma, TableProperties } from "lucide-react";
 import { alineaDerecha, textoParaLeer } from "@/lib/exportar";
 import { cn } from "@/lib/utils";
 import {
@@ -24,12 +24,19 @@ export function VistaPrevia({
     error,
     sinColumnas,
     className,
+    ot,
 }: {
     resultado: ResultadoReporte | null;
     cargando: boolean;
     error: string | null;
     sinColumnas: boolean;
     className?: string;
+    /**
+     * Para sacar una OT del reporte desde la tabla (Lucas, 23/10/2026): la casilla de cada
+     * fila. `queda` dice si la OT sigue con lo elegido: la fila se esconde al toque, sin
+     * esperar la próxima vista previa.
+     */
+    ot?: { clave: string; queda: (numero: number) => boolean; sacar: (numero: number) => void };
 }) {
     if (sinColumnas) {
         return (
@@ -56,6 +63,11 @@ export function VistaPrevia({
     const esCuenta = (clave: string) => /^m\d+$/.test(clave);
     const cantidadDeGrupos = agrupado ? resultado.columnas.filter((c) => !esCuenta(c.clave)).length : 0;
     const gruposDeDos = cantidadDeGrupos === 2;
+    // La casilla de cada fila: sólo con filas sueltas y con el N° de OT a la vista.
+    const conCasilla = !!ot && !agrupado && resultado.columnas.some((c) => c.clave === ot.clave);
+    const filas = conCasilla
+        ? resultado.filas.filter((f) => ot!.queda(Number(f[ot!.clave])))
+        : resultado.filas;
 
     return (
         <div className={cn("flex h-full min-h-0 flex-col", className)}>
@@ -97,6 +109,11 @@ export function VistaPrevia({
                     <table className="w-full min-w-max text-sm">
                         <thead className="sticky top-0 z-10 bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 shadow-[0_1px_0_0_#e5e7eb]">
                             <tr>
+                                {conCasilla && (
+                                    <th className="w-8 px-2 py-2" title="Destildá una OT para sacarla del reporte">
+                                        <span className="sr-only">Entra en el reporte</span>
+                                    </th>
+                                )}
                                 {columnas.map((c, i) => (
                                     <th
                                         key={i}
@@ -112,14 +129,27 @@ export function VistaPrevia({
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {resultado.filas.map((fila, i) => (
-                                <tr key={i} className="hover:bg-[#DC143C]/[0.03]">
+                            {filas.map((fila, i) => (
+                                <tr key={i} className="group hover:bg-[#DC143C]/[0.03]">
+                                    {conCasilla && (
+                                        <td className="w-8 px-2 py-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => ot!.sacar(Number(fila[ot!.clave]))}
+                                                title={`Sacar la OT ${fila[ot!.clave]} del reporte (no se toca en el sistema)`}
+                                                aria-label={`Sacar la OT ${fila[ot!.clave]} del reporte`}
+                                                className="flex h-4 w-4 items-center justify-center rounded border border-[#DC143C] bg-[#DC143C] text-white transition-colors hover:border-gray-300 hover:bg-white hover:text-transparent"
+                                            >
+                                                <Check className="h-3 w-3" />
+                                            </button>
+                                        </td>
+                                    )}
                                     {columnas.map((c, j) => {
                                         const texto = textoParaLeer(c, c.valor(fila, i));
                                         // Agrupado por dos: el primer grupo repetido va apagado, así
                                         // se lee «JUAN PEREZ» una vez con sus procesos abajo.
                                         const repetido = agrupado && j === 0 && i > 0 && gruposDeDos
-                                            && textoParaLeer(c, c.valor(resultado.filas[i - 1], i - 1)) === texto;
+                                            && textoParaLeer(c, c.valor(filas[i - 1], i - 1)) === texto;
                                         return (
                                             <td
                                                 key={j}
@@ -141,6 +171,7 @@ export function VistaPrevia({
                         {hayTotales && (
                             <tfoot className="sticky bottom-0 bg-[#fdf2f4] text-[13px] font-semibold text-[#1e3a5f] shadow-[0_-1px_0_0_#f3c6cf]">
                                 <tr>
+                                    {conCasilla && <td className="w-8" />}
                                     {resultado.columnas.map((c, j) => {
                                         const col = columnas[j];
                                         const valor = resultado.totales[c.clave];
@@ -173,6 +204,7 @@ export function VistaPrevia({
                     </span>
                 )}
                 {hayTotales && <span>Los totales son de todo lo filtrado, no sólo de lo que se ve.</span>}
+                {conCasilla && <span>Destildá una OT para sacarla del reporte (en el sistema no se toca).</span>}
             </div>
         </div>
     );

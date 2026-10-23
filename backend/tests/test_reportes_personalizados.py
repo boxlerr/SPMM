@@ -342,7 +342,7 @@ def test_el_catalogo_no_trae_datos_personales_ni_secretos():
 def test_los_ejemplos_son_utiles_y_pasan_la_validacion():
     assert 4 <= len(cat.EJEMPLOS) <= 8
     nombres = {e["nombre"] for e in cat.EJEMPLOS}
-    for pedido in ("OT pendientes, un proceso por fila", "OT pendientes con sus procesos",
+    for pedido in ("OT pendientes, un proceso por fila", "OT pendientes, una fila por OT",
                    "OT entregadas por cliente este mes",
                    "Horas por persona y proceso", "Consumo de material por OT",
                    "No conformidades por persona"):
@@ -379,6 +379,14 @@ INVENTADOS = [
     (_cfg("ordenes", ["numero"], filtros=[{"columna": "unidades", "op": "entre", "desde": "mucho"}]),
      "no es un número"),
     (_cfg("ordenes", ["numero"], filtros=[{"columna": "unidades", "op": "raw", "valor": "1"}]),
+     "forma esperada"),
+    (_cfg("ordenes", ["numero"], filtros=[{"columna": "unidades", "op": "solo", "valores": [1]}]),
+     "no se elige de a uno"),
+    (_cfg("ordenes", ["numero"], filtros=[{"columna": "numero", "op": "fuera", "valores": ["1 OR 1=1"]}]),
+     "no es un número de OT"),
+    (_cfg("ordenes", ["numero"], filtros=[{"columna": "numero", "op": "fuera", "valores": []}]),
+     "elegí al menos una OT para sacar"),
+    (_cfg("ordenes", ["numero"], filtros=[{"columna": "numero", "op": "solo", "valores": list(range(201))}]),
      "forma esperada"),
     (_cfg("ordenes", ["numero"], agrupar=["observaciones"]), "No se puede agrupar"),
     (_cfg("ordenes", ["numero"], agrupar=["cliente", "estado", "prioridad"]), "forma esperada"),
@@ -598,6 +606,13 @@ async def test_el_tope_de_filas_avisa(base, monkeypatch):
     ([{"columna": "reclamo", "op": "es", "valor": True}], [15013]),
     ([{"columna": "fecha_prometida", "op": "entre", "desde": "2026-09-06", "hasta": "2026-09-16"}],
      [15010, 15011, 15013]),
+    # Las OT elegidas una por una (Lucas, 23/10): sólo esas, o todas menos esas.
+    ([{"columna": "numero", "op": "solo", "valores": [15011, 15013, 99999]}], [15011, 15013]),
+    ([{"columna": "numero", "op": "fuera", "valores": [15011, 15013]}], [15010, 15012, 15014, 15015, 15016]),
+    # Destildadas todas (para tildar unas pocas): el reporte sale vacío, no entero.
+    ([{"columna": "numero", "op": "solo", "valores": []}], []),
+    ([{"columna": "cliente", "op": "en", "valores": [1, None]},
+      {"columna": "numero", "op": "fuera", "valores": [15010]}], [15011, 15014]),
     # Dos filtros juntos.
     ([{"columna": "prioridad", "op": "en", "valores": [2]},
       {"columna": "estado", "op": "en", "valores": ["completadas"]}], [15011, 15016]),
@@ -605,6 +620,23 @@ async def test_el_tope_de_filas_avisa(base, monkeypatch):
 async def test_los_filtros(base, filtros, esperado):
     r = await correr(base, _cfg("ordenes", ["numero"], filtros=filtros, orden={"por": "numero"}))
     assert _col(r, "numero") == esperado
+
+
+async def test_las_ot_elegidas_tambien_en_los_pasos(base):
+    """En «Pasos de las OT» sacar una OT saca todos sus pasos, no uno."""
+    todos = await correr(base, _cfg("pasos", ["numero"]))
+    sin = await correr(base, _cfg("pasos", ["numero"], filtros=[
+        {"columna": "numero", "op": "fuera", "valores": [15010]}]))
+    assert 15010 in _col(todos, "numero") and 15010 not in _col(sin, "numero")
+    assert len(_col(sin, "numero")) == len([n for n in _col(todos, "numero") if n != 15010])
+
+
+def test_el_numero_de_ot_se_elige_de_a_uno_en_cada_fuente_que_lo_tiene():
+    cat = rs.catalogo(ADMIN)
+    for f in cat["fuentes"]:
+        for c in f["columnas"]:
+            if c["codigo"] == "numero" and c["nombre"] == "N° de OT" and f["codigo"] in ("ordenes", "pasos"):
+                assert c["elegible"], f["codigo"]
 
 
 async def test_el_periodo_con_atajo_y_con_fechas(base):
@@ -887,6 +919,7 @@ async def test_los_criterios_dichos_en_castellano(base):
         {"columna": "articulo", "op": "contiene", "valor": "eje"},
         {"columna": "unidades", "op": "entre", "desde": 1, "hasta": 1000.5},
         {"columna": "reclamo", "op": "es", "valor": False},
+        {"columna": "numero", "op": "fuera", "valores": [15013, 15016]},
     ], agrupar=["estado"], medidas=[{"funcion": "conteo"}], orden={"por": "m0", "direccion": "desc"}))
     assert r["criterios"]["lineas"] == [
         "Datos: Órdenes de trabajo",
@@ -895,6 +928,7 @@ async def test_los_criterios_dichos_en_castellano(base):
         "Artículo contiene «eje»",
         "Unidades: de 1 a 1.000,5",
         "Con reclamo: No",
+        "Sin 2 OT: 15013, 15016",
         "Agrupado por Estado del tablero · Cuentas: Cantidad",
         "Ordenado por Cantidad (de mayor a menor)",
     ]

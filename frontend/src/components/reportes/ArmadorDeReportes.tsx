@@ -25,6 +25,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
     BookmarkPlus,
     ChevronDown,
+    Lightbulb,
     FilePlus2,
     FolderOpen,
     Loader2,
@@ -44,8 +45,12 @@ import { usePermisos } from "@/hooks/usePermisos";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
+    columnaElegible,
     completarReceta,
     correrReporte,
+    filtroDeElegidas,
+    quedaEnElReporte,
+    sinLaOT,
     criteriosParaExportar,
     guardarReporte,
     borrarReporte,
@@ -66,6 +71,7 @@ import {
 } from "@/lib/reportes";
 import { ElegirAgrupacion, ElegirColumnas, ElegirFiltros, ElegirFuente, ElegirPeriodo, Paso } from "./PasosDelArmador";
 import { VistaPrevia } from "./VistaPrevia";
+import { ElegirOT } from "./ElegirOT";
 import {
     TRABAJO_VACIO, trabajoDesdeGuardado, trabajoDesdeEjemplo,
     type TrabajoDeReporte, type EstadoCatalogo,
@@ -105,6 +111,7 @@ export function ArmadorDeReportes({
         [catalogo, receta?.fuente],
     );
     const setReceta = (r: ConfigReporte) => setTrabajo((t) => ({ ...t, receta: r }));
+    const elegible = columnaElegible(fuente);
 
     // ── las listas para filtrar, una vez por fuente ──
     const [opciones, setOpciones] = useState<Record<string, Record<string, Opcion[]>>>({});
@@ -428,6 +435,9 @@ export function ArmadorDeReportes({
                                                     opciones={opciones[fuente.codigo] ?? null}
                                                     onCambiar={setReceta}
                                                 />
+                                                {elegible && (
+                                                    <ElegirOT fuente={fuente} columna={elegible} receta={receta} onCambiar={setReceta} />
+                                                )}
                                             </div>
                                         </Paso>
                                         <Paso
@@ -453,7 +463,21 @@ export function ArmadorDeReportes({
                                 {!receta || !fuente ? (
                                     <Bienvenida catalogo={catalogo} onEjemplo={(e) => abrir(trabajoDesdeEjemplo(e), e.nombre)} />
                                 ) : (
-                                    <VistaPrevia resultado={resultado} cargando={cargando} error={error} sinColumnas={sinColumnas} className="flex-1" />
+                                    <>
+                                        <SugerenciaDeEjemplo receta={receta} catalogo={catalogo} onEjemplo={(e) => abrir(trabajoDesdeEjemplo(e), e.nombre)} />
+                                        <VistaPrevia
+                                            resultado={resultado}
+                                            cargando={cargando}
+                                            error={error}
+                                            sinColumnas={sinColumnas}
+                                            className="flex-1"
+                                            ot={elegible ? {
+                                                clave: elegible.codigo,
+                                                queda: (n) => quedaEnElReporte(filtroDeElegidas(receta), n),
+                                                sacar: (n) => setReceta(sinLaOT(receta, elegible.codigo, n)),
+                                            } : undefined}
+                                        />
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -480,6 +504,44 @@ function Aviso({ titulo, texto, accion }: { titulo: string; texto: string; accio
                     </button>
                 )}
             </div>
+        </div>
+    );
+}
+
+/**
+ * Un empujón hacia el ejemplo que sirve, cuando lo armado se parece a otra cosa.
+ *
+ * Lucas (21/10 y otra vez el 23/10) quería los procesos uno por fila, como el listado del
+ * sistema viejo, y abría «OT pendientes con sus procesos», que los junta en una celda: «eso
+ * quedó igual». El otro ejemplo ya existía; no se encontraba. Si la receta es de órdenes y
+ * muestra los procesos, se ofrece el de un proceso por fila con un botón.
+ */
+const PROCESOS_EN_UNA_CELDA = ["procesos_pendientes", "procesos"];
+const EJEMPLO_POR_FILA = "ot_pendientes_por_proceso";
+
+function SugerenciaDeEjemplo({ receta, catalogo, onEjemplo }: {
+    receta: ConfigReporte;
+    catalogo: Catalogo;
+    onEjemplo: (e: Ejemplo) => void;
+}) {
+    const ejemplo = catalogo.ejemplos.find((e) => e.codigo === EJEMPLO_POR_FILA);
+    const juntos = receta.fuente === "ordenes" && receta.agrupar.length === 0
+        && receta.columnas.some((c) => PROCESOS_EN_UNA_CELDA.includes(c));
+    if (!ejemplo || !juntos) return null;
+    return (
+        <div className="mb-3 flex flex-col gap-2 rounded-xl border border-[#1e3a5f]/15 bg-[#1e3a5f]/[0.04] px-3 py-2.5 text-xs text-[#1e3a5f] sm:flex-row sm:items-center">
+            <Lightbulb className="hidden h-4 w-4 shrink-0 text-[#DC143C] sm:block" />
+            <p className="flex-1 leading-snug">
+                <span className="font-semibold">Acá los procesos de cada OT van juntos, en una sola celda.</span>{" "}
+                ¿Los querés uno por fila, como el listado del sistema viejo?
+            </p>
+            <button
+                type="button"
+                onClick={() => onEjemplo(ejemplo)}
+                className="shrink-0 rounded-lg bg-[#1e3a5f] px-3 py-1.5 font-semibold text-white hover:bg-[#0f2742]"
+            >
+                Abrir «{ejemplo.nombre}»
+            </button>
         </div>
     );
 }

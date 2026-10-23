@@ -66,6 +66,7 @@ from backend.application.ReportesCatalogo import (
     OPCIONES_DE_TABLA,
     OPCIONES_FIJAS,
     OPERACION_DE_FILTRO,
+    OPERACIONES_DE_ELEGIDOS,
     TOPE_DIAS_DE_LA_FICHA,
     Columna,
     Contexto,
@@ -91,6 +92,9 @@ TOPE_SEGUNDOS = 25
 # todo lo que el catálogo deja pedir mide ~3 KB; esto es el doble y pico.
 LARGO_MAXIMO_CONFIG = 8000
 TOPE_OPCIONES = 5000
+# Las OT que se pueden tildar una por una en «sólo estas» o «sin estas» (la pantalla guarda
+# la lista más corta: con las 258 OT pendientes de hoy no pasa de 129).
+MAXIMO_ELEGIDOS = 200
 # Las filas que se traen enteras para completar los números de la ficha (una por persona).
 TOPE_FILAS_EN_PYTHON = 2000
 
@@ -112,8 +116,8 @@ class _Estricto(BaseModel):
 
 class FiltroCfg(_Estricto):
     columna: str = Field(max_length=40)
-    op: Literal["en", "contiene", "entre", "es"]
-    valores: Optional[list[Union[int, str, None]]] = Field(None, max_length=200)
+    op: Literal["en", "contiene", "entre", "es", "solo", "fuera"]
+    valores: Optional[list[Union[int, str, None]]] = Field(None, max_length=MAXIMO_ELEGIDOS)
     valor: Optional[Union[bool, str]] = None
     desde: Optional[Union[int, float, str]] = None
     hasta: Optional[Union[int, float, str]] = None
@@ -306,10 +310,23 @@ def _validar_filtro(fuente: Fuente, f: FiltroCfg, permisos: PermisosUsuario) -> 
     tipo_filtro = col.filtro
     if tipo_filtro is None:
         raise BusinessException(f"«{col.nombre}» no se puede usar como filtro.")
+    que = f"Filtro «{col.nombre}»"
+    if f.op in OPERACIONES_DE_ELEGIDOS:
+        if not col.elegible:
+            raise BusinessException(f"«{col.nombre}» no se elige de a uno.")
+        elegidos = []
+        for v in f.valores or []:
+            if isinstance(v, bool) or v is None or not str(v).strip().isdigit():
+                raise BusinessException(f"{que}: «{v}» no es un número de OT.")
+            elegidos.append(int(v))
+        # «Sólo estas» sin ninguna es un reporte vacío (se destildaron todas para tildar
+        # unas pocas): se contesta vacío. «Sin estas» sin ninguna no saca nada y es un error.
+        if not elegidos and f.op == "fuera":
+            raise BusinessException(f"{que}: elegí al menos una OT para sacar.")
+        return Filtro(col, f.op, valores=list(dict.fromkeys(elegidos)))
     esperada = OPERACION_DE_FILTRO[tipo_filtro]
     if f.op != esperada:
         raise BusinessException(f"«{col.nombre}» se filtra con «{esperada}», no con «{f.op}».")
-    que = f"Filtro «{col.nombre}»"
 
     if f.op == "en":
         valores = list(f.valores or [])
@@ -525,6 +542,11 @@ def _entre_fechas(expr, columna: Columna, desde: Optional[date], hasta: Optional
 def _condicion(f: Filtro, ctx: Contexto):
     col = f.columna
     expr = (col.filtro_expr or col.expr)(ctx)
+    if f.op == "solo":
+        return expr.in_(f.valores) if f.valores else false()
+    if f.op == "fuera":
+        # Una fila sin número (no debería haberla) no es una de las que se sacaron.
+        return or_(expr.is_(None), expr.not_in(f.valores))
     if f.op == "en":
         valores = [v for v in f.valores if v is not None]
         partes = []
@@ -920,7 +942,14 @@ async def criterios(db, plan: Plan) -> dict:
 
     for f in plan.filtros:
         col = f.columna
-        if f.op == "en":
+        if f.op in OPERACIONES_DE_ELEGIDOS:
+            numeros = ", ".join(str(v) for v in f.valores)
+            cuantas = f"{len(f.valores)} OT" if len(f.valores) > 1 else "la OT"
+            if not f.valores:
+                lineas.append("Sin ninguna OT elegida")
+            else:
+                lineas.append(f"Sólo {cuantas}: {numeros}" if f.op == "solo" else f"Sin {cuantas}: {numeros}")
+        elif f.op == "en":
             if col.opciones in OPCIONES_FIJAS:
                 nombres = {k: v for k, v in OPCIONES_FIJAS[col.opciones].items()}
             else:
@@ -1049,13 +1078,16 @@ def _columna_para_pantalla(c: Columna, sin_persona: bool = False) -> dict:
         "totaliza": c.totaliza,
         "decimales": c.decimales,
         "por_defecto": c.por_defecto,
+        "elegible": c.elegible,
     }
 
 
 def _filtro_completo(f: dict) -> bool:
     """Espejo de filtroCompleto (frontend/src/lib/reportes.ts)."""
     op = f.get("op")
-    if op == "en":
+    if op == "solo":
+        return isinstance(f.get("valores"), list)
+    if op in ("en", "fuera"):
         return bool(f.get("valores"))
     if op == "contiene":
         return bool(str(f.get("valor") or "").strip())

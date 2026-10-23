@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Cpu, Database, Save, Search } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 import { Progress } from "@/components/ui/progress";
+import { textoDeSegundos, tiempoDelCalculo } from "@/lib/tiempoDelCalculo";
 
 /**
  * Lo que se ve mientras el planificador calcula.
@@ -51,44 +53,38 @@ const ETAPAS_GUARDAR: Etapa[] = [
 const TECHO = 92;
 
 /**
- * Cuánto suele tardar, en segundos. Sale de las corridas reales: hay que leer las
- * OTs con sus procesos, buscar la combinación y volcar el resultado, y las tres
- * cosas crecen con el tamaño del lote.
+ * Cuánto suele tardar, en segundos.
  *
- * Los números salen de medir, no de la cuenta del presupuesto del solver: el
- * presupuesto ya no es fijo —crece con el lote, justamente para que una tanda
- * grande salga mejor— así que la única referencia honesta es cuánto tardó de
- * verdad. La medición de 60 OT dio 244 segundos: sacándole los ~14 de leer y
- * escribir, son casi 4 segundos por OT, y de ahí sale el 3,8.
- *
- * Con la estimación vieja (1,6 por OT) esas mismas 60 OT daban 110 segundos, y la
- * barra se arrastraba en los ochenta y pico mientras el reloj seguía corriendo al
- * doble de lo prometido: exactamente la sensación de "se colgó" por la que existe
- * esta pantalla. (No llegaba a clavarse en 92: la curva es exponencial y a los dos
- * minutos mostraba 86. Lo que se veía mal era el desfasaje con el reloj, no el
- * techo.)
- *
- * El techo de 380 no es un redondeo: el navegador corta el pedido a los 420, así
- * que una estimación más larga que eso prometería un final que nunca va a llegar.
+ * Hasta el 23/10/2026 salía de medir corridas por OT (3,8 s cada una, con el techo de 240 s
+ * del solver). Ese día el techo bajó a 90 s y el solver corta cuando deja de mejorar de
+ * verdad (ver MEJORA_RELEVANTE en el backend): la cuenta pasó a lib/tiempoDelCalculo, por
+ * procesos, con las mismas constantes del presupuesto del solver.
  */
-export function duracionEstimada(cantidadOts: number, modo: "calcular" | "guardar" = "calcular"): number {
+export function duracionEstimada(cantidadOts: number, modo: "calcular" | "guardar" = "calcular", cantidadProcesos?: number): number {
     // Guardar es una escritura, no un cálculo: desde que dejó de pasar por el solver
     // son segundos, no minutos. Con la estimación vieja la barra se arrastraba al 3%
     // mientras la pantalla ya se había cerrado.
     if (modo === "guardar") return Math.max(2, 1 + cantidadOts * 0.15);
-    // Más la segunda pasada (cada uno en lo suyo, 19/10/2026): la mitad de lo que tarda
-    // la primera, hasta un minuto. Con las 23 OT del 17/10 tardó entre 28 y 58 segundos.
-    return Math.min(380, 14 + cantidadOts * 3.8 + Math.min(60, cantidadOts * 1.9));
+    // 23/10/2026: con los procesos se usa la cuenta del presupuesto del solver
+    // (lib/tiempoDelCalculo), que es la que decide cuánto tarda. Lo de abajo queda para
+    // cuando no se sabe cuántos procesos son.
+    if (cantidadProcesos && cantidadProcesos > 0) return tiempoDelCalculo(cantidadProcesos).estimado;
+    // Sin los procesos, con el promedio de las tandas reales: 7,27 procesos por OT (ver
+    // presupuesto_solver en el backend). Antes era 3,8 s por OT, del techo de 240 s.
+    return tiempoDelCalculo(Math.round(cantidadOts * 7.27)).estimado;
 }
 
 export function ProgresoPlanificacion({
     activo,
     cantidadOts,
+    cantidadProcesos,
     listo = false,
     modo = "calcular",
 }: {
     activo: boolean;
     cantidadOts: number;
+    /** Los procesos que entran al cálculo: con eso sale el tiempo estimado. */
+    cantidadProcesos?: number;
     /** La respuesta llegó: la barra se completa y recién ahí se va. */
     listo?: boolean;
     /** "guardar" = se está confirmando el plan, no sólo mirándolo. */
@@ -106,7 +102,7 @@ export function ProgresoPlanificacion({
             return;
         }
         inicio.current = Date.now();
-        const total = duracionEstimada(cantidadOts, modo) * 1000;
+        const total = duracionEstimada(cantidadOts, modo, cantidadProcesos) * 1000;
 
         const id = window.setInterval(() => {
             const transcurrido = Date.now() - inicio.current;
@@ -118,7 +114,7 @@ export function ProgresoPlanificacion({
         }, 200);
 
         return () => window.clearInterval(id);
-    }, [activo, cantidadOts, modo]);
+    }, [activo, cantidadOts, modo, cantidadProcesos]);
 
     useEffect(() => {
         if (listo) setPct(100);
@@ -154,7 +150,11 @@ export function ProgresoPlanificacion({
      * Queda sólo el piso de 20 segundos, para que en un lote chico no salte apenas
      * empezó. Sin techo: si la estimación crece, el umbral crece con ella.
      */
-    const tarda = segundos >= Math.max(20, Math.round(duracionEstimada(cantidadOts, modo) * 1.5));
+    const estimado = duracionEstimada(cantidadOts, modo, cantidadProcesos);
+    const maximo = modo === "calcular" && cantidadProcesos ? tiempoDelCalculo(cantidadProcesos).maximo : null;
+    const tarda = segundos >= Math.max(20, Math.round((maximo ?? estimado * 1.5)));
+    // Lo que falta, contra lo que suele tardar; pasado eso, contra el tope.
+    const falta = segundos < estimado ? estimado - segundos : maximo !== null && segundos < maximo ? maximo - segundos : null;
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]">
@@ -181,8 +181,18 @@ export function ProgresoPlanificacion({
                     indicatorClassName="bg-blue-600"
                 />
 
-                <p className="mt-3 text-xs text-slate-500 tabular-nums">
-                    {segundos}s transcurridos
+                {modo === "calcular" && (
+                    <p className="mt-3 text-sm text-slate-700">
+                        Tiempo estimado: <span className="font-semibold">~{textoDeSegundos(estimado)}</span>
+                        {maximo !== null && maximo > estimado + 10 && (
+                            <span className="text-slate-500"> (como mucho {textoDeSegundos(maximo)})</span>
+                        )}
+                    </p>
+                )}
+                <p className={cn("text-xs text-slate-500 tabular-nums", modo === "calcular" ? "mt-1" : "mt-3")}>
+                    {segundos < 60 ? `${segundos} s` : `${Math.floor(segundos / 60)} min ${String(segundos % 60).padStart(2, "0")} s`} transcurridos
+                    {falta !== null && !tarda && ` · faltan ~${textoDeSegundos(falta)}`}
+                    {falta === null && !tarda && segundos > 5 && " · terminando"}
                     {tarda && " · está tardando más de lo habitual, seguí esperando"}
                 </p>
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-400">

@@ -49,10 +49,10 @@ def _sin_env(monkeypatch):
     [
         # 6 OT: en los logs son entre 30 y 73 procesos y hoy la grande se come los
         # 60 s enteros. Tiene que quedar cerca de ese minuto, no irse a cuatro.
-        (6, 60, 100),
-        # 20 OT: ni tanda chica ni tanda grande, en el medio de la recta.
-        (20, 100, 160),
-        # 60 OT: las que necesitan ~244 s. Acá ya tiene que estar el techo entero.
+        (6, 60, 90),
+        # 20 OT: desde el 23/10/2026 (techo de 90 s) ya está en el techo.
+        (20, SOLVER_TECHO_SEG_DEFAULT, SOLVER_TECHO_SEG_DEFAULT),
+        # 60 OT: el techo entero.
         (60, SOLVER_TECHO_SEG_DEFAULT, SOLVER_TECHO_SEG_DEFAULT),
         # 200 OT: sigue en el techo, no se dispara.
         (200, SOLVER_TECHO_SEG_DEFAULT, SOLVER_TECHO_SEG_DEFAULT),
@@ -70,17 +70,18 @@ def test_la_tanda_de_6_ot_que_se_comia_el_minuto():
     assert seg == 80
 
 
-def test_el_techo_se_alcanza_cerca_de_las_50_ot():
-    # La otra ancla: 364 procesos (~50 OT) es donde la recta toca los 240 s. Justo
-    # abajo todavía no llega; de ahí para arriba, techo y nada más.
-    assert presupuesto_solver(362)[0] < SOLVER_TECHO_SEG_DEFAULT
-    assert presupuesto_solver(364)[0] == SOLVER_TECHO_SEG_DEFAULT
+def test_el_techo_se_alcanza_cerca_de_las_13_ot():
+    # Hasta el 23/10/2026 el techo era 240 s y la recta lo tocaba en 364 procesos (~50
+    # OT). Con el techo en 90 s (ver MEJORA_RELEVANTE en PlanificacionService) lo toca
+    # en ~91 procesos: de ahí para arriba manda el corte por mejoras de verdad.
+    assert presupuesto_solver(88)[0] < SOLVER_TECHO_SEG_DEFAULT
+    assert presupuesto_solver(91)[0] == SOLVER_TECHO_SEG_DEFAULT
 
 
 def test_no_hay_default_de_env_que_haga_falta_tocar():
     # Sin variables de entorno el techo tiene que ser el del código: el backend se
     # deploya a mano y esto tiene que salir con el deploy, sin tocar Cloud Run.
-    assert presupuesto_solver(10_000)[0] == SOLVER_TECHO_SEG_DEFAULT == 240
+    assert presupuesto_solver(10_000)[0] == SOLVER_TECHO_SEG_DEFAULT == 90
 
 
 def test_es_monotono_y_nunca_pasa_el_techo():
@@ -139,9 +140,9 @@ def test_corte_escala_con_el_presupuesto():
     # porque entre mejora y mejora el solver tarda más.
     chico = presupuesto_solver(_procesos_de(6))
     grande = presupuesto_solver(_procesos_de(60))
-    # 6 OT: 11 s, prácticamente el corte de siempre. 60 OT: 40 s, cuatro veces más.
+    # 6 OT: 11 s, prácticamente el corte de siempre. 60 OT: 15 s (1/6 del techo de 90).
     assert chico[1] <= SOLVER_CORTE_MIN_SEG + 2
-    assert grande[1] == 40
+    assert grande[1] == 15
 
 
 def test_corte_nunca_baja_de_los_diez_segundos_de_siempre():

@@ -2343,7 +2343,7 @@ SOLVER_MINIMO_SEG = 60
 # el backend se deploya a mano y la idea es que esto salga con el deploy, sin tocar
 # configuración. Los 240 s entran cómodos en el timeoutSeconds=600 del servicio,
 # contando la lectura de datos, el diagnóstico y el guardado que van alrededor.
-SOLVER_TECHO_SEG_DEFAULT = 240
+SOLVER_TECHO_SEG_DEFAULT = 90
 
 # El corte por estancamiento vale 1/6 del presupuesto: la misma proporción que rige
 # hoy (10 s sobre 60), para que una tanda chica se comporte igual que antes.
@@ -2362,6 +2362,52 @@ SOLVER_TECHO_SEG_DEFAULT = 240
 # alguna vez se loguea el instante de cada mejora, recalibrar acá.
 SOLVER_CORTE_FRACCION = 6
 SOLVER_CORTE_MIN_SEG = 10
+
+# 23/10/2026 — EL TECHO BAJA DE 240 A 90 Y EL CORTE MIRA MEJORAS DE VERDAD.
+#
+# Lucas planificó 54 OT (360 procesos, del 26 al 30/10) y esperó 305 s: 238 de la primera
+# pasada y 60 de la segunda, las dos hasta el tope. Julián: «no es factible». El corte por
+# estancamiento nunca saltó porque el solver encuentra una mejora cada pocos segundos, pero
+# mínima: con esas mismas OT (medido en sólo lectura, 4 hilos como Cloud Run) el plan de
+# los 30 s quedaba a 2,0% del de los 238 s, el de los 60 s a 2,0% y el de los 90 s a 1,2%;
+# y dos corridas de 238 s entre sí difieren más que eso (6.289 y 5.069 min sin persona o
+# máquina). Cuatro minutos más de espera compraban ruido.
+#
+# Ahora el vigía sólo cuenta como mejora la que baja el objetivo al menos MEJORA_RELEVANTE
+# (una fracción del valor de la última que contó). Las chiquitas se aceptan igual —el plan
+# que sale es el mejor que encontró—, pero no estiran la espera. Con el techo en 90 s y la
+# segunda pasada en 30, ese lote de Lucas tardó entre 77 y 114 s en cuatro corridas (contra
+# 304), con 6.286 a 7.559 min sin persona o máquina (las de 238 s: 5.069 y 6.289).
+#
+# El 0,05% es del objetivo ENTERO, que en un lote apretado arrastra la multa de lo que quedó
+# afuera (1e11 por paso): ahí equivale a unos 20 minutos de trabajo sin persona o máquina.
+MEJORA_RELEVANTE = 0.0005
+
+
+def _mejora_relevante() -> float:
+    """MEJORA_RELEVANTE, o la de SOLVER_MEJORA_RELEVANTE si se fijó a mano (para medir)."""
+    try:
+        return float(os.getenv("SOLVER_MEJORA_RELEVANTE") or MEJORA_RELEVANTE)
+    except ValueError:
+        return MEJORA_RELEVANTE
+
+
+class _VigiaDeMejoras(cp_model.CpSolverSolutionCallback):
+    """Anota cuándo llegó la última mejora RELEVANTE (ver MEJORA_RELEVANTE) en `ultima["t"]`."""
+
+    def __init__(self, ultima: dict):
+        super().__init__()
+        self._ultima = ultima
+        self._referencia = None
+        self._umbral = _mejora_relevante()
+
+    def on_solution_callback(self):
+        import time as _t
+        valor = self.ObjectiveValue()
+        ref = self._referencia
+        if ref is None or (ref - valor) >= self._umbral * max(1.0, abs(ref)):
+            self._referencia = valor
+            self._ultima["t"] = _t.monotonic()
 
 
 def presupuesto_solver(cant_procesos: int, techo_seg: int | None = None) -> tuple[int, int]:
@@ -2746,7 +2792,7 @@ SEGUNDA_PASADA_ESPECIALIDAD = True
 # Tope de segundos de la segunda pasada: la mitad de lo de la primera, hasta este tope, y
 # se corta antes si no mejora durante la mitad del corte de la primera (nunca menos de
 # SEGUNDA_PASADA_CORTE_MIN: con el modelo entero, las mejoras llegan de a ratos).
-SEGUNDA_PASADA_SEG_MAX = 60
+SEGUNDA_PASADA_SEG_MAX = 30
 SEGUNDA_PASADA_CORTE_MIN = 8
 
 
@@ -2761,11 +2807,6 @@ def _resolver_con_corte(model, seg: float, corte_seg: float):
     solver.parameters.num_search_workers = int(os.getenv("SOLVER_WORKERS", "0")) or max(2, min(8, os.cpu_count() or 2))
     solver.parameters.log_search_progress = False
     ultima = {"t": None}
-
-    class _Mejoras(cp_model.CpSolverSolutionCallback):
-        def on_solution_callback(self):
-            ultima["t"] = _t.monotonic()
-
     fin = threading.Event()
 
     def _vigia():
@@ -2776,7 +2817,7 @@ def _resolver_con_corte(model, seg: float, corte_seg: float):
 
     threading.Thread(target=_vigia, daemon=True).start()
     try:
-        estado = solver.Solve(model, _Mejoras())
+        estado = solver.Solve(model, _VigiaDeMejoras(ultima))
     finally:
         fin.set()
     return solver, estado
@@ -3378,10 +3419,6 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
 
         _ultima_mejora = {"t": None}
 
-        class _RegistroMejoras(cp_model.CpSolverSolutionCallback):
-            def on_solution_callback(self):
-                _ultima_mejora["t"] = _t.monotonic()
-
         _fin_vigia = threading.Event()
 
         def _vigia(solver=solver, corte_seg=corte_intento, _ultima_mejora=_ultima_mejora,
@@ -3397,7 +3434,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         hilo_vigia.start()
         _t0 = _t.monotonic()
         try:
-            status = solver.Solve(model, _RegistroMejoras())
+            status = solver.Solve(model, _VigiaDeMejoras(_ultima_mejora))
         finally:
             _fin_vigia.set()
 

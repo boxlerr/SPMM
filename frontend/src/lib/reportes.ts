@@ -49,6 +49,8 @@ export interface ColumnaCatalogo {
     totaliza: boolean;
     decimales: number | null;
     por_defecto: boolean;
+    /** Sus valores se tildan uno por uno: el N° de OT («Elegir las OT»). */
+    elegible?: boolean;
 }
 
 export interface FuenteCatalogo {
@@ -89,7 +91,8 @@ export type ValorOpcion = string | number | null;
 
 export interface FiltroReporte {
     columna: string;
-    op: "en" | "contiene" | "entre" | "es";
+    /** «solo» y «fuera»: las OT tildadas una por una (ver ElegirOT). */
+    op: "en" | "contiene" | "entre" | "es" | "solo" | "fuera";
     valores?: ValorOpcion[];
     valor?: string | boolean;
     desde?: string | number | null;
@@ -279,7 +282,7 @@ export function limpiarConfig(c: ConfigReporte): ConfigReporte {
         columnas: [...c.columnas],
         filtros: c.filtros.filter(filtroCompleto).map((f) => {
             const x: FiltroReporte = { columna: f.columna, op: f.op };
-            if (f.op === "en") x.valores = f.valores ?? [];
+            if (f.op === "en" || f.op === "solo" || f.op === "fuera") x.valores = f.valores ?? [];
             if (f.op === "contiene") x.valor = String(f.valor ?? "").trim();
             if (f.op === "es") x.valor = Boolean(f.valor);
             if (f.op === "entre") {
@@ -312,7 +315,9 @@ export function limpiarConfig(c: ConfigReporte): ConfigReporte {
 
 /** Un filtro a medio cargar (sin valores todavía) no viaja: se ve en la pantalla y listo. */
 export function filtroCompleto(f: FiltroReporte): boolean {
-    if (f.op === "en") return (f.valores ?? []).length > 0;
+    // «Sólo estas» sin ninguna tildada vale: es un reporte vacío, no uno entero.
+    if (f.op === "solo") return Array.isArray(f.valores);
+    if (f.op === "en" || f.op === "fuera") return (f.valores ?? []).length > 0;
     if (f.op === "contiene") return String(f.valor ?? "").trim().length > 0;
     if (f.op === "es") return typeof f.valor === "boolean";
     const hay = (v: unknown) => v !== undefined && v !== null && v !== "";
@@ -444,4 +449,86 @@ export function criteriosParaExportar(r: ResultadoReporte): string[] {
         lineas.push(`Atención: el archivo trae las primeras ${r.filas.length.toLocaleString("es-AR")} de ${total.toLocaleString("es-AR")} ${r.modo === "grupos" ? "filas agrupadas" : "filas"} (tope de un reporte)`);
     }
     return lineas;
+}
+
+// ─────────────────────────── las OT elegidas una por una ───────────────────────────
+//
+// Lucas (23/10/2026): «si filtro las OT de Cañuelas, necesito poder quitar del reporte las
+// que no me interesan [...] sin modificar ni eliminar las OT del sistema». Se guarda como un
+// filtro más del N° de OT: «solo» (sólo esas) o «fuera» (todas menos esas), la lista más
+// corta de las dos. Con «fuera» una OT nueva que cumpla los filtros entra sola.
+
+/** La columna que se elige de a una (el N° de OT), si la fuente la tiene. */
+export function columnaElegible(fuente: FuenteCatalogo | null): ColumnaCatalogo | null {
+    return fuente?.columnas.find((c) => c.elegible) ?? null;
+}
+
+export const esFiltroDeElegidas = (f: FiltroReporte) => f.op === "solo" || f.op === "fuera";
+
+/** El filtro de las OT elegidas, si hay. */
+export function filtroDeElegidas(receta: ConfigReporte): FiltroReporte | null {
+    return receta.filtros.find(esFiltroDeElegidas) ?? null;
+}
+
+/** ¿Esta OT queda en el reporte con lo elegido? (Para esconder una fila al toque.) */
+export function quedaEnElReporte(filtro: FiltroReporte | null, numero: unknown): boolean {
+    if (!filtro) return true;
+    const esta = (filtro.valores ?? []).some((v) => String(v) === String(numero));
+    return filtro.op === "solo" ? esta : !esta;
+}
+
+/** La receta con estas OT tildadas de `todas` (null en `tildadas` = todas, sin filtro). */
+export function conElegidas(receta: ConfigReporte, columna: string, todas: number[], tildadas: Set<number> | null): ConfigReporte {
+    const resto = receta.filtros.filter((f) => !esFiltroDeElegidas(f));
+    if (tildadas === null || todas.every((n) => tildadas.has(n))) return { ...receta, filtros: resto };
+    const destildadas = todas.filter((n) => !tildadas.has(n));
+    const solo = todas.filter((n) => tildadas.has(n));
+    const filtro: FiltroReporte = solo.length <= destildadas.length
+        ? { columna, op: "solo", valores: solo }
+        : { columna, op: "fuera", valores: destildadas };
+    return { ...receta, filtros: [...resto, filtro] };
+}
+
+/** La receta sin esta OT (la × de la vista previa). */
+export function sinLaOT(receta: ConfigReporte, columna: string, numero: number): ConfigReporte {
+    const actual = filtroDeElegidas(receta);
+    const resto = receta.filtros.filter((f) => !esFiltroDeElegidas(f));
+    const valores = (actual?.valores ?? []).map(Number);
+    const filtro: FiltroReporte = actual?.op === "solo"
+        ? { columna, op: "solo", valores: valores.filter((n) => n !== numero) }
+        : { columna, op: "fuera", valores: [...valores.filter((n) => n !== numero), numero] };
+    return { ...receta, filtros: [...resto, filtro] };
+}
+
+/** Tope del servidor para una lista de OT elegidas (MAXIMO_ELEGIDOS). */
+export const MAXIMO_ELEGIDAS = 200;
+
+export interface OTDelReporte {
+    numero: number;
+    cliente: string | null;
+    filas: number;
+}
+
+/**
+ * Las OT que dejan pasar el período y los otros filtros (sin el de las elegidas), con su
+ * cliente y cuántas filas aporta cada una: la lista para tildar. Es el mismo reporte
+ * agrupado por N° de OT, así que respeta los mismos permisos y las mismas reglas.
+ */
+export async function pedirOTDelReporte(receta: ConfigReporte, fuente: FuenteCatalogo, senal?: AbortSignal): Promise<OTDelReporte[]> {
+    const col = columnaElegible(fuente);
+    if (!col) return [];
+    const conCliente = fuente.columnas.some((c) => c.codigo === "cliente" && c.agrupable);
+    const r = await correrReporte({
+        ...receta,
+        filtros: receta.filtros.filter((f) => !esFiltroDeElegidas(f)),
+        columnas: [],
+        agrupar: conCliente ? [col.codigo, "cliente"] : [col.codigo],
+        medidas: [{ funcion: "conteo" }],
+        orden: { por: col.codigo, direccion: "asc" },
+    }, false, senal);
+    return r.filas.map((f) => ({
+        numero: Number(f[col.codigo]),
+        cliente: conCliente ? (f.cliente as string | null) ?? null : null,
+        filas: Number(f.m0 ?? 0),
+    })).filter((o) => Number.isFinite(o.numero));
 }

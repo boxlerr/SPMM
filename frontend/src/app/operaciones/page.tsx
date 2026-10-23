@@ -325,9 +325,15 @@ export default function OperacionesPage() {
   )
   // Overlay de progreso del cálculo. `listo` marca que la respuesta llegó: la
   // barra se completa y el overlay se baja cuando termina de armarse la vista previa.
-  const [calculando, setCalculando] = useState<{ activo: boolean; ots: number; listo: boolean; modo?: "calcular" | "guardar" }>(
+  const [calculando, setCalculando] = useState<{ activo: boolean; ots: number; procesos?: number; listo: boolean; modo?: "calcular" | "guardar" }>(
     { activo: false, ots: 0, listo: false }
   )
+  // Los procesos que faltan de esas OT: con eso la barra dice cuánto va a tardar
+  // (lib/tiempoDelCalculo, la misma cuenta que el presupuesto del solver).
+  const procesosParaCalcular = (ids: number[]) => {
+    const porId = new Map(ordenesTrabajo.map(o => [o.id, o]))
+    return ids.reduce((n, id) => n + (porId.get(id)?.procesos ?? []).filter(p => p.estado_proceso?.id !== 3).length, 0)
+  }
   // Autoguardado del plan sin confirmar. El navegador escribe en cada cambio (cubre
   // el cierre accidental y el corte de luz); la base va debounceada y es la copia
   // que ve cualquiera desde cualquier máquina. Ver hooks/useBorradorPlan.
@@ -1381,7 +1387,7 @@ export default function OperacionesPage() {
 
     // Call API for preview
     try {
-      setCalculando({ activo: true, ots: ids.length, listo: false });
+      setCalculando({ activo: true, ots: ids.length, procesos: procesosParaCalcular(ids), listo: false });
       // La foto de Recursos se pide JUNTO con el cálculo, no después: así no suma
       // latencia, y queda claro que es "cómo estaban los datos cuando se planificó".
       const huellaPromesa = huellaRecursos();
@@ -1566,7 +1572,7 @@ export default function OperacionesPage() {
       return;
     }
     setIsPreviewCalculating(true);
-    setCalculando({ activo: true, ots: ids.length, listo: false });
+    setCalculando({ activo: true, ots: ids.length, procesos: procesosParaCalcular(ids), listo: false });
     setSelectedOrderIds(ids);
     setPlanningRange(range);
     setRangoDeLaVistaPrevia(prev => ({ rango: range, vez: (prev?.vez ?? 0) + 1 }));
@@ -3190,6 +3196,7 @@ export default function OperacionesPage() {
       <ProgresoPlanificacion
         activo={calculando.activo}
         cantidadOts={calculando.ots}
+        cantidadProcesos={calculando.procesos}
         listo={calculando.listo}
         modo={calculando.modo}
       />

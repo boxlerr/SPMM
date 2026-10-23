@@ -31,6 +31,7 @@ import { Flotante } from "./Flotante";
 import { cn } from "@/lib/utils";
 import {
     ATAJOS,
+    esFiltroDeElegidas,
     fechaCorta,
     rangoDelAtajo,
     type Atajo,
@@ -418,7 +419,9 @@ export function ElegirFiltros({
     onCambiar: (r: ConfigReporte) => void;
 }) {
     const porCodigo = useMemo(() => new Map(fuente.columnas.map((c) => [c.codigo, c])), [fuente]);
-    const usadas = new Set(receta.filtros.map((f) => f.columna));
+    // Las OT elegidas una por una tienen su propio bloque (ElegirOT): acá no se ven ni
+    // ocupan la columna (el N° de OT se puede filtrar además por rango).
+    const usadas = new Set(receta.filtros.filter((f) => !esFiltroDeElegidas(f)).map((f) => f.columna));
     const disponibles = fuente.columnas.filter((c) => c.filtro && !usadas.has(c.codigo));
 
     const cambiar = (i: number, f: FiltroReporte | null) => {
@@ -432,7 +435,7 @@ export function ElegirFiltros({
         <div className="space-y-2">
             {receta.filtros.map((f, i) => {
                 const c = porCodigo.get(f.columna);
-                if (!c) return null;
+                if (!c || esFiltroDeElegidas(f)) return null;
                 return (
                     <div key={`${f.columna}-${i}`} className="rounded-xl border border-gray-200 bg-gray-50/60 p-2.5">
                         <div className="mb-1.5 flex items-center gap-2">

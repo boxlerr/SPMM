@@ -127,6 +127,11 @@ FILTRO_DE_TIPO = {
     "booleano": "booleano",
     "mes": None,
 }
+# Los filtros de una columna `elegible`, además del suyo: las OT tildadas una por una.
+# «solo» deja únicamente esas; «fuera» saca esas y deja pasar todo lo demás (también las OT
+# que aparezcan después). La pantalla guarda la lista más corta de las dos.
+OPERACIONES_DE_ELEGIDOS = ("solo", "fuera")
+
 OPERACION_DE_FILTRO = {
     "opciones": "en",
     "texto": "contiene",
@@ -435,6 +440,10 @@ class Columna:
     # Sumada o promediada POR PERSONA es el rendimiento de cada una (las horas estimadas
     # y reales de sus pasos): ver `Fuente.por_persona` y REQUISITOS_RENDIMIENTO.
     rendimiento: bool = False
+    # Se eligen sus valores uno por uno desde la pantalla: «sólo estas OT» o «sin estas OT»
+    # (Lucas, 23/10/2026: «filtrar por período y cliente, ver las OT y elegir cuáles
+    # incluir, sin modificar ni eliminar las OT del sistema»). Ver OPERACIONES_DE_ELEGIDOS.
+    elegible: bool = False
     # El valor NO sale de SQL: es un número del reporte de la ficha de la persona (RF-07,
     # RendimientoOperarioService.reporte), con el tiempo EFECTIVO (jornada menos pausas).
     # La clave dice cuál (ver ReportesService.valores_de_la_ficha). Se calcula en Python
@@ -617,7 +626,7 @@ def _nombre_persona(tabla) -> ColumnElement:
 
 def _numero_ot(tabla) -> Columna:
     return C("numero", "N° de OT", "id", tabla.c.id_otvieja, agrupable=True, por_defecto=True,
-             ayuda="El número con que el taller conoce la orden.")
+             elegible=True, ayuda="El número con que el taller conoce la orden.")
 
 
 def _cliente(por_defecto: bool = False) -> Columna:
@@ -1471,11 +1480,13 @@ EJEMPLOS: tuple[dict, ...] = (
     # y no lo manda hasta que tenga alguno (ver ReportesService.sin_filtros_a_medio_cargar).
     # Sin período: una OT pendiente puede haber entrado hace meses.
     {
+        # 23/10/2026: se llamaba «OT pendientes con sus procesos» y Lucas lo abría buscando los
+        # procesos por fila. El nombre ahora dice lo que lo distingue del de arriba.
         "codigo": "ot_pendientes_con_procesos",
-        "nombre": "OT pendientes con sus procesos",
-        "descripcion": ("Las OT que todavía tienen trabajo, con sus procesos pendientes en orden, "
-                        "cantidad, prioridad y fecha prometida. Elegí los clientes y bajalo en Excel "
-                        "(por ejemplo, para pasárselo a la IA y organizar la producción)."),
+        "nombre": "OT pendientes, una fila por OT",
+        "descripcion": ("Una fila por OT con todos sus procesos pendientes juntos en una celda, en "
+                        "orden, con cantidad, prioridad, fecha prometida y horas que faltan. Elegí "
+                        "los clientes y bajalo en Excel."),
         "config": {
             "fuente": "ordenes",
             "columnas": ["numero", "cliente", "articulo", "unidades", "prioridad", "fecha_prometida",

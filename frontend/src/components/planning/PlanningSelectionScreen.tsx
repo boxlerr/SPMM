@@ -521,11 +521,33 @@ export function PlanningSelectionScreen({
         const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id))
         const emptyOrders = selectedOrders.filter(o => !o.procesos || o.procesos.length === 0)
         if (emptyOrders.length > 0) {
+            // Una OT sin procesos no tiene nada que planificar, pero no frena a las demás.
+            // Lucas, 23/10: tenía 55 tildadas, una sin procesos (#15946), y el único camino
+            // era encontrarla en la lista y destildarla a mano. Ahora el aviso la saca y
+            // sigue (avisar, no bloquear).
             const orderIds = emptyOrders.map(nro).join(", ")
-            toast.error(`Las órdenes ${orderIds} no tienen procesos. Agregue procesos antes de planificar.`, {
-                duration: 6000,
-                description: "Destildalas para planificar el resto, o cargales los procesos primero.",
-            })
+            const restantes = selectedIds.filter(id => !emptyOrders.some(o => o.id === id))
+            const una = emptyOrders.length === 1
+            toast.warning(
+                una ? `La OT ${orderIds} no tiene procesos cargados.` : `Las OT ${orderIds} no tienen procesos cargados.`,
+                {
+                    duration: 12000,
+                    description: restantes.length > 0
+                        ? `No hay nada que planificar en ${una ? "ella" : "ellas"}. Sacala${una ? "" : "s"} y planificá las otras ${restantes.length}, o cargale${una ? "" : "s"} los procesos primero.`
+                        : "No hay nada que planificar: cargales los procesos primero.",
+                    action: restantes.length > 0
+                        ? {
+                            label: una ? "Sacarla y seguir" : "Sacarlas y seguir",
+                            onClick: () => {
+                                setSelectedIds(restantes)
+                                setSoloTildadas(prev =>
+                                    prev === null ? null : prev.filter(id => restantes.includes(id)))
+                                abrirSelectorFechas("planificar")
+                            },
+                        }
+                        : undefined,
+                }
+            )
             return
         }
         abrirSelectorFechas("planificar")
