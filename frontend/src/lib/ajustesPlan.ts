@@ -162,6 +162,8 @@ export type AjustesDelPlanPayload = {
     /** maquinaria_id -> conjunto FINAL de rangos. */
     maquinarias: Record<number, number[]>;
     skills_nativas: { operario_id: number; proceso_id: number; habilitado: boolean }[];
+    /** orden_id -> piezas de la OT que se fabrican en este plan (ver `lib/entregaParcial`). */
+    entregas_parciales?: Record<number, { unidades: number; fecha: string | null }>;
 };
 
 /**

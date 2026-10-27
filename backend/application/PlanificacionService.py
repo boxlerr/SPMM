@@ -3955,6 +3955,31 @@ def unidades_hechas(orden) -> int:
     return max(0, entregadas, terminadas)
 
 
+def entrega_parcial_de(orden, hechas: int, pedido) -> dict | None:
+    """La entrega parcial que vale para esta OT en este plan, o None si no achica nada.
+
+    Lucas (27/10/2026), con la 15984 fuera del plan: «Debo poder indicar si en vez del
+    total del pedido, puedo hacer una entrega parcial. Son 66 piezas total pero tengo que
+    entregar 24 para el jueve». El plan fabrica esas piezas y nada más; lo que sobra queda
+    para el próximo plan, que ya lo cuenta solo cuando se carga la entrega.
+
+    `pedido` es lo que llega en `ajustes_del_plan.entregas_parciales[orden_id]`
+    ({"unidades", "fecha"}). Pedir lo que falta o más no es una entrega parcial: el plan
+    sale como siempre. Sin unidades cargadas en la OT no hay contra qué dividir.
+
+    Devuelve {"unidades", "fecha", "faltan"}: las piezas de esta entrega, para cuándo
+    (o None) y cuántas faltaban de la OT, que es lo que la pantalla muestra al lado.
+    """
+    if not pedido:
+        return None
+    total = int(getattr(orden, "unidades", 0) or 0)
+    faltan = total - hechas
+    piezas = int(pedido.get("unidades") or 0)
+    if total <= 0 or piezas <= 0 or piezas >= faltan:
+        return None
+    return {"unidades": piezas, "fecha": pedido.get("fecha"), "faltan": faltan}
+
+
 def minutos_de_lo_que_falta(tiempo_proceso, nombre_proceso: str, unidades, hechas: int) -> int:
     """Los minutos a planificar de un paso, contando solo las unidades que faltan.
 
@@ -4003,6 +4028,25 @@ def _marcar_lineas(resultados, linea_por_clave, lote_por_clave=None, a_mano=None
         lote = (lote_por_clave or {}).get(clave)
         if lote:
             r["minutos_lote"], r["unidades_lote"], r["unidades_faltan"] = lote
+    return resultados
+
+
+def _marcar_entregas_parciales(resultados, entregas_por_orden: dict):
+    """Le pega a cada fila de una OT con entrega parcial cuántas piezas se planificaron, de
+    cuántas que faltaban, y para cuándo. Va en TODAS sus filas, también en las que no
+    entraron: la pantalla saca de acá con qué entregas se calculó el plan que muestra, y
+    una OT que quedó afuera entera no tiene otras."""
+    if not entregas_por_orden:
+        return resultados
+    for r in resultados or []:
+        entrega = entregas_por_orden.get(r.get("orden_id"))
+        if entrega:
+            fecha = entrega["fecha"]
+            r["entrega_parcial"] = {
+                "unidades": entrega["unidades"],
+                "faltan": entrega["faltan"],
+                "fecha": fecha.isoformat() if hasattr(fecha, "isoformat") else fecha,
+            }
     return resultados
 
 
@@ -4106,7 +4150,10 @@ async def planificar(
     ajustes_procesos = dict(_ajustes.get("procesos") or {})
     ajustes_maquinarias = dict(_ajustes.get("maquinarias") or {})
     ajustes_skills = list(_ajustes.get("skills_nativas") or [])
-    if ajustes_procesos or ajustes_maquinarias or ajustes_skills:
+    # orden_id -> {"unidades", "fecha"}: las OT de las que este plan fabrica una parte
+    # (ver entrega_parcial_de).
+    entregas_parciales = dict(_ajustes.get("entregas_parciales") or {})
+    if ajustes_procesos or ajustes_maquinarias or ajustes_skills or entregas_parciales:
         # Este log va ARRIBA del early-return del guardado a propósito. Un plan con
         # ajustes sale distinto de lo que dicen los datos: si mañana alguien mira el
         # plan guardado y no le cierra con Recursos, esta línea es la única
@@ -4115,7 +4162,8 @@ async def planificar(
         logger.info(
             f"Service - planificar() con ajustes SOLO para este plan (no se guardan "
             f"en Recursos): {len(ajustes_procesos)} proceso(s), "
-            f"{len(ajustes_maquinarias)} máquina(s), {len(ajustes_skills)} habilidad(es)"
+            f"{len(ajustes_maquinarias)} máquina(s), {len(ajustes_skills)} habilidad(es), "
+            f"{len(entregas_parciales)} entrega(s) parcial(es)"
         )
 
     # 🔹 Plan ya armado: se guarda TAL CUAL, sin pasar por el solver.
@@ -4291,6 +4339,7 @@ async def planificar(
     linea_por_clave = {}   # (orden_id, secuencia) -> orden_trabajo_proceso.id (qué pasada es)
     a_mano_por_clave = set()  # pasos marcados «va a mano» en la OT
     lote_por_clave = {}    # (orden_id, secuencia) -> (min del lote, unidades, faltan) si se achicó
+    entregas_por_orden = {}  # orden_id -> la entrega parcial que se aplicó (entrega_parcial_de)
     procesos_sin_rango = {}  # id_proceso -> nombre, para avisar al final
     # id_proceso -> rangos que tiene cargados en Recursos. Se anotan SOLO los procesos
     # ajustados: para todos los demás, lo que entra al solver ya es el dato de Recursos,
@@ -4323,6 +4372,15 @@ async def planificar(
         # carga avance: sin esto, cada recálculo de la semana inflaba el plan.
         _elegidas = [rel for rel in _elegidas if getattr(rel, "id_estado", 1) != 3]
         _hechas = unidades_hechas(orden)
+        # Entrega parcial: se fabrican esas piezas y nada más, así que para el cálculo
+        # «hecho» es todo lo demás. Con fecha, esa es la que se tiene que cumplir.
+        _vence = orden.fecha_prometida
+        _entrega = entrega_parcial_de(orden, _hechas, entregas_parciales.get(orden.id))
+        if _entrega:
+            entregas_por_orden[orden.id] = _entrega
+            _hechas = int(orden.unidades) - _entrega["unidades"]
+            if _entrega["fecha"]:
+                _vence = _entrega["fecha"]
 
         # `secuencia` es la POSICIÓN en la OT, no `rel.orden`: ver _lineas_ordenadas.
         for secuencia, rel in _lineas_ordenadas(_elegidas):
@@ -4456,7 +4514,7 @@ async def planificar(
                 orden.id,               # orden_id
                 rel.proceso.id,         # proc_id
                 secuencia,              # secuencia (posición en la OT, única)
-                orden.fecha_prometida,  # deadline
+                _vence,                 # deadline (la de la entrega parcial, si tiene)
                 prioridad_desc,         # prioridad
                 dur_min,                # duración
                 rangos_validos,         # rangos permitidos
@@ -4532,6 +4590,7 @@ async def planificar(
     )
 
     _marcar_lineas(resultados, linea_por_clave, lote_por_clave, a_mano=a_mano_por_clave)
+    _marcar_entregas_parciales(resultados, entregas_por_orden)
     _marcar_tercerizados(resultados, tercerizados,
                          {(p[0], p[2]): p[5] for p in procesos_para_solver})
     planificados, excedentes = _split_resultados(resultados)

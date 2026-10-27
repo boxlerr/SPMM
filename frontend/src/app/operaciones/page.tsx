@@ -37,6 +37,7 @@ import {
   payloadDeAjustes, ajustesDelPlanMostrado, ajustesComoCalculados,
   type AjusteDelPlan, type AjustesDelPlanPayload,
 } from "@/lib/ajustesPlan"
+import { conEntregasParciales, entregasDeLasFilas, type EntregasParciales } from "@/lib/entregaParcial"
 import { huellaRecursos } from "@/lib/huellaRecursos"
 import { FILTRO_RECURSOS_VACIO, type FiltroRecursos } from "@/lib/filtroRecursos"
 import {
@@ -362,6 +363,10 @@ export default function OperacionesPage() {
    * saltea, no se puede recuperar de ninguna parte. Ver lib/ajustesPlan.
    */
   const ajustesBorrador = useRef<AjusteDelPlan[]>([])
+  /** Las entregas parciales marcadas en la vista previa (ver lib/entregaParcial). En un
+   *  ref por lo mismo que los ajustes: las marcadas sin recalcular no están en ningún
+   *  otro lado. */
+  const entregasBorrador = useRef<EntregasParciales>({})
   /** Cuándo se calculó el plan que se está viendo. Al retomar un borrador es la
    *  fecha del borrador, no la de ahora: es lo que permite avisar que la foto de
    *  diagnósticos puede haber quedado vieja. */
@@ -376,6 +381,7 @@ export default function OperacionesPage() {
   const [forzarIdsIniciales, setForzarIdsIniciales] = useState<number[]>([])
   const [tandasIniciales, setTandasIniciales] = useState<TandaManual[]>([])
   const [ajustesIniciales, setAjustesIniciales] = useState<AjusteDelPlan[]>([])
+  const [entregasIniciales, setEntregasIniciales] = useState<EntregasParciales | undefined>({})
 
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isReplanning, setIsReplanning] = useState(false)
@@ -1513,9 +1519,11 @@ export default function OperacionesPage() {
       setForzarIdsIniciales([]);
       setTandasIniciales([]);
       setAjustesIniciales([]);
+      setEntregasIniciales({});
       retoquesBorrador.current = { ediciones: {}, forzarOrdenIds: [] };
       tandasBorrador.current = [];
       ajustesBorrador.current = [];
+      entregasBorrador.current = {};
       setPlanCalculadoEn(new Date().toISOString());
       void guardarYa({
         ...baseBorrador.current,
@@ -1523,6 +1531,7 @@ export default function OperacionesPage() {
         forzarOrdenIds: [],
         tandasManuales: [],
         ajustesDelPlan: [],
+        entregasParciales: {},
         guardadoEn: new Date().toISOString(),
       });
 
@@ -1686,6 +1695,7 @@ export default function OperacionesPage() {
         ...retoquesBorrador.current,
         tandasManuales: tandasBorrador.current,
         ajustesDelPlan: ajustesComoCalculados(ajustesDeEstePedido),
+        entregasParciales: entregasBorrador.current,
         guardadoEn: new Date().toISOString(),
       });
 
@@ -1726,6 +1736,7 @@ export default function OperacionesPage() {
       ...retoquesBorrador.current,
       tandasManuales: tandasBorrador.current,
       ajustesDelPlan: ajustesBorrador.current,
+      entregasParciales: entregasBorrador.current,
       guardadoEn: new Date().toISOString(),
     });
   }, [registrarCambio]);
@@ -1803,6 +1814,12 @@ export default function OperacionesPage() {
     registrarBorrador();
   }, [registrarBorrador]);
 
+  /** Cada entrega parcial marcada o sacada en la vista previa. */
+  const handleEntregasBorrador = useCallback((entregas: EntregasParciales) => {
+    entregasBorrador.current = entregas;
+    registrarBorrador();
+  }, [registrarBorrador]);
+
   /** Retomar un plan calculado y sin confirmar: se abre tal cual quedó, sin
    *  recalcular. Lo que se pierde recalculando son los minutos del solver y los
    *  retoques hechos a mano, así que se restauran los dos. */
@@ -1855,6 +1872,11 @@ export default function OperacionesPage() {
     // en el render siguiente, y si en el medio se dispara un guardado el borrador
     // recién retomado se guardaría sin sus ajustes —o sea, borrándolos.
     ajustesBorrador.current = borrador.ajustesDelPlan || [];
+    // Los borradores de antes del 27/10/2026 no traen las entregas marcadas: la vista
+    // previa toma las de las filas, y el ref también, para no guardarlo sin ellas.
+    setEntregasIniciales(borrador.entregasParciales);
+    entregasBorrador.current = borrador.entregasParciales
+      ?? entregasDeLasFilas([...(borrador.resultados || []), ...(borrador.excedentes || [])]);
     setPlanCalculadoEn(borrador.guardadoEn);
     // El autosave pasa a pisar ESTE borrador en vez de crear uno nuevo.
     adoptar(borrador);
@@ -1901,7 +1923,11 @@ export default function OperacionesPage() {
       //
       // Sólo los que el plan en pantalla YA tiene: si se guarda sin recalcular, los
       // recién marcados no están en este plan y los que se estaban sacando sí.
-      const ajustesDelPlanGuardado = payloadDeAjustes(ajustesDelPlanMostrado(ajustesBorrador.current));
+      // Las entregas parciales, también las del plan en pantalla: las dicen sus filas.
+      const ajustesDelPlanGuardado = conEntregasParciales(
+        payloadDeAjustes(ajustesDelPlanMostrado(ajustesBorrador.current)),
+        entregasDeLasFilas([...previewResults, ...excedentesResults]),
+      );
 
       // Distinguir entre el caso "manual plan" (array) y el nuevo "decisiones de excedentes" ({forzarOrdenIds})
       let manualPlan: any[] | undefined = undefined;
@@ -2004,9 +2030,11 @@ export default function OperacionesPage() {
       // que la próxima planificación arranque con la fresadora abierta de ésta, y
       // saliendo distinta de los datos sin que nadie hubiera pedido nada.
       setAjustesIniciales([]);
+      setEntregasIniciales({});
       retoquesBorrador.current = { ediciones: {}, forzarOrdenIds: [] };
       tandasBorrador.current = [];
       ajustesBorrador.current = [];
+      entregasBorrador.current = {};
 
       // GUARDAR TERMINA ACÁ. El plan ya está escrito.
       //
@@ -2966,6 +2994,7 @@ export default function OperacionesPage() {
             onEdicionesChange={handleEdicionesBorrador}
             onTandasChange={handleTandasBorrador}
             onAjustesChange={handleAjustesBorrador}
+            onEntregasParcialesChange={handleEntregasBorrador}
             calculadoEn={planCalculadoEn}
             inicioBase={baseBorrador.current?.inicioBase}
             feriados={feriados}
@@ -2988,6 +3017,7 @@ export default function OperacionesPage() {
             forzarIdsIniciales={forzarIdsIniciales}
             tandasIniciales={tandasIniciales}
             ajustesIniciales={ajustesIniciales}
+            entregasParcialesIniciales={entregasIniciales}
           />
         </div>
       ) : (

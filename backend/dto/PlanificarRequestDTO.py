@@ -1,6 +1,6 @@
 # backend/dto/PlanificarRequestDTO.py
 from datetime import date, datetime
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from typing import Dict, List, Optional
 
 class AjusteSkillNativaDTO(BaseModel):
@@ -8,6 +8,14 @@ class AjusteSkillNativaDTO(BaseModel):
     operario_id: int
     proceso_id: int
     habilitado: bool = True
+
+
+class EntregaParcialDTO(BaseModel):
+    """Fabricar SOLO una parte de la OT en este plan (Lucas, 27/10/2026: «son 66 piezas
+    total pero tengo que entregar 24 para el jueves»). `fecha`, si viene, es para cuándo
+    hacen falta esas piezas y reemplaza a la prometida de la OT en este cálculo."""
+    unidades: int = Field(ge=1)
+    fecha: Optional[date] = None
 
 
 class AjustesDelPlanDTO(BaseModel):
@@ -27,6 +35,10 @@ class AjustesDelPlanDTO(BaseModel):
     procesos: Dict[int, List[int]] = {}        # proceso_id -> conjunto FINAL de rangos
     maquinarias: Dict[int, List[int]] = {}     # maquinaria_id -> conjunto FINAL de rangos
     skills_nativas: List[AjusteSkillNativaDTO] = []
+    # orden_id -> cuántas piezas de esa OT se fabrican en este plan (y para cuándo). Va
+    # con los ajustes porque es lo mismo: vale para este cálculo, no se escribe en la OT
+    # y tiene que viajar en TODOS los recálculos de la vista previa.
+    entregas_parciales: Dict[int, EntregaParcialDTO] = {}
 
 
 class PlanificarRequestDTO(BaseModel):

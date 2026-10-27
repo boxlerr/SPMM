@@ -22,6 +22,7 @@
 
 import { API_URL } from "@/config";
 import type { AjusteDelPlan } from "@/lib/ajustesPlan";
+import type { EntregasParciales } from "@/lib/entregaParcial";
 
 const CLAVE_LOCAL = "spmm_borrador_plan";
 
@@ -85,6 +86,14 @@ export type BorradorPlan = {
      * que pasaba antes— y no se rompe nada.
      */
     ajustesDelPlan?: AjusteDelPlan[];
+    /**
+     * Las entregas parciales MARCADAS (orden_id → piezas y fecha), calculadas o no.
+     *
+     * Con las que salió el plan ya lo dicen sus filas (`entrega_parcial`); esto guarda
+     * además las marcadas sin recalcular, que no están en ningún otro lado. Ausente en
+     * los borradores de antes del 27/10/2026: ahí se toman las de las filas.
+     */
+    entregasParciales?: EntregasParciales;
     /**
      * Desde cuándo arranca este plan (el T=0 del planificador), tal como lo devolvió
      * el backend.

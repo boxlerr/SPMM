@@ -168,12 +168,15 @@ export function NombreDeProcesoEditable({
  * agujero por donde entró mal. El globito dice DÓNDE se corrige y no sólo que acá no
  * se puede: si no, el que encuentra el error igual se queda sin saber adónde ir.
  */
-export function MinutosDelProceso({ minutos, minutosLote, unidades, unidadesFaltan }: {
+export function MinutosDelProceso({ minutos, minutosLote, unidades, unidadesFaltan, entregaParcial }: {
     minutos: number;
     /** Si vienen, el paso se achicó a las unidades que faltan (entrega parcial). */
     minutosLote?: number;
     unidades?: number;
     unidadesFaltan?: number;
+    /** El paso se achicó porque en este plan se marcó una entrega parcial de la OT: las
+     *  unidades que «faltan» son las de esa entrega, no las que le quedan a la OT. */
+    entregaParcial?: boolean;
 }) {
     const achicado = !!minutosLote && !!unidades && unidadesFaltan != null && minutosLote !== minutos;
     return (
@@ -189,7 +192,7 @@ export function MinutosDelProceso({ minutos, minutosLote, unidades, unidadesFalt
                 «12m» en un paso que en la OT dice 2.400 parece un error de carga. */}
             {achicado && (
                 <span className="rounded bg-sky-50 border border-sky-200 px-1.5 text-[11px] text-sky-800 tabular-nums">
-                    faltan {unidadesFaltan!.toLocaleString("es-AR")} de {unidades!.toLocaleString("es-AR")} u. · lote {minutosLote!.toLocaleString("es-AR")}m
+                    {entregaParcial ? "entrega" : "faltan"} {unidadesFaltan!.toLocaleString("es-AR")} de {unidades!.toLocaleString("es-AR")} u. · lote {minutosLote!.toLocaleString("es-AR")}m
                 </span>
             )}
         </span>

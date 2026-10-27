@@ -66,6 +66,11 @@ import {
     NombreDeProcesoEditable, MinutosDelProceso, AccionesDeProcesoEnPlan,
     PasoEnPlanEditable, AgregarProcesoEnPlan, type ProcesoDelCatalogo,
 } from "@/components/planning/ProcesoEnPlanEditable";
+import { EntregaParcialDeOT } from "@/components/planning/EntregaParcialDeOT";
+import {
+    conEntregasParciales, entregasDeLasFilas, entregasPendientes, textoDeEntrega,
+    type EntregaParcial, type EntregaParcialDeLaFila, type EntregasParciales,
+} from "@/lib/entregaParcial";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -106,6 +111,8 @@ interface PlanificacionResult {
     minutos_lote?: number;
     unidades_lote?: number;
     unidades_faltan?: number;
+    /** La OT se planificó con entrega parcial: cuántas piezas, de cuántas, para cuándo. */
+    entrega_parcial?: EntregaParcialDeLaFila | null;
     prioridad_peso: number;
     id_operario?: number;
     id_rango_operario?: number;
@@ -244,6 +251,14 @@ interface PlanningPreviewScreenProps {
     ajustesIniciales?: AjusteDelPlan[];
     /** Avisa de cada ajuste aplicado o deshecho, para que se guarde en el borrador. */
     onAjustesChange?: (ajustes: AjusteDelPlan[]) => void;
+    /**
+     * Las entregas parciales marcadas en el borrador que se retoma (ver
+     * `lib/entregaParcial`). Sin esto se toman las de las filas del plan: un borrador de
+     * antes del 27/10/2026 no las trae, y un plan nuevo manda `{}`.
+     */
+    entregasParcialesIniciales?: EntregasParciales;
+    /** Avisa de cada entrega parcial marcada o sacada, para que se guarde en el borrador. */
+    onEntregasParcialesChange?: (entregas: EntregasParciales) => void;
 }
 
 /**
@@ -419,6 +434,8 @@ export function PlanningPreviewScreen({
     onTandasChange,
     ajustesIniciales,
     onAjustesChange,
+    entregasParcialesIniciales,
+    onEntregasParcialesChange,
 }: PlanningPreviewScreenProps) {
 
     // Zoom compartido (key 'plan_zoom' en localStorage).
@@ -497,6 +514,24 @@ export function PlanningPreviewScreen({
         onAjustesChange?.(ajustesDelPlan);
     }, [ajustesDelPlan, onAjustesChange]);
 
+    /**
+     * Las entregas parciales MARCADAS: van en el próximo recálculo. Con cuáles salió el
+     * plan de la pantalla lo dicen sus filas (`entregasCalculadas`, más abajo), y lo que
+     * difiere es lo que cuenta el botón del pie. Ver `lib/entregaParcial`.
+     */
+    const [entregasMarcadas, setEntregasMarcadas] = React.useState<EntregasParciales>({});
+    React.useEffect(() => {
+        onEntregasParcialesChange?.(entregasMarcadas);
+    }, [entregasMarcadas, onEntregasParcialesChange]);
+    const cambiarEntrega = React.useCallback((ordenId: number, entrega: EntregaParcial | undefined) => {
+        setEntregasMarcadas(prev => {
+            const next = { ...prev };
+            if (entrega) next[ordenId] = entrega;
+            else delete next[ordenId];
+            return next;
+        });
+    }, []);
+
     // D1 (feedback 06/07): agregar procesos SUELTOS. `pendingAddLineas` mapea
     // orden_id -> set de ids de PASADA (orden_trabajo_proceso.id) elegidas;
     // `expandedAddIds` = OTs expandidas en el popover para ver sus procesos.
@@ -535,6 +570,9 @@ export function PlanningPreviewScreen({
         // manda la lista vacía y eso los limpia: valen para el plan en el que se
         // aplicaron y no para el siguiente.
         setAjustesDelPlan(ajustesIniciales ?? []);
+        // Y las entregas parciales: las del borrador o, si no las trae, con las que se
+        // calculó el plan que llega.
+        setEntregasMarcadas(entregasParcialesIniciales ?? entregasDeLasFilas([...results, ...excedentes]));
         // Lo guardado en Recursos no viaja en el borrador: al retomarlo, la huella de
         // Recursos lo detecta como «cambió algo». Y nada está en viaje: el `calculadoEn`
         // del borrador que llega no es la vuelta de ningún recálculo de esta pantalla.
@@ -1110,7 +1148,9 @@ export function PlanningPreviewScreen({
             sacados: new Set(todos.filter(a => estadoDeAjuste(a) === "por-quitar").map(a => a.clave)),
             guardados: new Set(guardadosSinRecalcular.map(g => g.id)),
         };
-        return payloadDeAjustes(ajustesParaElProximo(todos));
+        // Las entregas parciales viajan con los ajustes: así llegan a todos los
+        // recálculos, por cualquiera de las puertas.
+        return conEntregasParciales(payloadDeAjustes(ajustesParaElProximo(todos)), entregasMarcadas);
     };
 
     /** Recalcula el plan con las OTs actuales + las nuevas pendientes + decisiones de forzar. */
@@ -2789,6 +2829,22 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
      * en el cartel: una fila sin `id_otvieja` porque la OT la cargó otra persona
      * después de abrir la pantalla.
      */
+    /** Con qué entregas parciales salió el plan de la pantalla: lo dicen sus filas. */
+    const entregasCalculadas = React.useMemo(
+        () => entregasDeLasFilas([...results, ...excedentes]), [results, excedentes]);
+    /**
+     * Las piezas que faltan de una OT, que es el tope de una entrega parcial. La del
+     * backend si la fila la trae (cuenta también lo terminado sin entregar); si no,
+     * unidades menos entregadas.
+     */
+    const faltanDeLaOT = (filas: PlanificacionResult[]) => {
+        const conDato = filas.find(f => f.entrega_parcial?.faltan || f.unidades_faltan != null);
+        if (conDato?.entrega_parcial?.faltan) return conDato.entrega_parcial.faltan;
+        if (conDato?.unidades_faltan != null) return conDato.unidades_faltan;
+        const f = filas[0];
+        return Math.max(0, (f?.unidades || 0) - (f?.cantidad_entregada || 0));
+    };
+
     const ordenIdPorNumeroVisible = React.useMemo(() => {
         const m = new Map<number, number>();
         for (const r of [...results, ...stickyExcedentes]) {
@@ -2829,8 +2885,17 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         for (const oid of procesosEnPlan.otsCambiadas) {
             lista.push({ clave: `p-${oid}`, texto: `Procesos editados en la OT #${numeroDeOT(oid)}` });
         }
+        for (const e of entregasPendientes(entregasMarcadas, entregasCalculadas)) {
+            lista.push({
+                clave: `e-${e.orden_id}`,
+                texto: e.marcada
+                    ? `Entrega parcial en la OT #${numeroDeOT(e.orden_id)}: ${textoDeEntrega(e.marcada)}`
+                    : `La OT #${numeroDeOT(e.orden_id)} vuelve a planificarse entera`,
+            });
+        }
         return lista;
-    }, [ajustesDelPlan, guardadosSinRecalcular, revisionAuto, procesosEnPlan.otsCambiadas, numeroDeOT]);
+    }, [ajustesDelPlan, guardadosSinRecalcular, revisionAuto, procesosEnPlan.otsCambiadas, numeroDeOT,
+        entregasMarcadas, entregasCalculadas]);
     const cantidadPendientes = pendientes.length;
     const textoCambios = (n: number) => `${n} ${n === 1 ? "cambio que marcaste" : "cambios que marcaste"}`;
     /**
@@ -4419,6 +4484,10 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                     </div>
                                                                     <div className="text-xs text-gray-500 mt-0.5 flex flex-wrap items-center gap-x-2">
                                                                         <span>{items.length} proceso(s) · {formatMinutesShort(otDurationMin)}</span>
+                                                                        {/* Calculada y sigue afuera: que no parezca que no se aplicó. */}
+                                                                        {entregasCalculadas[oid] && (
+                                                                            <span className="text-sky-700">· ya con la entrega parcial</span>
+                                                                        )}
                                                                         {prometidaReal(first.fecha_prometida) && (
                                                                             <span>· Prometida {formatDate(first.fecha_prometida)}</span>
                                                                         )}
@@ -4438,6 +4507,20 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                         <HelpCircle className="w-3 h-3" />
                                                                         ¿Por qué no entra?
                                                                     </button>
+                                                                )}
+                                                                {/* Fabricar sólo una parte (Lucas, 27/10/2026): con 24 de
+                                                                    66 piezas la OT puede entrar sin forzar nada. */}
+                                                                {(first.unidades || 0) > 1 && (
+                                                                    <EntregaParcialDeOT
+                                                                        variante="tarjeta"
+                                                                        numero={first.id_otvieja || oid}
+                                                                        faltan={faltanDeLaOT(items)}
+                                                                        prometida={first.fecha_prometida}
+                                                                        marcada={entregasMarcadas[oid]}
+                                                                        calculada={entregasCalculadas[oid]}
+                                                                        onCambiar={(e) => cambiarEntrega(oid, e)}
+                                                                        disabled={isCalculating || isConfirming || !onRecalculate}
+                                                                    />
                                                                 )}
                                                                 <Button
                                                                     size="sm"
@@ -4892,6 +4975,21 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                     <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                                                                         <div className="h-full bg-green-500" style={{ width: `${percentage}%` }} />
                                                                     </div>
+                                                                    {/* Fabricar sólo una parte en este plan (Lucas,
+                                                                        27/10/2026). Sin marcar es un link discreto: la
+                                                                        columna no se puede ensanchar por un caso raro. */}
+                                                                    {firstItem.unidades > 1 && (
+                                                                        <EntregaParcialDeOT
+                                                                            variante="celda"
+                                                                            numero={firstItem.id_otvieja || ordenId}
+                                                                            faltan={faltanDeLaOT(items)}
+                                                                            prometida={firstItem.fecha_prometida}
+                                                                            marcada={entregasMarcadas[ordenId]}
+                                                                            calculada={entregasCalculadas[ordenId]}
+                                                                            onCambiar={(e) => cambiarEntrega(ordenId, e)}
+                                                                            disabled={isCalculating || isConfirming || !onRecalculate}
+                                                                        />
+                                                                    )}
                                                                 </div>
                                                             ) : "-"}
                                                         </td>
@@ -5203,7 +5301,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                     minutos={effectiveItem.duracion_min}
                                                                                                     minutosLote={effectiveItem.minutos_lote}
                                                                                                     unidades={effectiveItem.unidades_lote}
-                                                                                                    unidadesFaltan={effectiveItem.unidades_faltan} />
+                                                                                                    unidadesFaltan={effectiveItem.unidades_faltan}
+                                                                                                    entregaParcial={!!effectiveItem.entrega_parcial} />
                                                                                                 {/* Lo agregado a mano se distingue de lo que trajo la OT.
                                                                                                     La X saca esta pasada sola: sin ella, corregir "elegí
                                                                                                     la fresadora de otra OT" era tirar la OT entera y
