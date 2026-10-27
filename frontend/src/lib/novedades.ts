@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "entrega-parcial-en-el-plan",
+        fecha: "2026-10-27",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Podés planificar sólo una parte de las piezas de una OT (entrega parcial)",
+        detalle:
+            "En la vista previa, en «Fuera del plan» o debajo de la cantidad de cada OT, tocá «Entrega parcial» y poné cuántas piezas y para cuándo (por ejemplo, 24 de 66 para el jueves). Al recalcular, el plan fabrica sólo esas: la producción se achica a esas piezas y las preparaciones van enteras. La OT no cambia; lo que sobra queda para el próximo plan.",
+        href: "/operaciones",
+    },
+    {
         id: "plan-mas-rapido-y-tiempo-estimado",
         fecha: "2026-10-23",
         tipo: "mejora",
