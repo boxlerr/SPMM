@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "hora-de-fin-y-ocupado-en-el-plan",
+        fecha: "2026-10-28",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Cada paso dice a qué hora termina, y el plan avisa si la persona o la máquina ya está ocupada",
+        detalle:
+            "En la vista previa y en Planificadas, al lado del inicio de cada paso ahora está el fin («07:20 → 09:20»). Si el planificador lo hace en partes, con otras cosas metidas en el medio, dice «en partes». Al elegir a mano una persona o una máquina, la lista muestra quién ya tiene otra cosa a esa hora y con qué OT. Si igual la elegís, la fila se pone en rojo y abajo dice con qué paso se pisa. En el pie de la vista previa, «N pasos pisados» te lleva de uno al otro. Se puede guardar igual: avisa, no frena.",
+        href: "/operaciones",
+    },
+    {
         id: "entrega-parcial-en-el-plan",
         fecha: "2026-10-27",
         tipo: "nuevo",

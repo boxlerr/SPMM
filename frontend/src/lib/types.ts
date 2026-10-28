@@ -167,6 +167,9 @@ export interface PlanificacionItem {
     nombre_proceso: string;
     inicio_min: number;
     fin_min: number;
+    /** Minutos de trabajo del paso. Si es menos que de `inicio_min` a `fin_min`, el
+     *  planificador lo hizo en partes (ver `lib/choquesDelPlan`). */
+    duracion_min?: number;
     creado_en: string;
     /** Desde cuándo arranca ESTE plan (el T=0 del solver). Lo guarda el backend al
      *  planificar; los planes anteriores al 11/09/2026 no lo tienen. */

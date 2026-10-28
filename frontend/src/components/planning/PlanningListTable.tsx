@@ -86,6 +86,8 @@ import {
     type FiltroRecursos,
 } from "@/lib/filtroRecursos";
 import { FranjaDeRecursos, SelectoresDeRecursos } from "@/components/planning/FiltroRecursosPlan";
+import { choquesDelPlan, claveDelPlan, ocupadoEn, type TramoDelPlan } from "@/lib/choquesDelPlan";
+import { AvisoOcupado, FinDelPaso, OcupadoEnLaLista } from "@/components/planning/OcupadoEnElPlan";
 
 /**
  * Hasta cuántas OT se despliegan solas al filtrar por recurso humano o máquina.
@@ -573,6 +575,64 @@ function _PlanningListTable({
         }
         return planificacion.find(
             p => p.orden_id === ordenId && p.proceso_id === proc.proceso.id) || null;
+    };
+
+    /**
+     * Cada paso del plan en el calendario, con la persona y la máquina que quedarían si
+     * se aceptan los cambios pendientes: de acá salen la hora de fin y los choques
+     * (reunión con Lucas del 28/10/2026, ver `lib/choquesDelPlan`). La lista del plan
+     * puede traer la misma fila dos veces (el join por proceso de una OT que lo repite):
+     * va una vez por id.
+     */
+    const tramosDelPlan = React.useMemo<TramoDelPlan[]>(() => {
+        const vistos = new Set<number>();
+        const salida: TramoDelPlan[] = [];
+        for (const fila of planificacion) {
+            if (vistos.has(fila.id)) continue;
+            vistos.add(fila.id);
+            const pendiente = pendingRes[resKey(fila.id)];
+            const maquina = pendiente?.maquina !== undefined ? pendiente.maquina : fila.id_maquinaria;
+            salida.push({
+                clave: resKey(fila.id),
+                id_operario: pendiente?.operario ?? fila.id_operario ?? null,
+                id_maquinaria: maquina || null,
+                plan: claveDelPlan(fila, feriados),
+                desde: fila.inicio_min,
+                hasta: fila.fin_min,
+                duracion: Number(fila.duracion_min) || 0,
+                inicio: inicioDeLaFila(fila, feriados),
+                fin: finDeLaFila(fila, feriados),
+                ot: fila.pedido_externo ?? fila.orden_id,
+                orden_id: fila.orden_id,
+                proceso: fila.nombre_proceso,
+            });
+        }
+        return salida;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [planificacion, pendingRes, feriados]);
+    const tramoDeLaFila = React.useMemo(
+        () => new Map(tramosDelPlan.map(t => [t.clave, t] as const)),
+        [tramosDelPlan]
+    );
+    const choques = React.useMemo(() => choquesDelPlan(tramosDelPlan), [tramosDelPlan]);
+    const tramosPorRecurso = React.useMemo(() => {
+        const persona = new Map<number, TramoDelPlan[]>();
+        const maquina = new Map<number, TramoDelPlan[]>();
+        for (const t of tramosDelPlan) {
+            for (const [m, id] of [[persona, t.id_operario], [maquina, t.id_maquinaria]] as const) {
+                if (id == null) continue;
+                const lista = m.get(id);
+                if (lista) lista.push(t);
+                else m.set(id, [t]);
+            }
+        }
+        return { persona, maquina };
+    }, [tramosDelPlan]);
+    /** Qué tiene esa persona (o máquina) a la hora de esta fila, si se la eligiera. */
+    const ocupadoAEsaHora = (recurso: "persona" | "maquina", id: number, clave: string): TramoDelPlan[] => {
+        const fila = tramoDeLaFila.get(clave);
+        const suyos = (recurso === "persona" ? tramosPorRecurso.persona : tramosPorRecurso.maquina).get(id);
+        return fila && suyos ? ocupadoEn(suyos, recurso, id, fila) : [];
     };
 
     const getScheduledStart = (ordenId: number, proc: { id?: number; proceso: { id: number } }) => {
@@ -1192,10 +1252,10 @@ function _PlanningListTable({
 
             {/* Producción primero: `order-1` contra el `order-2` del plegable de arriba. */}
             <div className="order-1 w-full text-sm">
-                <div className="hidden md:grid bg-gray-100 text-[11px] uppercase text-gray-600 grid-cols-[44px_minmax(200px,1.6fr)_150px_118px_72px_72px_minmax(150px,2fr)_minmax(150px,2.4fr)] gap-3 px-4 py-2 font-bold border-t border-gray-200">
+                <div className="hidden md:grid bg-gray-100 text-[11px] uppercase text-gray-600 grid-cols-[44px_minmax(200px,1.6fr)_196px_118px_72px_72px_minmax(150px,2fr)_minmax(150px,2.4fr)] gap-3 px-4 py-2 font-bold border-t border-gray-200">
                     <div>#</div>
                     <div>Proceso</div>
-                    <div>Inicio Estimado</div>
+                    <div title="Cuándo empieza y cuándo termina el paso">Inicio → fin</div>
                     <div>Estado</div>
                     <div className="text-center">Min. Est.</div>
                     <div className="text-center text-blue-700">Min. Real</div>
@@ -1208,6 +1268,11 @@ function _PlanningListTable({
                         <>
                             {item.procesos.map((proc, idx) => {
                                 const plannedItem = filaDelPlan(item.id, proc);
+                                // Ya tiene otra cosa a esa hora: la persona o la máquina.
+                                const claveFila = resKey(plannedItem?.id);
+                                const choquesFila = plannedItem ? choques.get(claveFila) ?? [] : [];
+                                const chocaPersona = choquesFila.filter(c => c.recurso === "persona").map(c => c.con);
+                                const chocaMaquina = choquesFila.filter(c => c.recurso === "maquina").map(c => c.con);
                                 const machineName = plannedItem?.nombre_maquinaria || (plannedItem?.id_maquinaria ? "Cargando..." : "Recurso maquinaria sin asignar");
                                 // RF-29: con el filtro de recurso puesto, el paso que lo cumple
                                 // se resalta y los otros de la OT quedan en segundo plano (se ven,
@@ -1229,8 +1294,10 @@ function _PlanningListTable({
                                     <div
                                         key={proc.id ?? `${item.id}-${proc.proceso.id}-${idx}`}
                                         className={cn(
-                                            "flex flex-col md:grid md:grid-cols-[44px_minmax(200px,1.6fr)_150px_118px_72px_72px_minmax(150px,2fr)_minmax(150px,2.4fr)] gap-3 px-4 py-4 md:py-2 border-t items-stretch md:items-center transition-opacity",
-                                            coincide === true
+                                            "flex flex-col md:grid md:grid-cols-[44px_minmax(200px,1.6fr)_196px_118px_72px_72px_minmax(150px,2fr)_minmax(150px,2.4fr)] gap-3 px-4 py-4 md:py-2 border-t items-stretch md:items-center transition-opacity",
+                                            choquesFila.length > 0
+                                                ? "bg-red-100/70 shadow-[inset_4px_0_0_#dc2626] hover:bg-red-100"
+                                                : coincide === true
                                                 ? "bg-red-50/70 shadow-[inset_4px_0_0_#DC143C] hover:bg-red-50"
                                                 : coincide === false
                                                     ? "bg-white opacity-55 hover:opacity-100 hover:bg-gray-50"
@@ -1347,6 +1414,10 @@ function _PlanningListTable({
                                                                         )}>
                                                                             {partes.hora}
                                                                         </span>
+                                                                        {/* Cuándo termina, en el mismo renglón (Lucas,
+                                                                            28/10/2026: se veía a Gustavo a las 9:55 y no
+                                                                            que hasta las 11:55 estaba ocupado). */}
+                                                                        <FinDelPaso tramo={tramoDeLaFila.get(claveFila)} />
                                                                     </span>
                                                                 ) : (
                                                                     <span className="flex-1 text-gray-400">—</span>
@@ -1453,15 +1524,28 @@ function _PlanningListTable({
                                                         })?.id)?.toString() || undefined}
                                                         onValueChange={(val) => plannedItem && stageOperario(plannedItem.id, parseInt(val))}
                                                     >
-                                                        <SelectTrigger className={cn("h-7 text-xs w-full border px-2", pendingRes[resKey(plannedItem?.id)]?.operario !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200")}>
+                                                        <SelectTrigger className={cn(
+                                                            "h-7 text-xs w-full border px-2",
+                                                            chocaPersona.length > 0 ? "border-red-500 ring-1 ring-red-300 bg-red-50 text-red-900"
+                                                                : pendingRes[resKey(plannedItem?.id)]?.operario !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200",
+                                                        )}>
                                                             <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            {operarios.map((op) => (
-                                                                <SelectItem key={op.id} value={op.id.toString()}>
-                                                                    {toTitleCase(`${op.nombre} ${op.apellido}`)}
-                                                                </SelectItem>
-                                                            ))}
+                                                            {operarios.map((op) => {
+                                                                // Antes de elegir: si a esa hora ya tiene otra cosa, se dice acá.
+                                                                const ocupado = plannedItem
+                                                                    ? ocupadoAEsaHora("persona", op.id, claveFila) : [];
+                                                                return (
+                                                                    <SelectItem
+                                                                        key={op.id}
+                                                                        value={op.id.toString()}
+                                                                        detail={ocupado.length > 0 ? <OcupadoEnLaLista tramos={ocupado} /> : undefined}
+                                                                    >
+                                                                        {toTitleCase(`${op.nombre} ${op.apellido}`)}
+                                                                    </SelectItem>
+                                                                );
+                                                            })}
                                                         </SelectContent>
                                                     </Select>
                                                 ) : (
@@ -1469,6 +1553,7 @@ function _PlanningListTable({
                                                         {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
                                                     </span>
                                                 )}
+                                                {chocaPersona.length > 0 && <AvisoOcupado quien="La persona" tramos={chocaPersona} />}
                                                 {operarioAMano && (
                                                     <span className="mt-0.5 block truncate text-[10px] font-medium text-red-700" title="El paso tiene esta persona elegida a mano en la OT, aunque el plan diga otra">
                                                         Elegido a mano: {operarioAMano}
@@ -1486,19 +1571,28 @@ function _PlanningListTable({
                                                         value={(pendingRes[resKey(plannedItem?.id)]?.maquina ?? plannedItem?.id_maquinaria)?.toString() || "0"}
                                                         onValueChange={(val) => plannedItem && stageMaquina(plannedItem.id, parseInt(val))}
                                                     >
-                                                        <SelectTrigger className={cn("h-7 text-xs w-full border px-2", pendingRes[resKey(plannedItem?.id)]?.maquina !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200")}>
+                                                        <SelectTrigger className={cn(
+                                                            "h-7 text-xs w-full border px-2",
+                                                            chocaMaquina.length > 0 ? "border-red-500 ring-1 ring-red-300 bg-red-50 text-red-900"
+                                                                : pendingRes[resKey(plannedItem?.id)]?.maquina !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200",
+                                                        )}>
                                                             <SelectValue placeholder={machineName} />
                                                         </SelectTrigger>
                                                         <SelectContent>
                                                             <SelectItem value="0" className="text-gray-400 italic">Recurso maquinaria sin asignar</SelectItem>
                                                             {maquinarias.map((m) => {
                                                                 const limitacion = limitacionDeMaquina(m);
+                                                                const ocupada = plannedItem
+                                                                    ? ocupadoAEsaHora("maquina", m.id, claveFila) : [];
                                                                 return (
                                                                     <SelectItem
                                                                         key={m.id}
                                                                         value={m.id.toString()}
-                                                                        detail={limitacion
-                                                                            ? <span className="text-amber-700" title={limitacion}>⚠ {limitacion}</span>
+                                                                        detail={limitacion || ocupada.length > 0
+                                                                            ? <>
+                                                                                {limitacion && <span className="block text-amber-700" title={limitacion}>⚠ {limitacion}</span>}
+                                                                                {ocupada.length > 0 && <OcupadoEnLaLista tramos={ocupada} />}
+                                                                            </>
                                                                             : undefined}
                                                                     >
                                                                         {m.nombre}
@@ -1512,6 +1606,7 @@ function _PlanningListTable({
                                                         {machineName}
                                                     </div>
                                                 )}
+                                                {chocaMaquina.length > 0 && <AvisoOcupado quien="La máquina" tramos={chocaMaquina} />}
                                                 {maquinaAMano && (
                                                     <span className="mt-0.5 block truncate text-[10px] font-medium text-red-700" title="El paso tiene esta máquina elegida a mano en la OT, aunque el plan diga otra">
                                                         Elegida a mano: {maquinaAMano}

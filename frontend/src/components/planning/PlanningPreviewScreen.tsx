@@ -25,7 +25,9 @@ import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
 import type { WorkOrder } from "@/lib/types";
 import { toast } from "@/lib/toast";
 import { API_URL } from "@/config";
-import { HORA_APERTURA, inicioDelPlan, minutosDesdeFecha } from "@/lib/plan-fechas";
+import { HORA_APERTURA, fechaDeLaApi, fechaDesdeMinutos, inicioDelPlan, minutosDesdeFecha } from "@/lib/plan-fechas";
+import { choquesDelPlan, ocupadoEn, type TramoDelPlan } from "@/lib/choquesDelPlan";
+import { AvisoOcupado, FinDelPaso, OcupadoEnLaLista } from "@/components/planning/OcupadoEnElPlan";
 import {
     capacidadEnElPeriodo, contarDiasHabiles, describirDias, diasQueTrabajaElTaller, jornadaDelOperario,
     type CapacidadEnElPeriodo,
@@ -3118,6 +3120,82 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         [results, editedResults]
     );
 
+    /**
+     * Cada paso en el calendario, con lo que se le cambió a mano: de dónde a dónde va y
+     * con qué persona y máquina. De acá salen la hora de fin de cada fila y los choques
+     * (reunión con Lucas del 28/10/2026, ver `lib/choquesDelPlan`).
+     *
+     * Un inicio escrito a mano se cuenta igual que lo guarda confirmar
+     * (`datetimeToInicioMin`): desde ahí, la duración del paso de corrido. Los
+     * tercerizados no van: no ocupan a nadie del taller.
+     */
+    const tramosDelPlan = React.useMemo<TramoDelPlan[]>(() => {
+        const base = inicioBase
+            ? new Date(inicioBase)
+            : inicioDelPlan(new Date(), feriados, planningRange?.fecha_desde);
+        return results.filter(r => !r.tercerizado).map(r => {
+            const efectivo = getEffectiveItem(r);
+            const escrito = horarioEscrito(r, retoqueDe(r));
+            const duracion = r.duracion_min || 0;
+            const desde = escrito ? datetimeToInicioMin(escrito) : r.inicio_min;
+            const hasta = escrito ? desde + duracion : r.fin_min;
+            return {
+                clave: claveDeEdicion(r),
+                id_operario: efectivo.id_operario ?? null,
+                id_maquinaria: efectivo.id_maquinaria ?? null,
+                plan: "este",
+                desde, hasta, duracion,
+                inicio: escrito ? new Date(escrito) : fechaDeLaApi(r.fecha_inicio_estimada)
+                    ?? fechaDesdeMinutos(base, desde, feriados),
+                fin: (!escrito && fechaDeLaApi(r.fecha_fin_estimada))
+                    || fechaDesdeMinutos(base, hasta, feriados, true),
+                ot: r.id_otvieja ?? r.orden_id,
+                orden_id: r.orden_id,
+                proceso: efectivo.nombre_proceso,
+            };
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [results, editedResults, inicioBase, feriados, planningRange?.fecha_desde]);
+
+    const tramoDeLaFila = React.useMemo(
+        () => new Map(tramosDelPlan.map(t => [t.clave, t] as const)),
+        [tramosDelPlan]
+    );
+    /** Las filas que se pisan con otra, por la persona o por la máquina. */
+    const choques = React.useMemo(() => choquesDelPlan(tramosDelPlan), [tramosDelPlan]);
+    /** Lo de cada persona y cada máquina, para decir en la lista quién está ocupado. */
+    const tramosPorRecurso = React.useMemo(() => {
+        const persona = new Map<number, TramoDelPlan[]>();
+        const maquina = new Map<number, TramoDelPlan[]>();
+        const sumar = (m: Map<number, TramoDelPlan[]>, id: number | null | undefined, t: TramoDelPlan) => {
+            if (id == null) return;
+            const lista = m.get(id);
+            if (lista) lista.push(t);
+            else m.set(id, [t]);
+        };
+        for (const t of tramosDelPlan) {
+            sumar(persona, t.id_operario, t);
+            sumar(maquina, t.id_maquinaria, t);
+        }
+        return { persona, maquina };
+    }, [tramosDelPlan]);
+    /** Qué tiene esa persona (o máquina) a la hora de esta fila, si se la eligiera. */
+    const ocupadoAEsaHora = (recurso: "persona" | "maquina", id: number, clave: string): TramoDelPlan[] => {
+        const fila = tramoDeLaFila.get(clave);
+        const suyos = (recurso === "persona" ? tramosPorRecurso.persona : tramosPorRecurso.maquina).get(id);
+        return fila && suyos ? ocupadoEn(suyos, recurso, id, fila) : [];
+    };
+    /** A cuál llevó el último click en «pasos pisados»: el próximo va a la siguiente. */
+    const ultimaOTConChoque = React.useRef<number | null>(null);
+    /** Las OT con algún paso pisado, en el orden del plan: para ir de una a la otra. */
+    const otsConChoque = React.useMemo(() => {
+        const ids: number[] = [];
+        for (const t of [...tramosDelPlan].sort((a, b) => a.desde - b.desde)) {
+            if (choques.has(t.clave) && t.orden_id != null && !ids.includes(t.orden_id)) ids.push(t.orden_id);
+        }
+        return ids;
+    }, [tramosDelPlan, choques]);
+
     /** Lo que no entró al plan: el panel lo suma a su desglose para que cuadre con
      *  «Carga total» del encabezado, que también lo cuenta. */
     const excedentesMin = React.useMemo(
@@ -4170,6 +4248,25 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 <strong>{forzarOrdenIds.size}</strong> excedente{forzarOrdenIds.size === 1 ? "" : "s"} forzada{forzarOrdenIds.size === 1 ? "" : "s"}
                             </span>
                         )}
+                        {/* Avisa, no frena: se puede guardar igual, pero que se vea antes.
+                            Cada click lleva a la próxima OT con un paso pisado. */}
+                        {choques.size > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const i = otsConChoque.indexOf(ultimaOTConChoque.current ?? -1);
+                                    const siguiente = otsConChoque[(i + 1) % otsConChoque.length];
+                                    ultimaOTConChoque.current = siguiente;
+                                    verOT(siguiente);
+                                }}
+                                className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-red-50 px-2 py-1 font-medium text-red-700 hover:bg-red-100"
+                                title="Pasos con la persona o la máquina ocupada en otra cosa a esa hora. Click: ir al próximo."
+                            >
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                {choques.size} {choques.size === 1 ? "paso pisado" : "pasos pisados"}
+                                {otsConChoque.length > 0 && <span className="text-red-500">· ir</span>}
+                            </button>
+                        )}
                     </div>
                     {/* Lado derecho: recalcular lo marcado (si hay) y confirmar.
                         El botón de recalcular vive acá, fijo en el pie, porque los
@@ -5185,7 +5282,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                 <div className="px-3 py-1.5 border-b">Proceso</div>
                                                                                 <div className="px-3 py-1.5 border-b">Recurso humano</div>
                                                                                 <div className="px-3 py-1.5 border-b">Recurso maquinaria</div>
-                                                                                <div className="px-3 py-1.5 border-b">Inicio</div>
+                                                                                <div className="px-3 py-1.5 border-b" title="Cuándo empieza y cuándo termina el paso">Inicio → fin</div>
                                                                                 <div className="px-3 py-1.5 border-b text-right">Paso</div>
                                                                             </div>
 
@@ -5241,6 +5338,15 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                     && ordenOriginalVisible.indexOf(lineaId) !== posPasada;
                                                                                 /** Algo de ESTA fila cambió: el proceso, o el lugar que ocupa. */
                                                                                 const filaEditada = !!cambio || filaMovida || retocadaAMano;
+                                                                                /* La persona o la máquina ya tiene otra cosa a esa hora
+                                                                                   (reunión con Lucas del 28/10/2026). Va por encima del
+                                                                                   rojo suave de «editado»: es lo que no se puede guardar
+                                                                                   sin mirar. */
+                                                                                const claveFila = claveDeEdicion(item);
+                                                                                const tramoFila = tramoDeLaFila.get(claveFila);
+                                                                                const choquesFila = choques.get(claveFila) ?? [];
+                                                                                const chocaPersona = choquesFila.filter(c => c.recurso === "persona").map(c => c.con);
+                                                                                const chocaMaquina = choquesFila.filter(c => c.recurso === "maquina").map(c => c.con);
                                                                                 const vecinoArriba = posPasada > 0 ? pasadasVisibles[posPasada - 1] : null;
                                                                                 const vecinoAbajo = posPasada >= 0 && posPasada < pasadasVisibles.length - 1
                                                                                     ? pasadasVisibles[posPasada + 1]
@@ -5256,16 +5362,20 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                            se queda: es otra cosa —no lo editaron, lo puso el que
                                                                                            armaba el plan— y tenerlas separadas es lo que permite
                                                                                            distinguirlas de un vistazo. */
-                                                                                        filaEditada ? "[&>div]:bg-[#DC143C]/[0.045]" : procesoAMano && "[&>div]:bg-indigo-50/60",
+                                                                                        choquesFila.length > 0 ? "[&>div]:bg-red-100/70"
+                                                                                            : filaEditada ? "[&>div]:bg-[#DC143C]/[0.045]" : procesoAMano && "[&>div]:bg-indigo-50/60",
                                                                                     )}>
                                                                                         <div className="px-3 py-1.5 border-b flex items-center gap-1 text-gray-400 font-mono text-xs">
-                                                                                            {(filaEditada || procesoAMano) && (
+                                                                                            {(filaEditada || procesoAMano || choquesFila.length > 0) && (
                                                                                                 <span
                                                                                                     className={cn(
-                                                                                                        "w-0.5 self-stretch -ml-3 mr-1 rounded-r",
-                                                                                                        filaEditada ? "bg-[#DC143C]" : "bg-indigo-500",
+                                                                                                        "self-stretch -ml-3 mr-1 rounded-r",
+                                                                                                        choquesFila.length > 0 ? "w-1 bg-red-600"
+                                                                                                            : filaEditada ? "w-0.5 bg-[#DC143C]" : "w-0.5 bg-indigo-500",
                                                                                                     )}
-                                                                                                    title={filaEditada
+                                                                                                    title={choquesFila.length > 0
+                                                                                                        ? "La persona o la máquina ya tiene otra cosa a esa hora"
+                                                                                                        : filaEditada
                                                                                                         ? (cambio ? "Le cambiaste el proceso a este paso"
                                                                                                             : filaMovida ? "Este paso cambió de lugar"
                                                                                                                 : "Le cambiaste a mano la persona, la máquina o el horario")
@@ -5378,7 +5488,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                 />
                                                                                             </div>
                                                                                         ) : (<>
-                                                                                        <div className="px-4 py-2 border-b flex items-center">
+                                                                                        <div className="px-4 py-2 border-b flex flex-col justify-center">
                                                                                             <Select
                                                                                                 value={effectiveItem.id_operario?.toString() || "0"}
                                                                                                 onValueChange={(val) => handleUpdate(item, 'id_operario', val === "0" ? null : parseInt(val))}
@@ -5386,19 +5496,26 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                 {/* Mismo cuidado que en el select de máquina: sin min-w-0 y sin
                                                                                                     truncar, un nombre largo empuja la caja y se monta sobre la
                                                                                                     columna de al lado. */}
-                                                                                                <SelectTrigger className="h-8 w-full text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100 [&>span]:whitespace-nowrap [&>span]:text-left">
+                                                                                                <SelectTrigger className={cn(
+                                                                                                    "h-8 w-full text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100 [&>span]:whitespace-nowrap [&>span]:text-left",
+                                                                                                    chocaPersona.length > 0 && "border-red-500 bg-red-50 text-red-900 ring-1 ring-red-300",
+                                                                                                )}>
                                                                                                     <SelectValue placeholder="Sin asignar" />
                                                                                                 </SelectTrigger>
                                                                                                 <SelectContent>
                                                                                                     <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
                                                                                                     {availableOperators.map(op => {
                                                                                                         const isPruebas = op.sector?.toUpperCase() === 'PRUEBAS';
+                                                                                                        // Antes de elegir: si a esa hora ya tiene otra cosa, se dice acá.
+                                                                                                        const ocupado = op.id === effectiveItem.id_operario
+                                                                                                            ? chocaPersona : ocupadoAEsaHora("persona", op.id, claveFila);
                                                                                                         return (
                                                                                                             <SelectItem
                                                                                                                 key={op.id}
                                                                                                                 value={op.id.toString()}
                                                                                                                 disabled={!op.disponible && !isPruebas}
                                                                                                                 className={(!op.disponible && !isPruebas) ? "text-gray-400 italic" : ""}
+                                                                                                                detail={ocupado.length > 0 ? <OcupadoEnLaLista tramos={ocupado} /> : undefined}
                                                                                                             >
                                                                                                                 {nombrePersona(op.nombre, op.apellido)} {(!op.disponible && !isPruebas) && "(Ausente)"}
                                                                                                             </SelectItem>
@@ -5406,9 +5523,12 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                     })}
                                                                                                 </SelectContent>
                                                                                             </Select>
+                                                                                            {chocaPersona.length > 0 && (
+                                                                                                <AvisoOcupado quien="La persona" tramos={chocaPersona} onVerOT={verOT} />
+                                                                                            )}
                                                                                         </div>
 
-                                                                                        <div className="px-4 py-2 border-b flex items-center">
+                                                                                        <div className="px-4 py-2 border-b flex flex-col justify-center">
                                                                                             <Select
                                                                                                 value={valorMaquina(effectiveItem)}
                                                                                                 onValueChange={(val) => elegirMaquina(item, val)}
@@ -5420,7 +5540,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                         "h-8 w-full text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100 [&>span]:whitespace-nowrap [&>span]:text-left",
                                                                                                         // La limitación no entra en la caja sin ensanchar la columna, así que
                                                                                                         // acá queda el aviso en ámbar y el texto completo en el globito.
-                                                                                                        limitacionElegida && "border-amber-300 bg-amber-50/50"
+                                                                                                        limitacionElegida && "border-amber-300 bg-amber-50/50",
+                                                                                                        chocaMaquina.length > 0 && "border-red-500 bg-red-50 text-red-900 ring-1 ring-red-300",
                                                                                                     )}
                                                                                                     title={[
                                                                                                         effectiveItem.va_a_mano
@@ -5442,12 +5563,17 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                     <SelectItem value={NO_NECESITA} className="text-gray-500 italic">No necesita</SelectItem>
                                                                                                     {availableMachines.map(m => {
                                                                                                         const limitacion = limitacionDeMaquina(m);
+                                                                                                        const ocupada = m.id === effectiveItem.id_maquinaria
+                                                                                                            ? chocaMaquina : ocupadoAEsaHora("maquina", m.id, claveFila);
                                                                                                         return (
                                                                                                             <SelectItem
                                                                                                                 key={m.id}
                                                                                                                 value={m.id.toString()}
-                                                                                                                detail={limitacion
-                                                                                                                    ? <span className="text-amber-700" title={limitacion}>⚠ {limitacion}</span>
+                                                                                                                detail={limitacion || ocupada.length > 0
+                                                                                                                    ? <>
+                                                                                                                        {limitacion && <span className="block text-amber-700" title={limitacion}>⚠ {limitacion}</span>}
+                                                                                                                        {ocupada.length > 0 && <OcupadoEnLaLista tramos={ocupada} />}
+                                                                                                                    </>
                                                                                                                     : undefined}
                                                                                                             >
                                                                                                                 {nombreLindo(m.nombre)}
@@ -5456,14 +5582,17 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                     })}
                                                                                                 </SelectContent>
                                                                                             </Select>
+                                                                                            {chocaMaquina.length > 0 && (
+                                                                                                <AvisoOcupado quien="La máquina" tramos={chocaMaquina} onVerOT={verOT} />
+                                                                                            )}
                                                                                         </div>
                                                                                         </>)}
 
-                                                                                        <div className="px-4 py-2 border-b flex items-center">
+                                                                                        <div className="px-4 py-2 border-b flex items-center gap-2">
                                                                                             <Input
                                                                                                 type="datetime-local"
                                                                                                 className={cn(
-                                                                                                    "h-8 text-xs px-2 border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-amber-200",
+                                                                                                    "h-8 w-auto text-xs px-2 border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-amber-200",
                                                                                                     // Se marca la HORA, no sólo la fila: es el dato que dejó de
                                                                                                     // ser cierto cuando cambiaron los minutos o el orden.
                                                                                                     horarioViejo && "border-orange-400 bg-orange-50 text-orange-900 font-medium",
@@ -5474,6 +5603,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                 value={effectiveItem.fecha_inicio_estimada ? effectiveItem.fecha_inicio_estimada.slice(0, 16) : getDateFromMin(effectiveItem.inicio_min)}
                                                                                                 onChange={(e) => handleDateChange(item, e.target.value)}
                                                                                             />
+                                                                                            <FinDelPaso tramo={tramoFila} />
                                                                                         </div>
 
                                                                                         {/* Mover el paso y sacarlo de la OT. */}
