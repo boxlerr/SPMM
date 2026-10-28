@@ -180,8 +180,11 @@ export function ProveedorDelPaso({
                 onEditado={alEditarElProveedor}
                 disabled={bloqueado || guardando || lineaId == null}
                 placeholder="¿Qué proveedor lo hace?"
-                className="w-auto min-w-[11rem] max-w-[16rem] flex-1"
-                triggerClassName="h-8 text-xs bg-violet-50/40 border-violet-200"
+                className="w-auto min-w-[12rem] max-w-[16rem] flex-1"
+                // Como los selectores de persona y máquina de la fila: blanco, mismo alto y
+                // letra. Era violeta claro con el texto gris y parecía apagado (Julián,
+                // 28/10/2026: «se ve horrible al elegirlo»).
+                triggerClassName="h-8 text-xs border-violet-300 bg-white text-gray-900"
             />
             <label className="flex items-center gap-1 text-xs text-gray-600" title="Días de calendario que tarda en devolverlo">
                 <Input
@@ -200,7 +203,12 @@ export function ProveedorDelPaso({
                 />
                 días
             </label>
-            <span className={cn("text-[11px] leading-tight", sinRecalcular ? "text-orange-700" : "text-gray-500")}>
+            <span className={cn(
+                "text-[11px] leading-tight",
+                sinRecalcular ? "text-orange-700"
+                    : !vuelveEl && efectiva == null ? "rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800"
+                        : "text-gray-500",
+            )}>
                 {sinRecalcular
                     ? (efectiva
                         ? "Guardado. Recalculá para que el plan lo espere."

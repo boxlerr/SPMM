@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "solapa-proveedores",
+        fecha: "2026-10-29",
+        tipo: "nuevo",
+        seccion: "Recursos",
+        titulo: "Recursos tiene una solapa Proveedores: quién hace los trabajos de afuera y cuántos días tarda",
+        detalle:
+            "En Recursos › Proveedores están los que hacen trabajos tercerizados (pintura, vulcanizado, rectificado…), con los días que tardan en devolverlos y en cuántos pasos están elegidos. Los días se cambian ahí mismo, y buscando aparece cualquier proveedor del Integral para sumarlo. En la vista previa, el proveedor del paso tercerizado se elige igual que la persona y la máquina, y al abrir la lista salen primero estos. Ya no sale el aviso que pedía darle el rango TERCERIZADO a alguien.",
+        href: "/recursos",
+    },
+    {
+        id: "paso1-cual-falta-de-la-lista",
+        fecha: "2026-10-29",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Al pegar una lista de OT en el buscador, dice cuáles no están y por qué",
+        detalle:
+            "Si pegás la lista que te pasa Claude (o cualquier lista de números de OT) y alguna no aparece, arriba de la tabla sale en rojo cuál es y el motivo: ya está en otro plan, figura terminada en el Integral, ya se entregó, la esconde un filtro de arriba o no está en el sistema. Antes se tildaban 28 de 29 y no había cómo saber cuál faltaba.",
+        href: "/operaciones",
+    },
+    {
         id: "hora-de-fin-y-ocupado-en-el-plan",
         fecha: "2026-10-28",
         tipo: "mejora",

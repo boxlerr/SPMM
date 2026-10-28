@@ -125,6 +125,9 @@ export function SelectorProveedor({
     const [porEliminar, setPorEliminar] = useState<number | null>(null);
     const [eliminando, setEliminando] = useState(false);
 
+    /** La lista muestra sólo los que hacen trabajos de afuera (sin escribir, en el paso
+     *  tercerizado): se dice arriba, y que escribiendo se busca en todos. */
+    const [soloDeAfuera, setSoloDeAfuera] = useState(false);
     const ultimo = useRef(0);
     const controlador = useRef<AbortController | null>(null);
 
@@ -153,11 +156,24 @@ export function SelectorProveedor({
             controlador.current?.abort();
             const c = new AbortController();
             controlador.current = c;
-            const r = await mpGet<Proveedor[]>(
-                `${API_URL}/materia-prima/proveedores?${consulta({ search: texto.trim(), limit: 30 })}`,
-                { signal: c.signal },
-            );
-            if (n !== ultimo.current || r.abortado) return;
+            // En el paso tercerizado, sin escribir nada van primero los que hacen trabajos
+            // de afuera (los de la solapa Proveedores de Recursos, 28/10/2026): al abrir
+            // salían los primeros 30 del Integral por orden alfabético, casi todos de
+            // materia prima, y REYFIL no aparecía. Si no hay ninguno, o el servidor todavía
+            // no tiene esa lista, los primeros de siempre.
+            let r = gestionEnLista && !texto.trim()
+                ? await mpGet<Proveedor[]>(`${API_URL}/proveedores`, { signal: c.signal })
+                : null;
+            if (r && (r.abortado || n !== ultimo.current)) return;
+            const deAfuera = !!r?.ok && Array.isArray(r.data) && r.data.length > 0;
+            setSoloDeAfuera(deAfuera);
+            if (!deAfuera) {
+                r = await mpGet<Proveedor[]>(
+                    `${API_URL}/materia-prima/proveedores?${consulta({ search: texto.trim(), limit: 30 })}`,
+                    { signal: c.signal },
+                );
+            }
+            if (!r || n !== ultimo.current || r.abortado) return;
             setCargando(false);
             setSinServidor(r.sinServidor);
             if (!r.ok) {
@@ -448,6 +464,11 @@ export function SelectorProveedor({
                     {cargando && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-gray-400" />}
                 </div>
 
+                {soloDeAfuera && !texto.trim() && (
+                    <div className="border-b border-gray-100 px-3 py-1.5 text-[11px] text-gray-500">
+                        Los que hacen trabajos de afuera. Escribí para buscar en todos.
+                    </div>
+                )}
                 <div ref={listaRef} role="listbox" className="flex-1 overflow-y-auto p-1">
                     {error && (
                         <div

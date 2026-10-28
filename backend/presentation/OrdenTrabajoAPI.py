@@ -393,6 +393,45 @@ class ProveedorDelPasoCambiosIn(BaseModel):
     demora_dias: int | None = Field(default=None, ge=0, le=365)
 
 
+@router.get("/proveedores")
+async def listar_proveedores_de_tercerizados(search: str | None = None, db=Depends(get_db)):
+    """La solapa Proveedores de Recursos (reunión con Lucas del 28/10/2026: «una solapa
+    independiente de proveedores» para los trabajos que se mandan afuera y cuánto tardan).
+
+    Sin buscar: los que hacen trabajos de afuera, que son los que tienen días cargados o
+    ya están elegidos en algún paso tercerizado. El catálogo entero son ~900 proveedores
+    del Integral (los de materias primas incluidos), y con la búsqueda de materias primas
+    sólo se podían pedir los primeros 200 por orden alfabético: REYFIL no entraba.
+    Buscando: cualquiera que coincida, para sumarlo poniéndole los días.
+
+    Con cada uno, en cuántos pasos está elegido y cuántos de esos siguen sin terminar."""
+    from sqlalchemy import text
+    from backend.commons.ResponseDTO import ResponseDTO
+    logger.info(f"API - Inicio GET /proveedores (search={search!r})")
+    palabras = [p for p in (search or "").split() if p][:6]
+    params: dict = {}
+    filtro_busqueda = ""
+    for i, palabra in enumerate(palabras):
+        params[f"p{i}"] = f"%{palabra}%"
+        filtro_busqueda += (f" AND (p.razon_social ILIKE :p{i} OR p.fantasia ILIKE :p{i}"
+                            f" OR p.cuit ILIKE :p{i})")
+    alcance = "" if palabras else " AND (p.demora_dias IS NOT NULL OR usos.pasos > 0)"
+    filas = (await db.execute(text(f"""
+        SELECT p.id, p.razon_social, p.fantasia, p.cuit, p.telefono, p.mail, p.demora_dias,
+               COALESCE(usos.pasos, 0) AS pasos, COALESCE(usos.pendientes, 0) AS pendientes
+        FROM proveedor p
+        LEFT JOIN (
+            SELECT id_proveedor, COUNT(*) AS pasos,
+                   SUM(CASE WHEN COALESCE(id_estado, 1) <> 3 THEN 1 ELSE 0 END) AS pendientes
+            FROM orden_trabajo_proceso WHERE id_proveedor IS NOT NULL GROUP BY id_proveedor
+        ) usos ON usos.id_proveedor = p.id
+        WHERE COALESCE(p.inactivo, 0) = 0{alcance}{filtro_busqueda}
+        ORDER BY UPPER(p.razon_social), p.id
+        LIMIT 100
+    """), params)).mappings().all()
+    return ResponseDTO(status=True, errorDescription="", data=[dict(f) for f in filas])
+
+
 @router.post("/proveedores")
 async def crear_proveedor_del_paso(dto: ProveedorDelPasoIn, request: Request, forzar: bool = False,
                                    db=Depends(get_db), current_user: dict = Depends(get_current_user)):

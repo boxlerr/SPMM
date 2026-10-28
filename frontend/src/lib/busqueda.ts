@@ -28,3 +28,25 @@ export function terminosDeBusqueda(texto: string | null | undefined): string[] {
             : [crudo.replace(/^#/, "")];
     return terminos.map(t => t.toLowerCase()).filter(Boolean);
 }
+
+/**
+ * Los números de una lista de OT pegada en el buscador que no son ninguna de las OT de
+ * la lista que se está mirando (reunión con Lucas del 28/10/2026: pegó las 29 que le
+ * pasó Claude, se tildaron 28 y no había cómo saber cuál faltaba). Se compara el número
+ * EXACTO de la OT —el del Integral, o el interno—: buscar «1598» encuentra la 15981, pero
+ * esa no es la que se pidió. `null` si lo buscado no es una lista de números.
+ */
+export function numerosQueNoEstan(
+    texto: string | null | undefined,
+    ots: ReadonlyArray<{ id: number; id_otvieja?: number | null }>,
+): { pedidos: number; faltan: number[] } | null {
+    const terminos = terminosDeBusqueda(texto);
+    if (terminos.length === 0 || !terminos.every(t => /^\d+$/.test(t))) return null;
+    const numeros = [...new Set(terminos.map(Number))];
+    const hay = new Set<number>();
+    for (const o of ots) {
+        hay.add(o.id);
+        if (o.id_otvieja != null) hay.add(Number(o.id_otvieja));
+    }
+    return { pedidos: numeros.length, faltan: numeros.filter(n => !hay.has(n)) };
+}

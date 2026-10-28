@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, Pencil, Trash2, User, RefreshCw, Plus, Factory, Phone, Layers, Search, Target, MapPin, AlertTriangle, Ruler } from "lucide-react";
+import { Eye, Pencil, Trash2, User, RefreshCw, Plus, Factory, Phone, Layers, Search, Target, MapPin, AlertTriangle, Ruler, Truck } from "lucide-react";
+import { ProveedoresTercerizados } from "./_components/ProveedoresTercerizados";
 import { useApi } from "@/hooks/useApi";
 import MaquinaForm from "./_components/MaquinaForm";
 import ProcesoForm from "./_components/ProcesoForm";
@@ -39,11 +40,12 @@ import {
   siguientePendiente, sinAlternativa, type CambioDelAviso,
 } from "@/lib/avisoEnRecursos";
 
-type SolapaRecursos = "operarios" | "maquinas" | "procesos" | "rangos" | "sectores" | "planos";
+type SolapaRecursos = "operarios" | "maquinas" | "procesos" | "rangos" | "sectores" | "proveedores" | "planos";
 
 /**
  * RF-24: cada solapa es una sección de Recursos (el rol puede cerrar algunas), salvo
- * Planos, que es la misma biblioteca de la pantalla Planos y va por esa área.
+ * Planos, que es la misma biblioteca de la pantalla Planos y va por esa área, y
+ * Proveedores, que se guarda con la OT (el proveedor es del paso tercerizado).
  */
 const SECCION_DE_SOLAPA: Record<Exclude<SolapaRecursos, "planos">, SeccionCodigo> = {
   operarios: "recursos_humano",
@@ -51,14 +53,16 @@ const SECCION_DE_SOLAPA: Record<Exclude<SolapaRecursos, "planos">, SeccionCodigo
   procesos: "recursos_procesos",
   rangos: "recursos_rangos",
   sectores: "recursos_sectores",
+  proveedores: "operaciones_ordenes",
 };
-const ORDEN_SOLAPAS: SolapaRecursos[] = ["operarios", "maquinas", "procesos", "rangos", "sectores", "planos"];
+const ORDEN_SOLAPAS: SolapaRecursos[] = ["operarios", "maquinas", "procesos", "rangos", "sectores", "proveedores", "planos"];
 const NOMBRE_SOLAPA: Record<SolapaRecursos, string> = {
   operarios: "Recurso humano",
   maquinas: "Recurso maquinaria",
   procesos: "Procesos",
   rangos: "Rangos",
   sectores: "Sectores",
+  proveedores: "Proveedores",
   planos: "Planos",
 };
 
@@ -921,8 +925,11 @@ export default function RecursosPage() {
           grilla el ancho lo pone la columna y los rótulos se acomodan solos.
           En el teléfono (RF-27) cada celda mide ~150px y «Recurso maquinaria» con su
           ícono pide ~155: el botón se estiraba y descuadraba la grilla. Ahí el rótulo
-          puede bajar a un segundo renglón; desde `sm` vuelve a ir en una línea. */}
-      <div className="mb-4 md:mb-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          puede bajar a un segundo renglón; desde `sm` vuelve a ir en una línea.
+          Desde el 28/10/2026 son siete (Proveedores): con seis columnas fijas, Planos
+          quedaba sola en un renglón. Ahora entran las que caben de 170px para arriba:
+          las siete en una línea en la pantalla del taller, y en dos cuando no. */}
+      <div className="mb-4 md:mb-6 grid grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2">
         {veSolapa("operarios") && <Button
           variant={tabActiva === "operarios" ? "default" : "outline"}
           onClick={() => setTabActiva("operarios")}
@@ -962,6 +969,14 @@ export default function RecursosPage() {
         >
           <MapPin className="h-4 w-4 mr-2" />
           <span>Sectores</span>
+        </Button>}
+        {veSolapa("proveedores") && <Button
+          variant={tabActiva === "proveedores" ? "default" : "outline"}
+          onClick={() => setTabActiva("proveedores")}
+          className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "proveedores" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
+        >
+          <Truck className="h-4 w-4 mr-2" />
+          <span>Proveedores</span>
         </Button>}
         {veSolapa("planos") && <Button
           variant={tabActiva === "planos" ? "default" : "outline"}
@@ -1817,6 +1832,11 @@ export default function RecursosPage() {
           descripcion="Gestión de sectores del taller (donde se asignan las OTs)."
           icon={<MapPin className="h-5 w-5 text-muted-foreground" />}
         />
+      )}
+
+      {/* PROVEEDORES de los trabajos que se mandan afuera (reunión con Lucas del 28/10/2026). */}
+      {tabActiva === "proveedores" && (
+        <ProveedoresTercerizados soloLectura={!editaSolapa("proveedores")} />
       )}
 
       {/* BIBLIOTECA DE PLANOS */}

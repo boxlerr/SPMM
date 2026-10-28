@@ -60,6 +60,25 @@ async function pedir<T>(metodo: string, ruta: string, cuerpo?: unknown): Promise
     }
 }
 
+/** Un proveedor de la solapa Proveedores de Recursos, con en cuántos pasos está elegido. */
+export interface ProveedorDeTercerizados {
+    id: number;
+    razon_social: string;
+    fantasia: string | null;
+    cuit: string | null;
+    telefono: string | null;
+    mail: string | null;
+    demora_dias: number | null;
+    /** En cuántos pasos tercerizados está elegido, y cuántos de esos no se terminaron. */
+    pasos: number;
+    pendientes: number;
+}
+
+/** Sin buscar: los que hacen trabajos de afuera (con días, o elegidos en algún paso).
+ *  Buscando: cualquiera del catálogo que coincida, para sumarlo. */
+export const listarProveedoresDeTercerizados = (buscar = "") =>
+    pedir<ProveedorDeTercerizados[]>("GET", `/proveedores${buscar.trim() ? `?search=${encodeURIComponent(buscar.trim())}` : ""}`);
+
 export const crearProveedorDelPaso = (razon_social: string, forzar = false) =>
     pedir<Proveedor>("POST", `/proveedores${forzar ? "?forzar=true" : ""}`, { razon_social });
 

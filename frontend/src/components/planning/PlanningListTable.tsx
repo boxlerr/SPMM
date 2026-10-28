@@ -66,7 +66,7 @@ import { rankMaterial, resumirMaterial } from "@/lib/materialOT";
 import { ExportarMenu, type ExtraExportar } from "@/components/common/ExportarMenu";
 import { MarcaPausada } from "@/components/pausas/MarcaPausada";
 import { filtroBusqueda, type SeccionExport } from "@/lib/exportar";
-import { terminosDeBusqueda } from "@/lib/busqueda";
+import { numerosQueNoEstan, terminosDeBusqueda } from "@/lib/busqueda";
 import {
     columnasOrdenes,
     columnasPasos,
@@ -206,6 +206,9 @@ interface PlanningListTableProps {
     pasoEnVentana?: (fila: PlanificacionItem) => boolean;
     /** Cómo se dice esa fecha en el contador: «esta semana», «este día». */
     rotuloVentana?: string;
+    /** Por qué una OT de una lista pegada en el buscador no está en esta tabla (ya está
+     *  en un plan, terminada, la esconde un filtro…). Sin esto, el aviso dice sólo cuáles. */
+    porQueNoEsta?: (numero: number) => string | null;
 }
 
 /** Cómo se llama cada columna ordenable, para decir en el archivo por cuál se ordenó. */
@@ -323,6 +326,7 @@ function _PlanningListTable({
     onFiltroRecursosChange,
     pasoEnVentana,
     rotuloVentana,
+    porQueNoEsta,
 }: PlanningListTableProps) {
 
     // RF-24. Esta tabla edita dos cosas distintas y cada una pide lo suyo, igual que el
@@ -729,6 +733,15 @@ function _PlanningListTable({
     // renglón «OT: …» que devuelve Claude— busca cada número por su cuenta; un texto normal
     // se busca entero. Con el tilde de la cabecera se tildan todas las que quedan a la vista.
     const searchTerms = React.useMemo(() => terminosDeBusqueda(searchTerm), [searchTerm]);
+    /** De una lista de OT pegada, las que no están en esta tabla (y por qué). */
+    const faltanDeLaLista = React.useMemo(() => {
+        const r = numerosQueNoEstan(searchTerm, data);
+        if (!r || r.faltan.length === 0) return null;
+        return { pedidos: r.pedidos, faltan: r.faltan.map(n => ({ numero: n, motivo: porQueNoEsta?.(n) ?? null })) };
+    }, [searchTerm, data, porQueNoEsta]);
+    const avisoFaltan = faltanDeLaLista && (
+        <AvisoFaltanDeLaLista pedidos={faltanDeLaLista.pedidos} faltan={faltanDeLaLista.faltan} />
+    );
 
     const porBusqueda = React.useMemo(() => {
         if (searchTerms.length === 0) return data;
@@ -1840,6 +1853,7 @@ function _PlanningListTable({
                         sinDesplegar={(pasosCoincidentes?.size ?? 0) > TOPE_DESPLEGAR_POR_RECURSO}
                     />
                 )}
+                {avisoFaltan}
                 </div>
             )}
 
@@ -1848,6 +1862,7 @@ function _PlanningListTable({
                 {compacto && menuExportar && (
                     <div className="flex justify-end">{menuExportar}</div>
                 )}
+                {compacto && avisoFaltan}
                 {sortedData.length === 0 ? (
                     <div className="text-center py-8 px-4 text-gray-500 bg-white rounded-lg shadow">
                         {pasosCoincidentes && porBusqueda.length > 0
@@ -1965,6 +1980,7 @@ function _PlanningListTable({
                     {menuExportar}
                     </div>
                 )}
+                {compacto && avisoFaltan}
                 <div
                     ref={scrollContainerRef}
                     className={cn("w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top", !compacto && "pt-4")}
@@ -2560,3 +2576,29 @@ function _PlanningListTable({
 }
 
 
+
+/**
+ * Las OT de la lista pegada en el buscador que no están en la tabla, en rojo y con el
+ * porqué (reunión con Lucas del 28/10/2026: «pegó 29 y sólo seleccionamos 28 y no
+ * sabíamos cuál faltaba»).
+ */
+function AvisoFaltanDeLaLista({ pedidos, faltan }: {
+    pedidos: number;
+    faltan: Array<{ numero: number; motivo: string | null }>;
+}) {
+    return (
+        <div role="alert" className="border-b border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 md:rounded-none rounded-md">
+            <p className="font-semibold">
+                De las {pedidos} OT de la lista, {faltan.length === 1 ? "1 no está acá" : `${faltan.length} no están acá`}:
+            </p>
+            <ul className="mt-1 flex flex-wrap gap-1.5">
+                {faltan.map(f => (
+                    <li key={f.numero} className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-2 py-0.5">
+                        <span className="font-bold tabular-nums">#{f.numero}</span>
+                        {f.motivo && <span className="text-red-700">· {f.motivo}</span>}
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}

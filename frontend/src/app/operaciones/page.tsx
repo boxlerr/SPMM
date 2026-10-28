@@ -864,6 +864,27 @@ export default function OperacionesPage() {
   }, [rawPlanificacion, ordenesTrabajo]);
 
 
+  /**
+   * Por qué una OT de la lista pegada en el buscador del Paso 1 no está para planificar
+   * (reunión con Lucas del 28/10/2026: de 29 se tildaron 28 y faltaba la 15769, que en
+   * el Integral figura terminada). `null` si no se sabe.
+   */
+  const porQueNoEstaParaPlanificar = React.useCallback((numero: number): string | null => {
+    const ot = ordenesTrabajo.find(o => Number(o.id_otvieja) === numero)
+      ?? ordenesTrabajo.find(o => o.id === numero);
+    if (!ot) return "no está en el sistema (no existe o todavía no llegó del Integral)";
+    if (Number(ot.finalizadototal) === 1) {
+      return Number(ot.suspendida) === 1
+        ? "en el Integral figura terminada y suspendida"
+        : "en el Integral figura terminada";
+    }
+    if (isOrderDelivered(ot)) return "ya se entregó";
+    if (isOrderCompleted(ot)) return "ya se entregaron todas las piezas";
+    if (rawPlanificacion.some(p => p.orden_id === ot.id)) return "ya está en otro plan (Planificadas)";
+    if (!ot.procesos || ot.procesos.length === 0) return "no tiene procesos cargados";
+    return null;
+  }, [ordenesTrabajo, rawPlanificacion]);
+
   const ordersForPlanning = React.useMemo(() => {
     if (isReplanning && selectedLoteId !== 'all') {
       // Current batch orders (plannedOrdenes) + TRULY Unplanned
@@ -2982,6 +3003,7 @@ export default function OperacionesPage() {
             onAbrirBorrador={handleAbrirBorrador}
             rangoDeLaVistaPrevia={rangoDeLaVistaPrevia}
             onFeriadosCambiados={setFeriados}
+            porQueNoEstaParaPlanificar={porQueNoEstaParaPlanificar}
           />
           <PlanningPreviewScreen
             isOpen={isPreviewOpen}

@@ -407,6 +407,17 @@ const diasDeAtraso = (fin: string | null | undefined, prometida: string | null |
     return Math.max(0, diaFin - diaPrometido);
 };
 
+/**
+ * Avisos que manda el servidor y la pantalla ya no muestra.
+ *
+ * «Trabajo tercerizado: sale del taller» (reunión con Lucas del 28/10/2026): desde el 17/10
+ * el proveedor y los días se eligen en la fila de cada paso tercerizado, y el aviso seguía
+ * pidiendo «dale el rango TERCERIZADO» a una persona en Recursos, que no tiene sentido. Se
+ * saca acá y no en el servidor para que tampoco salga en los borradores guardados, que
+ * traen sus avisos adentro.
+ */
+const AVISOS_QUE_NO_VAN = new Set(["trabajo_tercerizado"]);
+
 export function PlanningPreviewScreen({
     isOpen,
     onClose,
@@ -452,7 +463,9 @@ export function PlanningPreviewScreen({
      * Recursos» cada vez que cambia la identidad de la lista, y sin memo la lista es
      * nueva en cada render: el cartel se cerraría solo y nunca se llegaría al «Sí».
      */
-    const diagnosticos = React.useMemo(() => unificarPreparaciones(diagnosticosCrudos), [diagnosticosCrudos]);
+    const diagnosticos = React.useMemo(
+        () => unificarPreparaciones(diagnosticosCrudos.filter(d => !AVISOS_QUE_NO_VAN.has(d.tipo))),
+        [diagnosticosCrudos]);
 
     /**
      * Los retoques a mano, por fila: SÓLO lo que la persona cambió, no la fila entera.

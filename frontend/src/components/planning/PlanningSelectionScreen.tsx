@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { PantallaPlanificador } from "./PantallaPlanificador"
 import { Button } from "@/components/ui/button"
 import { PlanningListTable } from "./PlanningListTable"
@@ -59,6 +59,9 @@ interface PlanningSelectionScreenProps {
     rangoDeLaVistaPrevia?: { rango: PlanningRange; vez: number } | null
     /** Se eligió si se trabaja un feriado: los días que el planificador saltea ahora. */
     onFeriadosCambiados?: (bloqueados: string[]) => void
+    /** Por qué una OT no está para planificar (ya en un plan, terminada…): para la lista
+     *  pegada en el buscador. Lo que esconden los filtros de acá lo resuelve esta pantalla. */
+    porQueNoEstaParaPlanificar?: (numero: number) => string | null
 }
 
 export function PlanningSelectionScreen({
@@ -72,6 +75,7 @@ export function PlanningSelectionScreen({
     onAbrirBorrador,
     rangoDeLaVistaPrevia = null,
     onFeriadosCambiados,
+    porQueNoEstaParaPlanificar,
 }: PlanningSelectionScreenProps) {
     const [selectedIds, setSelectedIds] = useState<number[]>(initialSelectedIds)
 
@@ -221,6 +225,15 @@ export function PlanningSelectionScreen({
             if (dateSort === 'NEWEST_FIRST') return dateB - dateA
             return 0
         })
+
+    /** Una OT de la lista pegada que está para planificar pero no se ve: la tapa un
+     *  filtro de arriba (prioridad, cliente, «Ver solo las tildadas»…). Si no, el porqué
+     *  lo sabe Operaciones. */
+    const porQueNoEsta = useCallback((numero: number) => {
+        const esta = unplannedOrders.some(o => o.id === numero || Number(o.id_otvieja) === numero)
+        if (esta) return "está para planificar, pero la esconde un filtro de arriba"
+        return porQueNoEstaParaPlanificar?.(numero) ?? null
+    }, [unplannedOrders, porQueNoEstaParaPlanificar])
 
     // Acá NO hay tildado automático, y es a propósito (Julián, 31/08: "cuando abro
     // planificar de base ya están todas seleccionadas, no tiene que pasar eso").
@@ -1045,6 +1058,7 @@ export function PlanningSelectionScreen({
                                     highlightedIds={initialSelectedIds}
                                     pinSelectedOnTop
                                     colapsarFilasKey={filtrosKey}
+                                    porQueNoEsta={porQueNoEsta}
                                     compacto
                                     exportar={{
                                         titulo: "Órdenes para planificar",
