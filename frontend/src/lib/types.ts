@@ -154,6 +154,8 @@ export interface WorkOrder {
         operario_nombre?: string;
         inicio_real?: string;
         fin_real?: string;
+        /** Quién lo dejó En curso o Completado, y cuándo (del historial de pasos). */
+        estado_marcado?: { por: string | null; en: string | null } | null;
     }[];
 }
 

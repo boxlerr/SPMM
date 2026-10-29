@@ -1,7 +1,7 @@
 from backend.domain.OrdenTrabajo import OrdenTrabajo, CASILLAS_DE_CONTROL
 from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
 from backend.dto.OrdenTrabajoUpdateDTO import OrdenTrabajoUpdateDTO
-from backend.dto.OrdenTrabajoResponseDTO import OrdenTrabajoResponseDTO
+from backend.dto.OrdenTrabajoResponseDTO import OrdenTrabajoResponseDTO, EstadoMarcadoDTO
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from pydantic import ValidationError
 from fastapi.exceptions import RequestValidationError
@@ -298,6 +298,13 @@ class OrdenTrabajoService:
             # 4. Fetch material status for all orders
             material_statuses = await self.repository.get_material_status(orden_ids)
 
+            # 4b. Quién arrancó o cerró cada paso. Sólo se busca para los que están En
+            # curso o Completado: un paso pendiente no tiene nada que explicar.
+            marcados = await self.repository.ultimo_cambio_de_estado([
+                p.id for o in ordenes for p in (o.procesos or [])
+                if p.id is not None and p.id_estado in (2, 3)
+            ])
+
             for o in ordenes:
                 try:
                     # Validate basic structure
@@ -308,6 +315,9 @@ class OrdenTrabajoService:
                     # 5. Inject operario_nombre into processes
                     if dto.procesos:
                         for proc in dto.procesos:
+                            if proc.id in marcados and proc.estado_proceso and proc.estado_proceso.id in (2, 3):
+                                por, en = marcados[proc.id]
+                                proc.estado_marcado = EstadoMarcadoDTO(por=por, en=en)
                             # proc is OrdenTrabajoProcesoDTO. It has id_proceso etc.
                             # We need to match with Planificacion. 
                             # OrdenTrabajoProcesoDTO usually has nested 'proceso' with id.

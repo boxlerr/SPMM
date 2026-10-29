@@ -88,6 +88,7 @@ import {
 import { FranjaDeRecursos, SelectoresDeRecursos } from "@/components/planning/FiltroRecursosPlan";
 import { SelectAlAbrir } from "@/components/planning/SelectAlAbrir";
 import { GlosarioDeColores } from "@/components/planning/GlosarioDeColores";
+import { FueraDelPlan, QuienLoMarco } from "@/components/planning/EstadoDelPaso";
 import { choquesDelPlan, claveDelPlan, ocupadoEn, type TramoDelPlan } from "@/lib/choquesDelPlan";
 import { AvisoOcupado, FinDelPaso, OcupadoEnLaLista } from "@/components/planning/OcupadoEnElPlan";
 
@@ -1292,8 +1293,14 @@ function _PlanningListTable({
                 <div>
                     {item.procesos && item.procesos.length > 0 ? (
                         <>
-                            {item.procesos.map((proc, idx) => {
+                            {(() => {
+                            // Un paso sin fila del plan en una OT que SÍ está planificada:
+                            // terminado antes de planificar, o cargado/reabierto después.
+                            // Antes salía «Sin asignar» y no se entendía por qué (15869).
+                            const otEnElPlan = item.procesos.some(p => filaDelPlan(item.id, p) != null);
+                            return item.procesos.map((proc, idx) => {
                                 const plannedItem = filaDelPlan(item.id, proc);
+                                const fueraDelPlan = otEnElPlan && !plannedItem;
                                 // Ya tiene otra cosa a esa hora: la persona o la máquina.
                                 const claveFila = resKey(plannedItem?.id);
                                 const choquesFila = plannedItem ? choques.get(claveFila) ?? [] : [];
@@ -1376,7 +1383,9 @@ function _PlanningListTable({
                                         <div className="flex flex-col md:block w-full md:w-auto">
                                             <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Recurso humano</span>
                                             <div>
-                                                {onOperatorChange && operarios.length > 0 ? (() => {
+                                                {fueraDelPlan ? (
+                                                    <FueraDelPlan terminado={proc.estado_proceso?.id === 3} />
+                                                ) : onOperatorChange && operarios.length > 0 ? (() => {
                                                     const idOperario = pendingRes[resKey(plannedItem?.id)]?.operario ?? operarios.find(op => {
                                                         const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
                                                         const currentName = (proc.operario_nombre || "").trim().toLowerCase();
@@ -1429,7 +1438,9 @@ function _PlanningListTable({
                                         <div className="flex flex-col md:block w-full md:w-auto">
                                             <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Recurso maquinaria</span>
                                             <div>
-                                                {onMachineryChange && maquinarias.length > 0 ? (() => {
+                                                {fueraDelPlan ? (
+                                                    <span className="block text-xs text-gray-400" title="No tiene fila en el plan: mirá la columna de recurso humano">—</span>
+                                                ) : onMachineryChange && maquinarias.length > 0 ? (() => {
                                                     const idMaquina = pendingRes[resKey(plannedItem?.id)]?.maquina ?? plannedItem?.id_maquinaria;
                                                     const elegida = idMaquina ? maquinarias.find(m => m.id === idMaquina) : undefined;
                                                     return (
@@ -1634,6 +1645,7 @@ function _PlanningListTable({
                                                         <SelectItem value="3">Finalizado</SelectItem>
                                                     </SelectContent>
                                                 </Select>
+                                                <QuienLoMarco marcado={proc.estado_marcado} estado={proc.estado_proceso?.id} />
                                             </div>
                                         </div>
 
@@ -1653,7 +1665,8 @@ function _PlanningListTable({
 
                                     </div>
                                 );
-                            })}
+                            });
+                            })()}
 
                             <RegisterDeliveryDialog
                                 open={!!deliveryOrder && editaOrdenes}

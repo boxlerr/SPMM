@@ -34,6 +34,11 @@ class EstadoProcesoDTO(BaseModel):
     descripcion: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
+class EstadoMarcadoDTO(BaseModel):
+    # None = el cambio no dejó autor (un script, una corrida a mano contra la base).
+    por: Optional[str] = None
+    en: Optional[datetime] = None
+
 class OrdenTrabajoProcesoDTO(BaseModel):
     # Flattened or selected fields to avoid circular recursion to OrdenTrabajo
     # id de la PASADA (orden_trabajo_proceso.id). Es lo que hay que mandar para tocar
@@ -65,7 +70,11 @@ class OrdenTrabajoProcesoDTO(BaseModel):
     operario_nombre: Optional[str] = None
     inicio_real: Optional[datetime] = None
     fin_real: Optional[datetime] = None
-    
+    # Quién lo dejó «En curso» o «Completado» y cuándo (sólo esos dos estados; lo
+    # llena listarOrdenes desde auditoria_proceso_ot). Sin esto, un paso cerrado fuera
+    # del plan se veía «finalizado sin motivo y sin quién lo hace» (Lucas, 28/10).
+    estado_marcado: Optional[EstadoMarcadoDTO] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 class OrdenTrabajoResponseDTO(BaseModel):

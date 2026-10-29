@@ -1096,6 +1096,37 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error obteniendo planificaciones (Raw): {e}")
             return []
 
+    async def ultimo_cambio_de_estado(self, ids_otp: list[int]) -> dict[int, tuple[str | None, datetime]]:
+        """Quién dejó cada pasada en el estado que tiene ahora, y cuándo.
+
+        Lucas, 28/10/2026, en la 15869: «dice finalizado sin motivo y no tiene quién lo
+        hace». Lo había cerrado un usuario de SPMM el 23/9; el dato estaba en
+        `auditoria_proceso_ot` y ninguna pantalla de Operaciones lo mostraba. Se mira
+        cualquier cambio que tocó el campo estado, venga de donde venga (el botón del
+        paso, varias OT a la vez, la ficha de la persona): la tabla guarda el cambio ya
+        comparado, no la ruta.
+
+        Devuelve {id_otp: (usuario, cuando)}; usuario None = no se registró quién.
+        """
+        if not ids_otp:
+            return {}
+        from backend.domain.AuditoriaProcesoOT import AuditoriaProcesoOT as A
+        try:
+            filas = (await self.db.execute(
+                select(A.id_otp, A.usuario, A.creado_en)
+                .where(A.id_otp.in_(ids_otp), A.accion == "edicion",
+                       A.cambios.like('%"campo": "estado"%'))
+                .order_by(A.creado_en.desc(), A.id.desc())
+            )).all()
+        except Exception as e:
+            # Es un dato de más para la pantalla: si falla, la lista sale igual.
+            logger.error(f"Repository - Error leyendo quién cambió el estado: {e}")
+            return {}
+        ultimo: dict[int, tuple[str | None, datetime]] = {}
+        for id_otp, usuario, cuando in filas:
+            ultimo.setdefault(int(id_otp), (usuario, cuando))
+        return ultimo
+
     async def _guardar_version_procesos(self, id_orden: int, procesos, motivo: str,
                                         usuario: dict | None = None):
         """Deja una foto de los procesos ANTES de tocarlos, para poder deshacer.

@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "paso-dice-quien-lo-cerro",
+        fecha: "2026-10-29",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Cada paso arrancado o terminado dice quién lo marcó y cuándo",
+        detalle:
+            "Debajo del estado de cada paso, en las listas de OT, ahora dice quién lo dejó en proceso o finalizado y a qué hora. Y un paso sin lugar en el plan ya no dice «Sin asignar»: dice que ya estaba terminado al planificar, o que está fuera del plan porque se cargó o se reabrió después, y entra al recalcular la OT.",
+        href: "/operaciones",
+    },
+    {
         id: "glosario-de-colores",
         fecha: "2026-10-29",
         tipo: "nuevo",
