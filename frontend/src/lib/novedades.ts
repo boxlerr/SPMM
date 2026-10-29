@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "planificadas-filtro-sin-trabarse",
+        fecha: "2026-10-29",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Elegir a una persona en el filtro de Planificadas ya no traba la pantalla",
+        detalle:
+            "Al elegir a alguien en Recurso humano se abren solas sus OT, y cada paso traía armadas por adelantado las listas de personas y máquinas con quién estaba ocupado: la pantalla se quedaba congelada casi dos segundos. Ahora esas listas se arman recién cuando abrís el desplegable, y responde unas tres veces más rápido.",
+        href: "/operaciones",
+    },
+    {
         id: "pintura-misma-persona",
         fecha: "2026-10-29",
         tipo: "mejora",

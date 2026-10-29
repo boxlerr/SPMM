@@ -86,6 +86,7 @@ import {
     type FiltroRecursos,
 } from "@/lib/filtroRecursos";
 import { FranjaDeRecursos, SelectoresDeRecursos } from "@/components/planning/FiltroRecursosPlan";
+import { SelectAlAbrir } from "@/components/planning/SelectAlAbrir";
 import { choquesDelPlan, claveDelPlan, ocupadoEn, type TramoDelPlan } from "@/lib/choquesDelPlan";
 import { AvisoOcupado, FinDelPaso, OcupadoEnLaLista } from "@/components/planning/OcupadoEnElPlan";
 
@@ -365,6 +366,17 @@ function _PlanningListTable({
     });
     const [searchTerm, setSearchTerm] = React.useState("");
     const [expandedOrderIds, setExpandedOrderIds] = React.useState<number[]>([]);
+    // La tabla (desde md) y las tarjetas del teléfono están las dos en el HTML y el CSS
+    // esconde una. El detalle de una OT abierta es lo más pesado de la pantalla: se dibuja
+    // sólo en la que se ve. `null` hasta saber el ancho: ahí van las dos, como antes.
+    const [pantallaAncha, setPantallaAncha] = React.useState<boolean | null>(null);
+    React.useEffect(() => {
+        const mq = window.matchMedia("(min-width: 768px)");
+        const ver = () => setPantallaAncha(mq.matches);
+        ver();
+        mq.addEventListener("change", ver);
+        return () => mq.removeEventListener("change", ver);
+    }, []);
 
     // B1 (feedback 06/07): staging de reasignaciones de OPERARIO y MÁQUINA en Planificadas.
     // Antes cada cambio se guardaba al instante; ahora se acumulan acá y se aplican al
@@ -1363,40 +1375,42 @@ function _PlanningListTable({
                                         <div className="flex flex-col md:block w-full md:w-auto">
                                             <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Recurso humano</span>
                                             <div>
-                                                {onOperatorChange && operarios.length > 0 ? (
-                                                    <Select
-                                                        value={(pendingRes[resKey(plannedItem?.id)]?.operario ?? operarios.find(op => {
-                                                            const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
-                                                            const currentName = (proc.operario_nombre || "").trim().toLowerCase();
-                                                            return opName === currentName;
-                                                        })?.id)?.toString() || undefined}
+                                                {onOperatorChange && operarios.length > 0 ? (() => {
+                                                    const idOperario = pendingRes[resKey(plannedItem?.id)]?.operario ?? operarios.find(op => {
+                                                        const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
+                                                        const currentName = (proc.operario_nombre || "").trim().toLowerCase();
+                                                        return opName === currentName;
+                                                    })?.id;
+                                                    const elegido = operarios.find(op => op.id === idOperario);
+                                                    return (
+                                                    // Las opciones se arman al abrir: ver SelectAlAbrir.
+                                                    <SelectAlAbrir
+                                                        value={idOperario?.toString() || undefined}
                                                         onValueChange={(val) => plannedItem && stageOperario(plannedItem.id, parseInt(val))}
-                                                    >
-                                                        <SelectTrigger className={cn(
+                                                        texto={elegido ? toTitleCase(`${elegido.nombre} ${elegido.apellido}`) : toTitleCase(proc.operario_nombre)}
+                                                        placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"}
+                                                        className={cn(
                                                             "h-7 text-xs w-full border px-2",
                                                             chocaPersona.length > 0 ? "border-red-500 ring-1 ring-red-300 bg-red-50 text-red-900"
                                                                 : pendingRes[resKey(plannedItem?.id)]?.operario !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200",
-                                                        )}>
-                                                            <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {operarios.map((op) => {
-                                                                // Antes de elegir: si a esa hora ya tiene otra cosa, se dice acá.
-                                                                const ocupado = plannedItem
-                                                                    ? ocupadoAEsaHora("persona", op.id, claveFila) : [];
-                                                                return (
-                                                                    <SelectItem
-                                                                        key={op.id}
-                                                                        value={op.id.toString()}
-                                                                        detail={ocupado.length > 0 ? <OcupadoEnLaLista tramos={ocupado} /> : undefined}
-                                                                    >
-                                                                        {toTitleCase(`${op.nombre} ${op.apellido}`)}
-                                                                    </SelectItem>
-                                                                );
-                                                            })}
-                                                        </SelectContent>
-                                                    </Select>
-                                                ) : (
+                                                        )}
+                                                        opciones={() => operarios.map((op) => {
+                                                            // Antes de elegir: si a esa hora ya tiene otra cosa, se dice acá.
+                                                            const ocupado = plannedItem
+                                                                ? ocupadoAEsaHora("persona", op.id, claveFila) : [];
+                                                            return (
+                                                                <SelectItem
+                                                                    key={op.id}
+                                                                    value={op.id.toString()}
+                                                                    detail={ocupado.length > 0 ? <OcupadoEnLaLista tramos={ocupado} /> : undefined}
+                                                                >
+                                                                    {toTitleCase(`${op.nombre} ${op.apellido}`)}
+                                                                </SelectItem>
+                                                            );
+                                                        })}
+                                                    />
+                                                    );
+                                                })() : (
                                                     <span className="text-gray-700 text-xs font-medium block truncate" title={toTitleCase(proc.operario_nombre) || "Sin Asignar"}>
                                                         {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
                                                     </span>
@@ -1414,19 +1428,23 @@ function _PlanningListTable({
                                         <div className="flex flex-col md:block w-full md:w-auto">
                                             <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Recurso maquinaria</span>
                                             <div>
-                                                {onMachineryChange && maquinarias.length > 0 ? (
-                                                    <Select
-                                                        value={(pendingRes[resKey(plannedItem?.id)]?.maquina ?? plannedItem?.id_maquinaria)?.toString() || "0"}
+                                                {onMachineryChange && maquinarias.length > 0 ? (() => {
+                                                    const idMaquina = pendingRes[resKey(plannedItem?.id)]?.maquina ?? plannedItem?.id_maquinaria;
+                                                    const elegida = idMaquina ? maquinarias.find(m => m.id === idMaquina) : undefined;
+                                                    return (
+                                                    <SelectAlAbrir
+                                                        value={idMaquina?.toString() || "0"}
                                                         onValueChange={(val) => plannedItem && stageMaquina(plannedItem.id, parseInt(val))}
-                                                    >
-                                                        <SelectTrigger className={cn(
+                                                        texto={idMaquina
+                                                            ? elegida?.nombre ?? machineName
+                                                            : <span className="text-gray-400 italic">Recurso maquinaria sin asignar</span>}
+                                                        placeholder={machineName}
+                                                        className={cn(
                                                             "h-7 text-xs w-full border px-2",
                                                             chocaMaquina.length > 0 ? "border-red-500 ring-1 ring-red-300 bg-red-50 text-red-900"
                                                                 : pendingRes[resKey(plannedItem?.id)]?.maquina !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200",
-                                                        )}>
-                                                            <SelectValue placeholder={machineName} />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
+                                                        )}
+                                                        opciones={() => <>
                                                             <SelectItem value="0" className="text-gray-400 italic">Recurso maquinaria sin asignar</SelectItem>
                                                             {maquinarias.map((m) => {
                                                                 const limitacion = limitacionDeMaquina(m);
@@ -1447,9 +1465,10 @@ function _PlanningListTable({
                                                                     </SelectItem>
                                                                 );
                                                             })}
-                                                        </SelectContent>
-                                                    </Select>
-                                                ) : (
+                                                        </>}
+                                                    />
+                                                    );
+                                                })() : (
                                                     <div className="text-gray-600 text-xs font-medium truncate" title={machineName}>
                                                         {machineName}
                                                     </div>
@@ -1958,7 +1977,7 @@ function _PlanningListTable({
                             </div>
 
                             {/* Expanded Details for Mobile */}
-                            {isRowExpanded(item.id) && (
+                            {isRowExpanded(item.id) && pantallaAncha !== true && (
                                 <div className="bg-gray-50 border-t p-2">
                                     {renderDetails(item, "tarjeta")}
                                 </div>
@@ -2542,7 +2561,7 @@ function _PlanningListTable({
                                                 {lapizDeCelda(item.id, 'requerido_por')}
                                             </td>
                                         </tr>
-                                        {isRowExpanded(item.id) && (
+                                        {isRowExpanded(item.id) && pantallaAncha !== false && (
                                             <tr className="bg-gray-50 border-b">
                                                 <td colSpan={hideStatus ? 19 : 20} className="px-4 py-4">
                                                     {renderDetails(item)}
