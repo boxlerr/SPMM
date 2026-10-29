@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "pintura-misma-persona",
+        fecha: "2026-10-29",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "La preparación de la pintura y la pintura de una OT las hace la misma persona",
+        detalle:
+            "Leonardo ahora también puede pintar y los pasantes preparar la pintura, y el plan pone a la misma persona en las dos cosas de cada OT: el trabajo ya no cambia de manos en el medio. La pistola de pintura quedó cargada para la preparación, así que tampoco sale el aviso de que la preparación de pintura no tiene máquina.",
+        href: "/operaciones",
+    },
+    {
         id: "vista-previa-filtro-y-columnas",
         fecha: "2026-10-29",
         tipo: "mejora",

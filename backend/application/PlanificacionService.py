@@ -1487,6 +1487,73 @@ def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_var
         logger.info(f"COORDINACIÓN: Vinculando operario de Seq {seq_a} y Seq {seq_s} en OT {oid}")
 
 
+# La preparación de un trabajo MANUAL que hace la misma persona que el trabajo (reunión con
+# Lucas del 28/10/2026). Leonardo preparaba la pintura y la pintaba un pasante: el trabajo
+# cambiaba de manos en el medio. Se le cargó a Leonardo la pintura y a los pasantes la
+# preparación, y con eso cualquiera puede hacer las dos, pero el plan las elegía por
+# separado. La regla de preparación y trabajo de siempre (_pares_setup_produccion) es de
+# MÁQUINA —ata también la máquina, y la pintura no usa ninguna—, así que esta va aparte y
+# ata sólo a la persona. Por nombre, sin espacios de más.
+PREPARACION_DE_MANUAL = {"PREPARACION DE PINTURA": "PINTURA"}
+
+
+def _nombre_llano(nombre) -> str:
+    return " ".join(str(nombre or "").upper().split())
+
+
+def _pares_preparacion_manual(procesos_norm, partes=None):
+    """[(claves de la preparación, claves del trabajo)] de PREPARACION_DE_MANUAL, en cada
+    OT. Como en _pares_setup_produccion: por línea (todos sus tramos) y uno a uno en el
+    orden de la OT —cada trabajo se lleva la preparación más vieja sin pareja—, para que una
+    OT que pinta dos veces no ate cosas que no van juntas."""
+    por_clave = {(p[0], p[2]): p for p in procesos_norm}
+    if partes:
+        lineas = [[k for k in info["claves"] if k in por_clave] for info in partes.values()]
+        lineas = [c for c in lineas if c]
+    else:
+        lineas = [[(p[0], p[2])] for p in procesos_norm]
+    trabajo_de = {_nombre_llano(a): _nombre_llano(b) for a, b in PREPARACION_DE_MANUAL.items()}
+    preparaciones = set(trabajo_de)
+    trabajos = set(trabajo_de.values())
+
+    por_ot = {}
+    for claves in lineas:
+        por_ot.setdefault(claves[0][0], []).append(claves)
+    pares = []
+    for lineas_ot in por_ot.values():
+        lineas_ot.sort(key=lambda cl: por_clave[cl[0]][2])
+        pendientes = {}
+        for claves in lineas_ot:
+            nombre = _nombre_llano(por_clave[claves[0]][7])
+            if nombre in preparaciones:
+                pendientes.setdefault(trabajo_de[nombre], []).append(claves)
+            elif nombre in trabajos and pendientes.get(nombre):
+                pares.append((pendientes[nombre].pop(0), claves))
+    return pares
+
+
+def _agregar_misma_persona_preparacion_manual(model, procesos_norm, operario_vars,
+                                              op_domain_vals=None, *, dummy_op_id,
+                                              partes=None):
+    """La preparación de la pintura y la pintura de una OT, con la misma persona (ver
+    PREPARACION_DE_MANUAL). Las mismas excepciones que _agregar_coordinacion_maq_setup: si
+    en la OT se eligió a alguien a mano para uno de los dos, no se atan; y si no hay nadie
+    que pueda hacer los dos, tampoco —atarlos mandaría a los dos a «sin asignar»—."""
+    op_domain_vals = op_domain_vals or {}
+    for claves_prep, claves_trab in _pares_preparacion_manual(procesos_norm, partes):
+        a, s = claves_prep[-1], claves_trab[0]
+        dom_a = [v for v in op_domain_vals.get(a, ()) if v != dummy_op_id]
+        dom_s = [v for v in op_domain_vals.get(s, ()) if v != dummy_op_id]
+        a_mano = any(len(op_domain_vals.get(k, ())) == 1 and op_domain_vals[k][0] != dummy_op_id
+                     for k in (a, s))
+        if a_mano:
+            continue
+        if not (set(dom_a) & set(dom_s)):
+            logger.warning(f"PINTURA: en la OT {a[0]} nadie puede preparar y pintar: no se atan.")
+            continue
+        model.Add(operario_vars[a] == operario_vars[s])
+
+
 def _agregar_compatibilidad_op_maq(
     model,
     procesos_norm,
@@ -2943,7 +3010,9 @@ def _reasignar_por_especialidad(solver, procesos_norm, partes, inicio_vars, fin_
             claves = [k for k in info["claves"] if k in padre]
             for k in claves[1:]:
                 unir(claves[0], k)
-        for claves_setup, claves_prod in _pares_setup_produccion(procesos_norm, partes):
+        # La preparación y su trabajo, de máquina y de pintura (ver PREPARACION_DE_MANUAL).
+        for claves_setup, claves_prod in (_pares_setup_produccion(procesos_norm, partes)
+                                          + _pares_preparacion_manual(procesos_norm, partes)):
             a, s = claves_setup[-1], claves_prod[0]
             # La misma excepción que _agregar_coordinacion_maq_setup: si en la OT se eligió
             # a alguien a mano para uno de los dos, no se atan.
@@ -3331,6 +3400,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars, op_domain_vals,
                                         dummy_op_id=DUMMY_OP_ID, partes=partes,
                                         maq_domain_vals=maq_domain_vals)
+        _agregar_misma_persona_preparacion_manual(model, procesos_norm, operario_vars, op_domain_vals,
+                                                  dummy_op_id=DUMMY_OP_ID, partes=partes)
         _agregar_preparacion_pegada(model, procesos_norm, inicio_vars, fin_vars,
                                     presente_vars=presente_vars, partes=partes)
         _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars)
