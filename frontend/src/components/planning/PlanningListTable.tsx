@@ -1256,8 +1256,13 @@ function _PlanningListTable({
                 tarjeta de celular es además el ÚNICO camino, porque ahí no está la
                 columna «Entrega» de la fila. Metiéndola adentro del plegable, cargar
                 una entrega desde el teléfono pasaba de dos toques a tres, y el tercero
-                atrás de un rótulo que dice «archivos». */}
-            <div className="order-3 p-2 border-t border-gray-200">
+                atrás de un rótulo que dice «archivos».
+                Y va SÓLO en la tarjeta: en la tabla la fila ya tiene la columna Entrega,
+                que muestra lo mismo y también registra la entrega con un click. Ahí este
+                recuadro repetía las tres cifras a lo ancho de toda la pantalla y dejaba
+                una franja blanca debajo de cada OT desplegada («me molesta el espacio
+                blanco que molesta ahí abajo», Julián, 28/10). */}
+            {vista === "tarjeta" && <div className="order-3 p-2 border-t border-gray-200">
                 <div
                     className={editaOrdenes ? "cursor-pointer hover:ring-2 ring-blue-100 rounded-xl transition-all" : "rounded-xl"}
                     onClick={(e) => {
@@ -1275,7 +1280,7 @@ function _PlanningListTable({
                         delivered={item.cantidad_entregada}
                     />
                 </div>
-            </div>
+            </div>}
 
             {/* Producción primero: `order-1` contra el `order-2` del plegable de arriba. */}
             <div className="order-1 w-full text-sm">

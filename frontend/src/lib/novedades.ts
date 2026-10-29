@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "sin-franja-de-entrega",
+        fecha: "2026-10-29",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Al desplegar una OT ya no queda el recuadro de entrega abajo",
+        detalle:
+            "En las listas de OT, el detalle desplegado terminaba con un recuadro de «Entrega» a lo ancho de toda la pantalla que repetía lo que ya dice la columna Entrega de la fila y dejaba una franja blanca. Ahora el detalle termina en los pasos y los planos. La entrega se sigue registrando con un click en la columna Entrega (y en el teléfono, en la tarjeta como siempre).",
+        href: "/operaciones",
+    },
+    {
         id: "paso-dice-quien-lo-cerro",
         fecha: "2026-10-29",
         tipo: "mejora",
