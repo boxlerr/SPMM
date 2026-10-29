@@ -38,6 +38,7 @@ import {
     diaCortoMayuscula,
     diaYMes,
     diasDeLaPersona,
+    horarioDelTramo,
     horas,
     horasYMinutos,
     listaDeNombres,
@@ -45,6 +46,7 @@ import {
     recortesDeLaSemana,
     resumenDelPeriodo,
     sinNadiePorRango,
+    tramosPorHora,
     type CargaDelPlan,
     type CeldaDia,
     type CeldaSemana,
@@ -1040,7 +1042,9 @@ function QueLeToca({ r, resumen, rangosNombres, horario, nombreRango, onVerOT }:
             if (!m.has(t.dia)) m.set(t.dia, []);
             m.get(t.dia)!.push(t);
         }
-        return [...m.entries()].sort(([a], [b]) => a.localeCompare(b));
+        return [...m.entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([dia, ts]) => [dia, tramosPorHora(ts)] as [string, Tramo[]]);
     }, [conFecha]);
 
     const porOT = React.useMemo(() => {
@@ -1140,8 +1144,15 @@ function BotonOT({ fila, onVerOT }: { fila: FilaDeCarga; onVerOT: (id: number) =
 function RenglonTramo({ t, onVerOT }: { t: Tramo; onVerOT: (id: number) => void }) {
     const f = t.fila;
     const parte = t.aprox && t.min < (f.duracion_min || 0);
+    // La hora adelante: es lo primero que se busca al leer el día de alguien.
+    const horario = horarioDelTramo(t).texto;
     return (
         <li className="tabular-nums leading-snug">
+            {horario && (
+                <span className={cn("mr-1 font-semibold", horario.includes(":") ? "text-gray-900" : "text-gray-500")}>
+                    {horario}
+                </span>
+            )}
             <BotonOT fila={f} onVerOT={onVerOT} /> {f.nombre_proceso} ·{" "}
             {t.aprox ? `≈ ${horas(t.min)}` : horas(t.min)}
             {parte && ` (parte de un proceso de ${horas(f.duracion_min)})`}
@@ -1180,7 +1191,7 @@ function TiraDeDias({ celdas, celdasSemana, tramos, decimales = 1, onVerOT, onEl
                         <div key={c.dia} className="flex-1 min-w-0 flex flex-col items-stretch gap-0.5">
                             <span className="text-[10px] text-gray-500 text-center truncate">{rotulo}</span>
                             {tramos && onVerOT ? (
-                                <PopoverDia celda={c} tramos={tramos.filter(t => t.dia === c.dia)} onVerOT={onVerOT} className={clase} aria={aria}>
+                                <PopoverDia celda={c} tramos={tramosPorHora(tramos.filter(t => t.dia === c.dia))} onVerOT={onVerOT} className={clase} aria={aria}>
                                     <span className="truncate max-w-full px-0.5">{texto}</span>
                                 </PopoverDia>
                             ) : (

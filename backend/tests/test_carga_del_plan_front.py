@@ -142,6 +142,9 @@ console.log(JSON.stringify({
     horas: m.horasYMinutos(34889),
     vacante: [m.esVacante('VACANTE TORNERO A CUBRIR'), m.esVacante('vacante x'), m.esVacante('Juan')],
     dia_corto: m.diaCorto('2026-09-28'),
+    horarios: persona.tramos.map(t => [t.fila.orden_id, t.dia, m.horarioDelTramo(t).texto]),
+    orden_del_dia: Object.fromEntries(['2026-09-30', '2026-10-02', '2026-10-05'].map(dia =>
+        [dia, m.tramosPorHora(persona.tramos.filter(t => t.dia === dia)).map(t => t.fila.orden_id)])),
 }));
 """
 
@@ -280,3 +283,28 @@ def test_formatos(front):
     assert front["horas"] == "581h 29m"
     assert front["vacante"] == [True, True, False]
     assert front["dia_corto"] == "lun 28/9"
+
+
+def test_cada_renglon_del_dia_dice_a_que_hora_arranca_y_termina(front):
+    """Lucas, 28/10/2026: en la lista del día de cada persona se leían las horas de cada
+    cosa pero no cuándo arrancaba. Lo que no se sabe (el medio de un proceso partido, el
+    fin de uno movido a mano) no se inventa."""
+    h = {(o, d): t for o, d, t in front["horarios"]}
+    assert h[(1, "2026-09-28")] == "07:00–10:00"
+    # Partido vie → mar.
+    assert h[(3, "2026-10-02")] == "desde 15:00"
+    assert h[(3, "2026-10-05")] == "sigue"
+    assert h[(3, "2026-10-06")] == "hasta 10:00"
+    # Movido a mano: el fin que trae no vale.
+    assert h[(6, "2026-09-30")] == "desde 14:00"
+    assert h[(6, "2026-10-01")] == "sigue"
+    # Sin fecha: no hay hora que mostrar.
+    assert h[(7, "")] is None
+
+
+def test_el_dia_se_lee_en_el_orden_en_que_arrancan_las_cosas(front):
+    o = front["orden_del_dia"]
+    assert o["2026-09-30"] == [5, 6]       # 07:00 y después la que se movió a las 14:00
+    assert o["2026-10-02"] == [2, 3]       # 12:30 y después la que arranca a las 15:00
+    assert o["2026-10-05"][0] in (3, 4)    # las dos arrancan con la jornada
+    assert sorted(o["2026-10-05"]) == [3, 4]

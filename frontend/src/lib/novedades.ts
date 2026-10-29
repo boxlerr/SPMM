@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "carga-con-horario-del-dia",
+        fecha: "2026-10-29",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "En la carga de cada persona, cada tarea dice a qué hora arranca y termina",
+        detalle:
+            "En el panel de carga de la vista previa, «Ver qué le toca» y el detalle de cada día ahora muestran el horario de cada tarea (07:00–07:30) y la lista va en el orden en que arrancan las cosas. Un trabajo que sigue de un día a otro dice «desde 15:00», «sigue» o «hasta 14:45».",
+        href: "/operaciones",
+    },
+    {
         id: "planificadas-filtro-sin-trabarse",
         fecha: "2026-10-29",
         tipo: "arreglo",

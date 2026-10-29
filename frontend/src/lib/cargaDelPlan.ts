@@ -189,6 +189,43 @@ export function diaCortoMayuscula(dia: string): string {
     return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
+const horaYMinuto = (d: Date) =>
+    `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+/**
+ * A qué hora arranca y termina un tramo en su día (Lucas, 28/10/2026: en la lista del día
+ * de cada persona se leían las horas que ocupa cada cosa pero no cuándo arranca).
+ *
+ *  - Empieza y termina ese día: «07:00–07:20».
+ *  - Sigue al día siguiente: «desde 13:05» el primero, «hasta 11:15» el último y «sigue»
+ *    los del medio (un proceso partido puede tener otras cosas adentro: no se inventa una
+ *    hora que no se sabe).
+ *  - Con el inicio cambiado a mano el fin que trae ya no vale: sólo «desde».
+ *
+ * `desde` son los minutos del día en que arranca, para ordenar la lista: lo que viene de
+ * un día anterior arranca con la jornada (0).
+ */
+export function horarioDelTramo(t: Tramo): { texto: string | null; desde: number } {
+    const I = fechaDeLaApi(t.fila.fecha_inicio_estimada);
+    if (!t.dia || !I) return { texto: null, desde: 0 };
+    const F = t.fila.fechaEditada ? null : fechaDeLaApi(t.fila.fecha_fin_estimada);
+    const empieza = clave(I) === t.dia;
+    const termina = F != null && F >= I && clave(F) === t.dia;
+    const desde = empieza ? I.getHours() * 60 + I.getMinutes() : 0;
+    if (empieza && termina) return { texto: `${horaYMinuto(I)}–${horaYMinuto(F!)}`, desde };
+    if (empieza) return { texto: `desde ${horaYMinuto(I)}`, desde };
+    if (termina) return { texto: `hasta ${horaYMinuto(F!)}`, desde };
+    return { texto: "sigue", desde };
+}
+
+/** Los tramos de un día en el orden en que arrancan. */
+export function tramosPorHora(tramos: Tramo[]): Tramo[] {
+    return tramos
+        .map((t, i) => ({ t, i, desde: horarioDelTramo(t).desde }))
+        .sort((a, b) => a.desde - b.desde || a.i - b.i)
+        .map(x => x.t);
+}
+
 /** 34889 → "581h 29m". El mismo formato que la «Carga total» del encabezado. */
 export function horasYMinutos(min: number): string {
     if (!(min > 0)) return "0 min";
