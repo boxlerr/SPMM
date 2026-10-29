@@ -29,6 +29,7 @@ import { HORA_APERTURA, fechaDeLaApi, fechaDesdeMinutos, inicioDelPlan, minutosD
 import { choquesDelPlan, ocupadoEn, type TramoDelPlan } from "@/lib/choquesDelPlan";
 import { AvisoOcupado, FinDelPaso, OcupadoEnLaLista } from "@/components/planning/OcupadoEnElPlan";
 import { SelectoresDeRecursos, SelectorMultiple } from "@/components/planning/FiltroRecursosPlan";
+import { GlosarioDeColores } from "@/components/planning/GlosarioDeColores";
 import {
     capacidadEnElPeriodo, contarDiasHabiles, describirDias, diasQueTrabajaElTaller, jornadaDelOperario,
     type CapacidadEnElPeriodo,
@@ -4954,6 +4955,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                         {ordenAlReves ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />}
                                         {ordenAlReves ? "Últimas primero" : "Primeras primero"}
                                     </Button>
+
+                                    <GlosarioDeColores pantalla="vista-previa" align="start" />
 
                                     {/* Columnas: trece entran en un monitor de escritorio y en ninguna
                                         otra cosa. Lo elegido queda guardado en el navegador. */}

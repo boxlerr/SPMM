@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "glosario-de-colores",
+        fecha: "2026-10-29",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Un botón «Colores» explica qué quiere decir cada color",
+        detalle:
+            "En la vista previa del plan (al lado de «Columnas») y en las listas de OT (al lado de «Exportar») hay un botón «Colores» que abre el glosario: el color de cada fila de OT, de los pasos de adentro, de los cuadros (la máquina en amarillo tiene una limitación) y de los avisos. No ocupa lugar: se abre cuando hace falta.",
+        href: "/operaciones",
+    },
+    {
         id: "carga-con-horario-del-dia",
         fecha: "2026-10-29",
         tipo: "mejora",

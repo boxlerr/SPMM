@@ -87,6 +87,7 @@ import {
 } from "@/lib/filtroRecursos";
 import { FranjaDeRecursos, SelectoresDeRecursos } from "@/components/planning/FiltroRecursosPlan";
 import { SelectAlAbrir } from "@/components/planning/SelectAlAbrir";
+import { GlosarioDeColores } from "@/components/planning/GlosarioDeColores";
 import { choquesDelPlan, claveDelPlan, ocupadoEn, type TramoDelPlan } from "@/lib/choquesDelPlan";
 import { AvisoOcupado, FinDelPaso, OcupadoEnLaLista } from "@/components/planning/OcupadoEnElPlan";
 
@@ -1850,6 +1851,7 @@ function _PlanningListTable({
                         </Button>
                     </>
                 )}
+                {conFiltroRecursos && <GlosarioDeColores pantalla="lista" className="h-10 shrink-0 bg-white" />}
                 {menuExportar}
                 </div>
                 {conFiltroRecursos && filtroRecursos && onFiltroRecursosChange && panelFiltrosAbierto && (
