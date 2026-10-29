@@ -32,7 +32,8 @@ interface SelectorProps {
  * pasos tiene en la lista; con cero se ve apagado pero se puede tildar igual (en otra
  * solapa puede tener).
  */
-function SelectorMultiple({ rotulo, Icono, opciones, elegidos, onChange, vacio, className }: SelectorProps) {
+/** Un desplegable de varios: lo usan estos dos y el de Sector de la vista previa. */
+export function SelectorMultiple({ rotulo, Icono, opciones, elegidos, onChange, vacio, className }: SelectorProps) {
     const [texto, setTexto] = React.useState("");
     const elegidosSet = React.useMemo(() => new Set(elegidos), [elegidos]);
     const visibles = React.useMemo(() => {
@@ -60,7 +61,7 @@ function SelectorMultiple({ rotulo, Icono, opciones, elegidos, onChange, vacio, 
                         elegidos.length > 0 ? "border-red-300 ring-1 ring-red-200" : "border-gray-300",
                         className,
                     )}
-                    title={`Mostrar sólo los pasos de ${rotulo === "Máquina" ? "esta máquina" : "esta persona"} (se pueden elegir varias)`}
+                    title={`Mostrar sólo los pasos de ${rotulo === "Máquina" ? "esta máquina" : rotulo === "Sector" ? "la gente de este sector" : "esta persona"} (se pueden elegir varias)`}
                 >
                     <span className="flex min-w-0 items-center gap-1.5">
                         <Icono className={cn("h-3.5 w-3.5 shrink-0", elegidos.length > 0 ? "text-red-600" : "text-gray-400")} />
@@ -77,7 +78,7 @@ function SelectorMultiple({ rotulo, Icono, opciones, elegidos, onChange, vacio, 
                     <Search className="mr-2 h-3.5 w-3.5 shrink-0 opacity-40" />
                     <input
                         className="h-7 w-full bg-transparent text-sm outline-none placeholder:text-gray-400"
-                        placeholder={`Buscar ${rotulo === "Máquina" ? "máquina" : "persona"}…`}
+                        placeholder={`Buscar ${rotulo === "Máquina" ? "máquina" : rotulo === "Sector" ? "sector" : "persona"}…`}
                         value={texto}
                         onChange={(e) => setTexto(e.target.value)}
                     />

@@ -1265,15 +1265,15 @@ function _PlanningListTable({
 
             {/* Producción primero: `order-1` contra el `order-2` del plegable de arriba. */}
             <div className="order-1 w-full text-sm">
-                <div className="hidden md:grid bg-gray-100 text-[11px] uppercase text-gray-600 grid-cols-[44px_minmax(200px,1.6fr)_196px_118px_72px_72px_minmax(150px,2fr)_minmax(150px,2.4fr)] gap-3 px-4 py-2 font-bold border-t border-gray-200">
+                <div className="hidden md:grid bg-gray-100 text-[11px] uppercase text-gray-600 grid-cols-[44px_minmax(220px,420px)_220px_220px_196px_118px_72px_72px] md:justify-start gap-3 px-4 py-2 font-bold border-t border-gray-200">
                     <div>#</div>
                     <div>Proceso</div>
+                    <div>Recurso humano</div>
+                    <div>Recurso maquinaria</div>
                     <div title="Cuándo empieza y cuándo termina el paso">Inicio → fin</div>
                     <div>Estado</div>
                     <div className="text-center">Min. Est.</div>
                     <div className="text-center text-blue-700">Min. Real</div>
-                    <div>Recurso humano</div>
-                    <div>Recurso maquinaria</div>
                 </div>
 
                 <div>
@@ -1307,7 +1307,7 @@ function _PlanningListTable({
                                     <div
                                         key={proc.id ?? `${item.id}-${proc.proceso.id}-${idx}`}
                                         className={cn(
-                                            "flex flex-col md:grid md:grid-cols-[44px_minmax(200px,1.6fr)_196px_118px_72px_72px_minmax(150px,2fr)_minmax(150px,2.4fr)] gap-3 px-4 py-4 md:py-2 border-t items-stretch md:items-center transition-opacity",
+                                            "flex flex-col md:grid md:grid-cols-[44px_minmax(220px,420px)_220px_220px_196px_118px_72px_72px] md:justify-start gap-3 px-4 py-4 md:py-2 border-t items-stretch md:items-center transition-opacity",
                                             choquesFila.length > 0
                                                 ? "bg-red-100/70 shadow-[inset_4px_0_0_#dc2626] hover:bg-red-100"
                                                 : coincide === true
@@ -1353,6 +1353,113 @@ function _PlanningListTable({
                                                 >
                                                     <FileWarning className="w-3.5 h-3.5" />
                                                 </button>}
+                                            </div>
+                                        </div>
+
+                                        {/* Recurso humano y máquina van al lado del proceso, en el mismo orden que la
+                                           vista previa (Julián, 28/10/2026: «me marea que en las planificadas cambió de
+                                           lugar las columnas»). Antes estaban al final, después de los minutos. */}
+                                        {/* Operario */}
+                                        <div className="flex flex-col md:block w-full md:w-auto">
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Recurso humano</span>
+                                            <div>
+                                                {onOperatorChange && operarios.length > 0 ? (
+                                                    <Select
+                                                        value={(pendingRes[resKey(plannedItem?.id)]?.operario ?? operarios.find(op => {
+                                                            const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
+                                                            const currentName = (proc.operario_nombre || "").trim().toLowerCase();
+                                                            return opName === currentName;
+                                                        })?.id)?.toString() || undefined}
+                                                        onValueChange={(val) => plannedItem && stageOperario(plannedItem.id, parseInt(val))}
+                                                    >
+                                                        <SelectTrigger className={cn(
+                                                            "h-7 text-xs w-full border px-2",
+                                                            chocaPersona.length > 0 ? "border-red-500 ring-1 ring-red-300 bg-red-50 text-red-900"
+                                                                : pendingRes[resKey(plannedItem?.id)]?.operario !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200",
+                                                        )}>
+                                                            <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {operarios.map((op) => {
+                                                                // Antes de elegir: si a esa hora ya tiene otra cosa, se dice acá.
+                                                                const ocupado = plannedItem
+                                                                    ? ocupadoAEsaHora("persona", op.id, claveFila) : [];
+                                                                return (
+                                                                    <SelectItem
+                                                                        key={op.id}
+                                                                        value={op.id.toString()}
+                                                                        detail={ocupado.length > 0 ? <OcupadoEnLaLista tramos={ocupado} /> : undefined}
+                                                                    >
+                                                                        {toTitleCase(`${op.nombre} ${op.apellido}`)}
+                                                                    </SelectItem>
+                                                                );
+                                                            })}
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <span className="text-gray-700 text-xs font-medium block truncate" title={toTitleCase(proc.operario_nombre) || "Sin Asignar"}>
+                                                        {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
+                                                    </span>
+                                                )}
+                                                {chocaPersona.length > 0 && <AvisoOcupado quien="La persona" tramos={chocaPersona} />}
+                                                {operarioAMano && (
+                                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-red-700" title="El paso tiene esta persona elegida a mano en la OT, aunque el plan diga otra">
+                                                        Elegido a mano: {operarioAMano}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Maquinaria */}
+                                        <div className="flex flex-col md:block w-full md:w-auto">
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Recurso maquinaria</span>
+                                            <div>
+                                                {onMachineryChange && maquinarias.length > 0 ? (
+                                                    <Select
+                                                        value={(pendingRes[resKey(plannedItem?.id)]?.maquina ?? plannedItem?.id_maquinaria)?.toString() || "0"}
+                                                        onValueChange={(val) => plannedItem && stageMaquina(plannedItem.id, parseInt(val))}
+                                                    >
+                                                        <SelectTrigger className={cn(
+                                                            "h-7 text-xs w-full border px-2",
+                                                            chocaMaquina.length > 0 ? "border-red-500 ring-1 ring-red-300 bg-red-50 text-red-900"
+                                                                : pendingRes[resKey(plannedItem?.id)]?.maquina !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200",
+                                                        )}>
+                                                            <SelectValue placeholder={machineName} />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="0" className="text-gray-400 italic">Recurso maquinaria sin asignar</SelectItem>
+                                                            {maquinarias.map((m) => {
+                                                                const limitacion = limitacionDeMaquina(m);
+                                                                const ocupada = plannedItem
+                                                                    ? ocupadoAEsaHora("maquina", m.id, claveFila) : [];
+                                                                return (
+                                                                    <SelectItem
+                                                                        key={m.id}
+                                                                        value={m.id.toString()}
+                                                                        detail={limitacion || ocupada.length > 0
+                                                                            ? <>
+                                                                                {limitacion && <span className="block text-amber-700" title={limitacion}>⚠ {limitacion}</span>}
+                                                                                {ocupada.length > 0 && <OcupadoEnLaLista tramos={ocupada} />}
+                                                                            </>
+                                                                            : undefined}
+                                                                    >
+                                                                        {m.nombre}
+                                                                    </SelectItem>
+                                                                );
+                                                            })}
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <div className="text-gray-600 text-xs font-medium truncate" title={machineName}>
+                                                        {machineName}
+                                                    </div>
+                                                )}
+                                                {chocaMaquina.length > 0 && <AvisoOcupado quien="La máquina" tramos={chocaMaquina} />}
+                                                {maquinaAMano && (
+                                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-red-700" title="El paso tiene esta máquina elegida a mano en la OT, aunque el plan diga otra">
+                                                        Elegida a mano: {maquinaAMano}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
 
@@ -1524,109 +1631,6 @@ function _PlanningListTable({
                                             </div>
                                         </div>
 
-                                        {/* Operario */}
-                                        <div className="flex flex-col md:block w-full md:w-auto">
-                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Recurso humano</span>
-                                            <div>
-                                                {onOperatorChange && operarios.length > 0 ? (
-                                                    <Select
-                                                        value={(pendingRes[resKey(plannedItem?.id)]?.operario ?? operarios.find(op => {
-                                                            const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
-                                                            const currentName = (proc.operario_nombre || "").trim().toLowerCase();
-                                                            return opName === currentName;
-                                                        })?.id)?.toString() || undefined}
-                                                        onValueChange={(val) => plannedItem && stageOperario(plannedItem.id, parseInt(val))}
-                                                    >
-                                                        <SelectTrigger className={cn(
-                                                            "h-7 text-xs w-full border px-2",
-                                                            chocaPersona.length > 0 ? "border-red-500 ring-1 ring-red-300 bg-red-50 text-red-900"
-                                                                : pendingRes[resKey(plannedItem?.id)]?.operario !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200",
-                                                        )}>
-                                                            <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {operarios.map((op) => {
-                                                                // Antes de elegir: si a esa hora ya tiene otra cosa, se dice acá.
-                                                                const ocupado = plannedItem
-                                                                    ? ocupadoAEsaHora("persona", op.id, claveFila) : [];
-                                                                return (
-                                                                    <SelectItem
-                                                                        key={op.id}
-                                                                        value={op.id.toString()}
-                                                                        detail={ocupado.length > 0 ? <OcupadoEnLaLista tramos={ocupado} /> : undefined}
-                                                                    >
-                                                                        {toTitleCase(`${op.nombre} ${op.apellido}`)}
-                                                                    </SelectItem>
-                                                                );
-                                                            })}
-                                                        </SelectContent>
-                                                    </Select>
-                                                ) : (
-                                                    <span className="text-gray-700 text-xs font-medium block truncate" title={toTitleCase(proc.operario_nombre) || "Sin Asignar"}>
-                                                        {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
-                                                    </span>
-                                                )}
-                                                {chocaPersona.length > 0 && <AvisoOcupado quien="La persona" tramos={chocaPersona} />}
-                                                {operarioAMano && (
-                                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-red-700" title="El paso tiene esta persona elegida a mano en la OT, aunque el plan diga otra">
-                                                        Elegido a mano: {operarioAMano}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        {/* Maquinaria */}
-                                        <div className="flex flex-col md:block w-full md:w-auto">
-                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Recurso maquinaria</span>
-                                            <div>
-                                                {onMachineryChange && maquinarias.length > 0 ? (
-                                                    <Select
-                                                        value={(pendingRes[resKey(plannedItem?.id)]?.maquina ?? plannedItem?.id_maquinaria)?.toString() || "0"}
-                                                        onValueChange={(val) => plannedItem && stageMaquina(plannedItem.id, parseInt(val))}
-                                                    >
-                                                        <SelectTrigger className={cn(
-                                                            "h-7 text-xs w-full border px-2",
-                                                            chocaMaquina.length > 0 ? "border-red-500 ring-1 ring-red-300 bg-red-50 text-red-900"
-                                                                : pendingRes[resKey(plannedItem?.id)]?.maquina !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200",
-                                                        )}>
-                                                            <SelectValue placeholder={machineName} />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="0" className="text-gray-400 italic">Recurso maquinaria sin asignar</SelectItem>
-                                                            {maquinarias.map((m) => {
-                                                                const limitacion = limitacionDeMaquina(m);
-                                                                const ocupada = plannedItem
-                                                                    ? ocupadoAEsaHora("maquina", m.id, claveFila) : [];
-                                                                return (
-                                                                    <SelectItem
-                                                                        key={m.id}
-                                                                        value={m.id.toString()}
-                                                                        detail={limitacion || ocupada.length > 0
-                                                                            ? <>
-                                                                                {limitacion && <span className="block text-amber-700" title={limitacion}>⚠ {limitacion}</span>}
-                                                                                {ocupada.length > 0 && <OcupadoEnLaLista tramos={ocupada} />}
-                                                                            </>
-                                                                            : undefined}
-                                                                    >
-                                                                        {m.nombre}
-                                                                    </SelectItem>
-                                                                );
-                                                            })}
-                                                        </SelectContent>
-                                                    </Select>
-                                                ) : (
-                                                    <div className="text-gray-600 text-xs font-medium truncate" title={machineName}>
-                                                        {machineName}
-                                                    </div>
-                                                )}
-                                                {chocaMaquina.length > 0 && <AvisoOcupado quien="La máquina" tramos={chocaMaquina} />}
-                                                {maquinaAMano && (
-                                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-red-700" title="El paso tiene esta máquina elegida a mano en la OT, aunque el plan diga otra">
-                                                        Elegida a mano: {maquinaAMano}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
                                     </div>
                                 );
                             })}

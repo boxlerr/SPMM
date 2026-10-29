@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "vista-previa-filtro-y-columnas",
+        fecha: "2026-10-29",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "La vista previa se filtra por persona, máquina y sector, y recalcular no te saca de la OT que mirabas",
+        detalle:
+            "Arriba de las OT planificadas de la vista previa están los mismos filtros de Planificadas (recurso humano y máquina) y uno más por sector: quedan las OT con algún paso que cumple, abiertas, y los otros pasos se ven apagados. Al recalcular, la OT que estabas mirando queda en el mismo lugar de la pantalla aunque el plan nuevo la cambie de orden (antes se iba a otro lado y parecía que se había cerrado todo). Y en Planificadas los pasos van en el mismo orden que en la vista previa: proceso, recurso humano, máquina, inicio → fin, estado y minutos, con las columnas de persona y máquina más angostas.",
+        href: "/operaciones",
+    },
+    {
         id: "solapa-proveedores",
         fecha: "2026-10-29",
         tipo: "nuevo",

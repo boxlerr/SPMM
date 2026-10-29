@@ -13,7 +13,7 @@ import {
     ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
     HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
     Columns3, Layers, ListFilter, ListChecks, LogOut, Printer, ArrowLeft, Pencil, Loader2,
-    ArrowDown, ArrowUp} from "lucide-react";
+    ArrowDown, ArrowUp, MapPin} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,6 +28,7 @@ import { API_URL } from "@/config";
 import { HORA_APERTURA, fechaDeLaApi, fechaDesdeMinutos, inicioDelPlan, minutosDesdeFecha } from "@/lib/plan-fechas";
 import { choquesDelPlan, ocupadoEn, type TramoDelPlan } from "@/lib/choquesDelPlan";
 import { AvisoOcupado, FinDelPaso, OcupadoEnLaLista } from "@/components/planning/OcupadoEnElPlan";
+import { SelectoresDeRecursos, SelectorMultiple } from "@/components/planning/FiltroRecursosPlan";
 import {
     capacidadEnElPeriodo, contarDiasHabiles, describirDias, diasQueTrabajaElTaller, jornadaDelOperario,
     type CapacidadEnElPeriodo,
@@ -2667,7 +2668,68 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         sinMaquina: false,
     });
     const [filtrosAbiertos, setFiltrosAbiertos] = React.useState(false);
-    const filtrosActivos = (filtroTexto ? 1 : 0) + Object.values(filtros).filter(Boolean).length;
+
+    /**
+     * Ver lo de cada uno antes de confirmar: el mismo filtro por persona y por máquina
+     * de Planificadas, más uno por sector (reunión con Lucas del 28/10/2026: «agregar el
+     * mismo filtro de las planificadas en la preview para ver más fácil lo que hace cada
+     * uno», y que Sergio y Matías revisen lo de torno y fresado). Mira la persona y la
+     * máquina como se ven en la fila, con lo cambiado a mano. Muestra las OT que tienen
+     * algún paso que cumple, y adentro apaga los que no.
+     */
+    const [filtroRec, setFiltroRec] = React.useState<{ operarios: number[]; maquinas: number[]; sectores: string[] }>(
+        { operarios: [], maquinas: [], sectores: [] });
+    const filtroRecActivo = filtroRec.operarios.length + filtroRec.maquinas.length + filtroRec.sectores.length > 0;
+    const sectoresDelPlantel = React.useMemo(
+        () => [...new Set(availableOperators.map(op => (op.sector || "").trim()).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, "es")),
+        [availableOperators]);
+    const personasDelFiltro = React.useMemo(() => {
+        if (filtroRec.operarios.length === 0 && filtroRec.sectores.length === 0) return null;
+        const ids = new Set(filtroRec.operarios);
+        const sectores = new Set(filtroRec.sectores.map(x => x.toLowerCase()));
+        for (const op of availableOperators) {
+            if (sectores.has((op.sector || "").trim().toLowerCase())) ids.add(op.id);
+        }
+        return ids;
+    }, [filtroRec, availableOperators]);
+    const pasoCumpleFiltroRec = (i: { id_operario?: number | null; id_maquinaria?: number | null }) =>
+        (!personasDelFiltro || (i.id_operario != null && personasDelFiltro.has(i.id_operario)))
+        && (filtroRec.maquinas.length === 0 || (i.id_maquinaria != null && filtroRec.maquinas.includes(i.id_maquinaria)));
+    /** Para cada desplegable, cuántos pasos tiene cada opción con lo elegido en los OTROS. */
+    const opcionesFiltroRec = React.useMemo(() => {
+        const efectivos = results.map(r => getEffectiveItem(r));
+        const conMaquina = (i: typeof efectivos[number]) =>
+            filtroRec.maquinas.length === 0 || (i.id_maquinaria != null && filtroRec.maquinas.includes(i.id_maquinaria));
+        const conPersona = (i: typeof efectivos[number]) =>
+            !personasDelFiltro || (i.id_operario != null && personasDelFiltro.has(i.id_operario));
+        const contar = (lista: typeof efectivos, clave: (i: typeof efectivos[number]) => number | null | undefined) => {
+            const n = new Map<number, number>();
+            for (const i of lista) { const k = clave(i); if (k != null) n.set(k, (n.get(k) ?? 0) + 1); }
+            return n;
+        };
+        const porPersona = contar(efectivos.filter(conMaquina), i => i.id_operario);
+        const porMaquina = contar(efectivos.filter(conPersona), i => i.id_maquinaria);
+        const sectorDe = new Map(availableOperators.map(op => [op.id, (op.sector || "").trim()] as const));
+        const porSector = new Map<number, number>();
+        for (const i of efectivos.filter(conMaquina)) {
+            const idx = sectoresDelPlantel.indexOf(sectorDe.get(i.id_operario ?? -1) ?? "");
+            if (idx >= 0) porSector.set(idx, (porSector.get(idx) ?? 0) + 1);
+        }
+        const porNombre = (a: { nombre: string }, b: { nombre: string }) => a.nombre.localeCompare(b.nombre, "es");
+        return {
+            operarios: availableOperators
+                .map(op => ({ id: op.id, nombre: nombrePersona(op.nombre, op.apellido), pasos: porPersona.get(op.id) ?? 0 }))
+                .filter(o => o.pasos > 0 || filtroRec.operarios.includes(o.id)).sort(porNombre),
+            maquinas: availableMachines
+                .map((m: any) => ({ id: m.id as number, nombre: nombreLindo(m.nombre), pasos: porMaquina.get(m.id) ?? 0 }))
+                .filter(o => o.pasos > 0 || filtroRec.maquinas.includes(o.id)).sort(porNombre),
+            sectores: sectoresDelPlantel.map((nombre, id) => ({ id, nombre, pasos: porSector.get(id) ?? 0 })),
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [results, editedResults, filtroRec, personasDelFiltro, availableOperators, availableMachines, sectoresDelPlantel]);
+
+    const filtrosActivos = (filtroTexto ? 1 : 0) + Object.values(filtros).filter(Boolean).length + (filtroRecActivo ? 1 : 0);
 
     const gruposFiltrados = React.useMemo(() => {
         if (filtrosActivos === 0) return groupedResults;
@@ -2695,11 +2757,25 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
             if (filtros.sinOperario && !efectivos.some(i => !i.id_operario && !i.tercerizado)) continue;
             // Idem un proceso manual sin máquina: no la necesita.
             if (filtros.sinMaquina && !efectivos.some(i => !i.id_maquinaria && i.usa_maquina !== false && !i.tercerizado)) continue;
+            if (filtroRecActivo && !efectivos.some(pasoCumpleFiltroRec)) continue;
 
             salida[oid] = items;
         }
         return salida;
-    }, [groupedResults, filtroTexto, filtros, filtrosActivos, forzarOrdenIds, editedResults]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [groupedResults, filtroTexto, filtros, filtrosActivos, forzarOrdenIds, editedResults, filtroRecActivo, personasDelFiltro, filtroRec.maquinas]);
+
+    /** Con el filtro de persona, máquina o sector, se abren solas las OT que cumplen (si
+     *  son pocas): lo que se quiere ver son sus pasos, no la fila de la OT. */
+    const huellaFiltroRec = `${filtroRec.operarios.join(",")}|${filtroRec.maquinas.join(",")}|${filtroRec.sectores.join(",")}`;
+    React.useEffect(() => {
+        if (!filtroRecActivo) return;
+        const ids = Object.keys(gruposFiltrados).map(Number);
+        if (ids.length === 0 || ids.length > 10) return;
+        void pedirCatalogoProcesos();
+        setExpandedOrderIds(prev => [...new Set([...prev, ...ids])]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [huellaFiltroRec]);
 
     /**
      * Las OT de la tabla (y del exportado) en el orden en que se trabajan: primero la
@@ -2965,7 +3041,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         // tildarlos, y el aviso dice cuáles se sacaron.
         if (filtrosActivos > 0 && !gruposFiltrados[ordenId]) {
             setFiltroTexto("");
-            setFiltros({ atrasadas: false, forzadas: false, sinOperario: false, sinMaquina: false });
+            setFiltros({ atrasadas: false, forzadas: false, sinOperario: false, sinMaquina: false }); setFiltroRec({ operarios: [], maquinas: [], sectores: [] });
             toast.info("Se limpiaron los filtros para poder mostrarte la OT.");
         }
         // Lo mismo que hace `toggleRow` al abrir: sin el catálogo cargado, el
@@ -2976,6 +3052,56 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         resaltar(ordenId);
         saltoPendiente.current = `tr[data-ot="${ordenId}"]`;
     };
+
+    /**
+     * Recalcular no te saca de la OT que estabas mirando (reunión con Lucas del
+     * 28/10/2026: «que no cierres las OT al replanificar»).
+     *
+     * Las OT abiertas quedaban abiertas, pero el plan nuevo reordena la lista (va por
+     * cuándo termina cada OT) y la que se estaba corrigiendo se iba a otro lado: medido
+     * con el borrador de 35 OT, la 15895 pasó del 4.º lugar al 26.º, fuera de la
+     * pantalla, y parecía que todo se había cerrado. Al empezar el recálculo se anota qué
+     * OT estaba arriba en la pantalla (la abierta más cerca del borde, o la primera que
+     * se veía) y a qué altura; cuando llega el plan nuevo se la vuelve a poner ahí y se
+     * la resalta.
+     */
+    const anclaDelRecalculo = React.useRef<{ ordenId: number; top: number } | null>(null);
+    React.useEffect(() => {
+        if (typeof document === "undefined") return;
+        const filaDe = (id: number) => document.querySelector<HTMLElement>(`tr[data-ot="${id}"]`);
+        if (isCalculating) {
+            const alto = window.innerHeight;
+            const visibles = Array.from(document.querySelectorAll<HTMLElement>("tr[data-ot]"))
+                .map(el => ({ el, r: el.getBoundingClientRect() }))
+                .filter(({ r }) => r.bottom > 0 && r.top < alto);
+            const abierta = visibles.find(({ el }) => expandedOrderIds.includes(Number(el.dataset.ot)));
+            // Si la abierta empieza más arriba de la pantalla, igual es la que se mira.
+            const enCurso = abierta ?? Array.from(document.querySelectorAll<HTMLElement>("tr[data-ot]"))
+                .map(el => ({ el, r: el.getBoundingClientRect() }))
+                .find(({ el, r }) => expandedOrderIds.includes(Number(el.dataset.ot)) && r.top < 0
+                    && (el.nextElementSibling?.getBoundingClientRect().bottom ?? 0) > 0);
+            const elegida = enCurso ?? visibles[0];
+            anclaDelRecalculo.current = elegida
+                ? { ordenId: Number(elegida.el.dataset.ot), top: elegida.r.top }
+                : null;
+            return;
+        }
+        const ancla = anclaDelRecalculo.current;
+        anclaDelRecalculo.current = null;
+        if (!ancla) return;
+        const fila = filaDe(ancla.ordenId);
+        if (!fila) return;
+        // El que scrollea es la lista, no la página: el primer contenedor con scroll.
+        let caja: HTMLElement | null = fila.parentElement;
+        while (caja && !(caja.scrollHeight > caja.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(caja).overflowY))) {
+            caja = caja.parentElement;
+        }
+        const mover = fila.getBoundingClientRect().top - ancla.top;
+        if (caja) caja.scrollBy({ top: mover, behavior: "auto" });
+        else window.scrollBy({ top: mover, behavior: "auto" });
+        resaltar(ancla.ordenId);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isCalculating]);
 
     /**
      * El click en un #OT de un aviso. Tres destinos posibles, y ninguno es un
@@ -4722,6 +4848,22 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
 
                                     <span className="flex-1" />
 
+                                    {/* Por persona, máquina y sector, como en Planificadas (28/10/2026). */}
+                                    <SelectoresDeRecursos
+                                        filtro={{ operarios: filtroRec.operarios, maquinas: filtroRec.maquinas }}
+                                        onChange={(f) => setFiltroRec(prev => ({ ...prev, operarios: f.operarios, maquinas: f.maquinas }))}
+                                        opciones={opcionesFiltroRec}
+                                    />
+                                    <SelectorMultiple
+                                        rotulo="Sector"
+                                        Icono={MapPin}
+                                        opciones={opcionesFiltroRec.sectores}
+                                        elegidos={filtroRec.sectores.map(x => sectoresDelPlantel.indexOf(x)).filter(i => i >= 0)}
+                                        onChange={(ids) => setFiltroRec(prev => ({ ...prev, sectores: ids.map(i => sectoresDelPlantel[i]).filter(Boolean) }))}
+                                        vacio="Nadie del plan tiene sector cargado."
+                                        className="w-[170px]"
+                                    />
+
                                     {/* Filtros: con 40 OTs la tabla no entra en la pantalla y lo que se
                                         busca casi siempre es un subconjunto. Filtran la VISTA, no el
                                         plan: lo dice el chip de arriba, porque un filtro que además
@@ -4789,7 +4931,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                     disabled={filtrosActivos === 0}
                                                     onClick={() => {
                                                         setFiltroTexto("");
-                                                        setFiltros({ atrasadas: false, forzadas: false, sinOperario: false, sinMaquina: false });
+                                                        setFiltros({ atrasadas: false, forzadas: false, sinOperario: false, sinMaquina: false }); setFiltroRec({ operarios: [], maquinas: [], sectores: [] });
                                                     }}
                                                 >
                                                     Limpiar
@@ -4862,6 +5004,29 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                         </PopoverContent>
                                     </Popover>
                                 </div>
+                                {filtroRecActivo && (
+                                    <div className="mx-4 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-red-100 bg-rose-50/60 px-3 py-1.5 text-xs" style={{ zoom: zoom / 100 }}>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-red-900/60">Filtrando</span>
+                                        {[
+                                            ...filtroRec.operarios.map(id => ({ k: `op-${id}`, t: opcionesFiltroRec.operarios.find(o => o.id === id)?.nombre ?? `#${id}`, sacar: () => setFiltroRec(f => ({ ...f, operarios: f.operarios.filter(x => x !== id) })) })),
+                                            ...filtroRec.maquinas.map(id => ({ k: `m-${id}`, t: opcionesFiltroRec.maquinas.find(o => o.id === id)?.nombre ?? `#${id}`, sacar: () => setFiltroRec(f => ({ ...f, maquinas: f.maquinas.filter(x => x !== id) })) })),
+                                            ...filtroRec.sectores.map(sec => ({ k: `s-${sec}`, t: `Sector ${sec}`, sacar: () => setFiltroRec(f => ({ ...f, sectores: f.sectores.filter(x => x !== sec) })) })),
+                                        ].map(c => (
+                                            <span key={c.k} className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white py-0.5 pl-2 pr-0.5 font-medium text-red-900">
+                                                {c.t}
+                                                <button type="button" onClick={c.sacar} className="flex h-5 w-5 items-center justify-center rounded-full text-red-400 hover:bg-red-100 hover:text-red-700" aria-label={`Sacar ${c.t}`}>
+                                                    <XIcon className="h-3 w-3" />
+                                                </button>
+                                            </span>
+                                        ))}
+                                        <button type="button" onClick={() => setFiltroRec({ operarios: [], maquinas: [], sectores: [] })} className="font-medium text-red-700/70 hover:text-red-900 hover:underline">
+                                            Sacar filtros
+                                        </button>
+                                        <span className="ml-auto text-red-950/80">
+                                            <b className="tabular-nums">{results.filter(r => pasoCumpleFiltroRec(getEffectiveItem(r))).length}</b> pasos en <b className="tabular-nums">{otsFiltradas}</b> OT
+                                        </span>
+                                    </div>
+                                )}
                             </div>
 
                             {/* El ancho mínimo sigue a las columnas que quedaron: con las trece
@@ -5377,6 +5542,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                            distinguirlas de un vistazo. */
                                                                                         choquesFila.length > 0 ? "[&>div]:bg-red-100/70"
                                                                                             : filaEditada ? "[&>div]:bg-[#DC143C]/[0.045]" : procesoAMano && "[&>div]:bg-indigo-50/60",
+                                                                                        // Con el filtro de persona, máquina o sector, los otros pasos de
+                                                                                        // la OT se ven (el orden importa) pero en segundo plano.
+                                                                                        filtroRecActivo && !pasoCumpleFiltroRec(effectiveItem) && "[&>div]:opacity-45",
                                                                                     )}>
                                                                                         <div className="px-3 py-1.5 border-b flex items-center gap-1 text-gray-400 font-mono text-xs">
                                                                                             {(filaEditada || procesoAMano || choquesFila.length > 0) && (
@@ -5872,7 +6040,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                             className="mt-3 h-8 text-xs"
                                             onClick={() => {
                                                 setFiltroTexto("");
-                                                setFiltros({ atrasadas: false, forzadas: false, sinOperario: false, sinMaquina: false });
+                                                setFiltros({ atrasadas: false, forzadas: false, sinOperario: false, sinMaquina: false }); setFiltroRec({ operarios: [], maquinas: [], sectores: [] });
                                             }}
                                         >
                                             Limpiar filtros
