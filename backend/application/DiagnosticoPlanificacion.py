@@ -36,10 +36,12 @@ traba tiene otro orden de palabras" — Julián):
      renglón con siete negritas no resalta nada: solo grita.
 """
 import re
+from datetime import date
 
 from backend.domain.PausaOrden import MOTIVO_EN_FRASE, fecha_corta, texto_del_motivo
 from backend.application.PlanificacionService import (
     MIN_LABORAL_DIA,
+    MIN_LABORAL_SABADO,
     familia_requerida_from_proceso,
     familia_de_maquina,
     _get_tipo_proceso,
@@ -226,8 +228,13 @@ def construir_diagnosticos(
     prioridad_skills=None,
     maq_rangos_reales=None,
     rangos_reales_por_proceso=None,
+    horas_extra=None,
 ):
     """
+    horas_extra   : {"sabados": [date], "vacantes": {id: (nombre, {rangos})},
+                    "eventuales": {ids}} — los sábados del período (para ofrecer horas
+                    extra cuando una máquina no alcanza), los puestos VACANTE que
+                    podrían ser un eventual y los que ya lo son en este plan.
     procesos      : tuplas que se le pasan al solver
     operarios     : [(id_operario, id_rango)] — solo los disponibles
     maquinarias   : [(id, {rangos}, nombre, cod_maquina)]
@@ -286,7 +293,7 @@ def construir_diagnosticos(
     )
     diagnosticos += _cuellos_de_maquina(
         procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
-        maq_rangos_reales,
+        maq_rangos_reales, horas_extra=horas_extra, nombre_operario=nombre_operario,
     )
     # Único responsable de "pidió máquina y no la tuvo", en sus tres causas.
     # Absorbió a _gente_sin_habilitacion_en_la_maquina, que contaba una de ellas
@@ -299,7 +306,8 @@ def construir_diagnosticos(
     )
     diagnosticos += _procesos_sin_rango(procesos, maq_familia, maq_rangos, nombre_rango)
     diagnosticos += _trabajo_tercerizado(procesos, nombre_rango)
-    diagnosticos += _trabajo_en_puestos_vacantes(resultados, nombre_operario)
+    diagnosticos += _trabajo_en_puestos_vacantes(
+        resultados, nombre_operario, eventuales=(horas_extra or {}).get("eventuales"))
 
     _avisar_nombres_repetidos(diagnosticos)
     for d in diagnosticos:
@@ -1040,8 +1048,108 @@ def _procesos_que_nadie_puede_hacer(
     return salida
 
 
+def _dia_y_mes(f) -> str:
+    return f"{f.day}/{f.month}"
+
+
+def _soluciones_de_horas_extra(habilitadas, nombres_hab, rangos, faltan, resultados,
+                               horas_extra, nombre_operario):
+    """Las soluciones de «horas extra» de un cuello de máquina: el sábado a la mañana.
+
+    Lucas, 28/10/2026, con la FRESADORA CNC cargada para 10 jornadas: que el plan diga
+    cuántas horas extra hacen falta y se puedan forzar, o que se pueda sumar un eventual
+    del grupo Z como CNC esa semana. Las dos son «solo en este plan» (no escriben nada):
+
+      1. Que quien hace el trabajo de esa máquina en este plan venga el sábado, 07 a 12.
+      2. Un eventual: el puesto VACANTE con el rango que pide el trabajo, ese sábado.
+
+    Cada sábado suma 5 horas de máquina. Si el período elegido no tiene sábado, se dice:
+    sin sábado adentro no hay dónde poner las horas extra.
+    """
+    he = horas_extra or {}
+    sabados = sorted(he.get("sabados") or ())
+    # Los sábados que ya tienen horas extra puestas en estas máquinas no se vuelven a
+    # ofrecer: con una sola FRESADORA CNC, una segunda persona el mismo sábado no suma
+    # ni un minuto de máquina.
+    ocupados = {}
+    for a in he.get("aplicados") or ():
+        maqs = set(a.get("maquinarias") or ())
+        if not maqs or maqs & set(habilitadas):
+            f = a["fecha"] if isinstance(a["fecha"], date) else date.fromisoformat(str(a["fecha"])[:10])
+            ocupados[f] = ocupados.get(f, 0) + 1
+    ya_puestos = [f for f in sabados if ocupados.get(f, 0) >= len(habilitadas)]
+    sabados = [f for f in sabados if f not in ya_puestos]
+    # En horas y no en jornadas («faltan 1 jornada» no se cruza con «suma 5 h»): las
+    # horas extra se cuentan en horas.
+    faltan_txt = (
+        f" Para que entre todo en el período faltan **{max(1, round(faltan / 60))} h** de máquina."
+        if faltan > 0 else ""
+    )
+    if not sabados and ya_puestos:
+        return [{
+            "texto": f"Ya sumaste horas extra {('el sábado ' + _dia_y_mes(ya_puestos[0])) if len(ya_puestos) == 1 else ('los sábados ' + _listar([_dia_y_mes(f) for f in ya_puestos]))} "
+                     f"en **{_listar(nombres_hab)}**: no queda otro sábado en el período." + faltan_txt,
+            "donde": "Horas extra",
+        }]
+    if not sabados:
+        return [{
+            "texto": "El período elegido no tiene ningún sábado: si lo estirás hasta el sábado, "
+                     "se pueden sumar horas extra en esa máquina." + faltan_txt,
+            "donde": "Al elegir las fechas",
+        }]
+
+    cuando = (f"el sábado {_dia_y_mes(sabados[0])}" if len(sabados) == 1
+              else f"los sábados {_listar([_dia_y_mes(f) for f in sabados])}")
+    horas = len(sabados) * MIN_LABORAL_SABADO // 60
+    maquina = _listar(nombres_hab)
+    eventuales = set(he.get("eventuales") or ())
+    soluciones = []
+
+    # Quién hace el trabajo de esa máquina en este plan: a esa persona se le pide el
+    # sábado. Sin puestos VACANTE ni eventuales: las horas extra son de alguien del taller.
+    por_persona = {}
+    for r in resultados:
+        op = r.get("id_operario")
+        if (not op or r.get("excedente") or r.get("id_maquinaria") not in habilitadas
+                or op in eventuales or _es_vacante(nombre_operario.get(op))):
+            continue
+        por_persona[op] = por_persona.get(op, 0) + (r.get("duracion_min") or 0)
+    if por_persona:
+        op = max(por_persona, key=lambda o: (por_persona[o], -o))
+        quien = (nombre_operario.get(op) or f"#{op}").strip().title()
+        soluciones.append({
+            "texto": f"Que **{quien}** haga horas extra {cuando} en **{maquina}**, de 7 a 12: "
+                     f"suma **{horas} h** de máquina." + faltan_txt,
+            "donde": "Horas extra",
+            "accion": {
+                "tipo": "sabado", "id": habilitadas[0], "nombre": maquina,
+                "objetivos": [{"id": op, "nombre": quien, "fecha": f.isoformat(),
+                                "maquinas": list(habilitadas)} for f in sabados],
+            },
+        })
+
+    # El eventual: un puesto VACANTE que tenga alguno de los rangos que pide el trabajo.
+    rangos = set(rangos or ())
+    for vac_id, (vac_nombre, vac_rangos) in sorted((he.get("vacantes") or {}).items()):
+        if not rangos or not (rangos & set(vac_rangos or ())):
+            continue
+        puesto = (vac_nombre or "").upper().replace("VACANTE", "").replace("A CUBRIR", "").strip()
+        soluciones.append({
+            "texto": f"O sumá un **eventual** como {puesto} {cuando} en **{maquina}**: "
+                     f"suma **{horas} h** sin que nadie del taller haga horas extra." + faltan_txt,
+            "donde": "Horas extra",
+            "accion": {
+                "tipo": "eventual", "id": vac_id, "nombre": f"Eventual {puesto}",
+                "objetivos": [{"id": vac_id, "nombre": f"Eventual {puesto}", "fecha": f.isoformat(),
+                               "maquinas": list(habilitadas)} for f in sabados],
+            },
+        })
+        break
+    return soluciones
+
+
 def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
-                        maq_rangos_reales=None):
+                        maq_rangos_reales=None, horas_extra=None, nombre_operario=None):
     """Más trabajo del que entra en las máquinas habilitadas dentro del período.
 
     Se agrupa por el CONJUNTO de máquinas que el proceso puede usar, no por familia:
@@ -1065,8 +1173,9 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
         g = grupos.setdefault(clave, {
             "minutos": 0, "ots": set(), "rangos": set(), "procesos": set(),
             "familia": familia, "de_la_familia": set(de_la_familia),
-            "pares": set(),
+            "pares": set(), "dur": {},
         })
+        g["dur"][(orden_id, _sec)] = dur
         g["minutos"] += dur
         g["ots"].add(orden_id)
         g["rangos"] |= rangos
@@ -1125,6 +1234,15 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
             if p not in pares_con_maquina and p not in pares_excedentes
         ]
         pares_sin_lugar = [p for p in d["pares"] if p in pares_excedentes]
+
+        # Horas extra (Lucas, 28/10/2026: «forzame horas extras» o un eventual del grupo
+        # Z). Van PRIMERO: es lo que se hace en el taller cuando una máquina no da, y
+        # las otras dos soluciones cambian datos o cambian el plan entero.
+        faltan = sum(d["dur"].get(p, 0) for p in pares_mordidos + pares_sin_lugar)
+        soluciones[:0] = _soluciones_de_horas_extra(
+            habilitadas, nombres_hab, d["rangos"], faltan, resultados, horas_extra,
+            nombre_operario or {},
+        )
         afecta_ots = sorted({o for o, _ in pares_mordidos} | {o for o, _ in pares_sin_lugar})
 
         # Hasta cuándo llega el trabajo de ESTE grupo. Es la consecuencia concreta
@@ -1748,13 +1866,17 @@ def _trabajo_tercerizado(procesos, nombre_rango=None):
     }]
 
 
-def _trabajo_en_puestos_vacantes(resultados, nombre_operario):
+def _trabajo_en_puestos_vacantes(resultados, nombre_operario, eventuales=None):
     """Trabajo que el plan le carga a un puesto sin persona. Los "VACANTE" figuran
-    como disponibles y el planificador los toma como gente."""
+    como disponibles y el planificador los toma como gente.
+
+    Los `eventuales` no cuentan: ahí el puesto VACANTE ES alguien, porque se lo sumó
+    a propósito como eventual en este plan (ver _soluciones_de_horas_extra)."""
+    eventuales = set(eventuales or ())
     por_op = {}
     for r in resultados:
         op = r.get("id_operario")
-        if not op or r.get("excedente"):
+        if not op or r.get("excedente") or op in eventuales:
             continue
         nombre = (nombre_operario.get(op) or "").upper()
         if not nombre.startswith("VACANTE"):

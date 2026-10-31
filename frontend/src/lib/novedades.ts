@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "horas-extra-sabado",
+        fecha: "2026-10-31",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Horas extra el sábado, o un eventual, cuando una máquina no alcanza",
+        detalle:
+            "Cuando una máquina tiene más trabajo del que entra (por ejemplo la FRESADORA CNC), el aviso ahora dice cuántas horas de máquina faltan y ofrece dos salidas solo para ese plan: que quien hace ese trabajo venga el sábado de 7 a 12, o sumar un eventual con el rango que hace falta. Ese sábado la persona sólo hace trabajo de esa máquina, y el panel de carga lo cuenta. No se guarda nada en Recursos.",
+        href: "/operaciones",
+    },
+    {
         id: "sin-franja-de-entrega",
         fecha: "2026-10-29",
         tipo: "mejora",

@@ -43,6 +43,13 @@ export interface HorarioDeOperario {
     min_desayuno?: number | string | null;
     min_almuerzo?: number | string | null;
     disponible?: boolean | null;
+    /**
+     * Sábados (AAAA-MM-DD) de horas extra de ESTE plan: ese día cuenta de 7 a 12 aunque
+     * no esté en sus días. Los pone la vista previa con los ajustes «solo en este plan».
+     */
+    sabados_extra?: string[] | null;
+    /** Un eventual: no trabaja ningún día de la semana, sólo sus `sabados_extra`. */
+    solo_sabados_extra?: boolean | null;
 }
 
 /**
@@ -167,7 +174,8 @@ export function capacidadEnElPeriodo(
     feriados: Iterable<string> = [],
 ): CapacidadEnElPeriodo {
     const jornada = jornadaDelOperario(op);
-    const suyos = diasDeTrabajo(op?.dias_trabajo);
+    const suyos = op?.solo_sabados_extra ? new Set<number>() : diasDeTrabajo(op?.dias_trabajo);
+    const extra = new Set(op?.sabados_extra ?? []);
     const d0 = soloElDia(desde);
     const d1 = soloElDia(hasta);
     if (!d0 || !d1 || d1 < d0) return { dias: 0, jornada, minutos: 0 };
@@ -175,9 +183,13 @@ export function capacidadEnElPeriodo(
     let dias = 0;
     let minutos = 0;
     for (let d = new Date(d0), i = 0; d <= d1 && i < 1100; d.setDate(d.getDate() + 1), i++) {
-        if (!suyos.has(d.getDay()) || bloqueados.has(clave(d))) continue;
+        // Un sábado de horas extra es la mañana entera, como en el backend.
+        const deHorasExtra = d.getDay() === SABADO && extra.has(clave(d));
+        if ((!suyos.has(d.getDay()) && !deHorasExtra) || bloqueados.has(clave(d))) continue;
         dias++;
-        minutos += d.getDay() === SABADO ? Math.min(jornada, MIN_LABORAL_SABADO) : jornada;
+        minutos += d.getDay() === SABADO
+            ? (deHorasExtra ? MIN_LABORAL_SABADO : Math.min(jornada, MIN_LABORAL_SABADO))
+            : jornada;
     }
     return { dias, jornada, minutos };
 }

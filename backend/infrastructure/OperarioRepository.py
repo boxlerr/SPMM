@@ -154,6 +154,20 @@ class OperarioRepository:
             print(f"Error en find_with_rangos: {e}")
             raise
 
+    async def find_rangos_de(self, ids: list[int]):
+        """(id_operario, id_rango) de esas personas, estén disponibles o no.
+
+        Para los eventuales de un plan (ver PlanificacionService.con_horas_extra): son
+        puestos VACANTE, que `find_with_rangos` deja afuera a propósito.
+        """
+        if not ids:
+            return []
+        result = await self.db.execute(
+            select(OperarioRango.id_operario, OperarioRango.id_rango)
+            .where(OperarioRango.id_operario.in_(ids))
+        )
+        return [(o, r) for o, r in result.all()]
+
     async def find_interpreta_planos(self):
         """
         Devuelve {id_operario: bool} con quién sabe interpretar planos.

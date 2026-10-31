@@ -258,11 +258,100 @@ def calendarios_de_operarios(operarios_orm):
             "hasta": minutos_modelo_desde_hora(o.hora_fin) if o.hora_fin else MIN_LABORAL_DIA,
             "desde_sab": minutos_modelo_desde_hora(o.hora_inicio, True) if o.hora_inicio else 0,
             "hasta_sab": minutos_modelo_desde_hora(o.hora_fin, True) if o.hora_fin else MIN_LABORAL_SABADO,
+            # Sábados sueltos que esta persona trabaja en ESTE plan (horas extra, ver
+            # con_horas_extra): {fecha: {máquinas} o None si es en cualquiera}. Vacío
+            # salvo que el plan venga con ese ajuste.
+            "sabados": {},
         }
     return calendarios
 
 
-def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str], fecha_hasta: date | None = None, incluir_sabado: bool = True):
+def con_horas_extra(calendarios, sabados=None, eventuales=None):
+    """Los calendarios con las horas extra de ESTE plan, sin tocar los originales.
+
+    Lucas, 28/10/2026: la FRESADORA CNC tenía 10 jornadas de trabajo y pidió poder
+    «forzar horas extras» o sumar un eventual del grupo Z. En el taller la hora extra
+    es el sábado a la mañana, y el sábado ya tiene su lugar en la línea de tiempo del
+    plan (300 minutos, lo trabaje alguien o no): sumarlo para una persona no corre
+    ninguna fecha, sólo le abre esas ventanas a esa persona.
+
+    - `sabados`: [{"operario_id", "fecha", "maquinarias"}] — esa persona trabaja ese
+      sábado, 07 a 12, y sólo en esas máquinas (sin máquinas, en lo que sea). Atarlo a la
+      máquina es lo que hace que sean horas extra DE la máquina que no alcanza: abierto,
+      el plan la usaba para cualquier otra cosa.
+    - `eventuales`: ids de puestos VACANTE que en este plan cuentan como una persona.
+      Sólo trabajan los sábados que les toquen: es un turno extra en la máquina, no
+      alguien más en el horario de todos (para eso está Recursos).
+    """
+    if not sabados and not eventuales:
+        return calendarios
+    nuevos = {op: {**c, "sabados": dict(c.get("sabados") or {})} for op, c in (calendarios or {}).items()}
+    for op in eventuales or ():
+        nuevos[op] = {
+            "dias": set(), "desde": 0, "hasta": MIN_LABORAL_DIA,
+            "desde_sab": 0, "hasta_sab": MIN_LABORAL_SABADO, "sabados": {},
+        }
+    for s in sabados or ():
+        fecha = s["fecha"]
+        if isinstance(fecha, str):
+            fecha = date.fromisoformat(fecha[:10])
+        cal = nuevos.setdefault(s["operario_id"], {
+            "dias": {0, 1, 2, 3, 4}, "desde": 0, "hasta": MIN_LABORAL_DIA,
+            "desde_sab": 0, "hasta_sab": MIN_LABORAL_SABADO, "sabados": {},
+        })
+        maquinas = set(s.get("maquinarias") or ())
+        if fecha in cal["sabados"]:
+            # Pedido dos veces (dos avisos): en cualquiera gana; si no, se suman.
+            previas = cal["sabados"][fecha]
+            cal["sabados"][fecha] = None if previas is None or not maquinas else previas | maquinas
+        else:
+            cal["sabados"][fecha] = maquinas or None
+        # El sábado de horas extra es la mañana entera, aunque la persona entre más
+        # tarde de semana (Argañaraz entra a las 9): se pidió el sábado, no su horario.
+        cal["desde_sab"], cal["hasta_sab"] = 0, MIN_LABORAL_SABADO
+    return nuevos
+
+
+def sabados_del_periodo(arranque, fecha_hasta, resultados, blocked_dates) -> list[date]:
+    """Los sábados que caen dentro del período del plan y no están bloqueados.
+
+    El período va del arranque hasta la fecha tope pedida; sin fecha tope, hasta el
+    último paso del plan. Es donde se pueden poner horas extra: un sábado después del
+    final no adelanta nada.
+    """
+    desde = arranque.date() if isinstance(arranque, datetime) else arranque
+    hasta = fecha_hasta
+    if hasta is None:
+        fines = [str(r.get("fecha_fin_estimada") or "")[:10] for r in resultados or ()]
+        fines = [f for f in fines if len(f) == 10]
+        hasta = date.fromisoformat(max(fines)) if fines else desde
+    if isinstance(hasta, datetime):
+        hasta = hasta.date()
+    bloqueados = set(blocked_dates or ())
+    dias = (hasta - desde).days
+    return [
+        f for f in (desde + timedelta(days=n) for n in range(dias + 1))
+        if f.weekday() == 5 and f.strftime("%Y-%m-%d") not in bloqueados
+    ]
+
+
+async def _vacantes_con_rangos(repo_operario, operarios_all) -> dict:
+    """{id: (nombre, {rangos})} de los puestos VACANTE: los que pueden ser un eventual."""
+    vac = {o.id: f"{o.nombre} {o.apellido or ''}".strip() for o in operarios_all
+           if (o.nombre or "").upper().startswith("VACANTE")}
+    rangos = {}
+    try:
+        for o, r in await repo_operario.find_rangos_de(list(vac)):
+            rangos.setdefault(o, set()).add(r)
+    except Exception as e:
+        # Es para ofrecer un eventual en un aviso: si no se puede leer, el aviso sale
+        # sin esa opción, pero sale. Que tumbe todos los diagnósticos sería peor.
+        logger.warning(f"Service - No se pudieron leer los rangos de los puestos VACANTE: {e}")
+        return {}
+    return {o: (n, rangos.get(o, set())) for o, n in vac.items()}
+
+
+def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str], fecha_hasta: date | None = None, incluir_sabado: bool = True, sabados_extra=None):
     """Las ventanas (tramos de trabajo) del horizonte, en minutos del plan.
 
     LA LÍNEA DE TIEMPO DEL PLAN. El solver no cuenta minutos de reloj sino minutos de
@@ -297,7 +386,14 @@ def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dat
 
     Con `fecha_hasta`, el horizonte va de `start_date` a `fecha_hasta` inclusive; si no,
     `num_semanas * 7` días de calendario.
+
+    LOS SÁBADOS DE HORAS EXTRA (`sabados_extra`, ver con_horas_extra). Si nadie trabaja
+    los sábados, esos sábados sueltos igual tienen sus ventanas, pero el viernes de antes
+    se sigue cerrando con `tope`: el sábado es sólo de quien hace las horas extra, y sin
+    el tope lo que arrancaba el viernes a la tarde de cualquiera seguía el sábado a la
+    mañana (Balmaceda y otros cinco salían «pasados» en la carga del 31/10).
     """
+    sabados_extra = set(sabados_extra or ())
     bloqueados = set(blocked_dates or ())
     if fecha_hasta is not None:
         total_dias = max(1, (fecha_hasta - start_date).days + 1)
@@ -321,7 +417,11 @@ def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dat
             continue
         if weekday == 6:
             continue
-        if weekday == 5 and not incluir_sabado:
+        if weekday == 5 and not incluir_sabado and dia in sabados_extra:
+            # Sábado de horas extra: el viernes cierra como si el sábado fuera un hueco.
+            _cerrar_ultimo_dia()
+            del_ultimo_dia = []
+        elif weekday == 5 and not incluir_sabado:
             # Nadie trabaja los sábados: el día no aporta capacidad, pero ocupa sus 300
             # minutos en la línea de tiempo (así lo cuenta la vuelta a fecha).
             _cerrar_ultimo_dia()
@@ -2260,7 +2360,9 @@ def _split_resultados(resultados: list[dict]) -> tuple[list[dict], list[dict]]:
 def _ventana_prohibida_para(cal, v: "Ventana") -> bool:
     """True si el calendario de ese operario no le permite trabajar en esa ventana."""
     if v.weekday not in cal["dias"]:
-        return True
+        # Un sábado suelto de horas extra (ver con_horas_extra).
+        if not (v.weekday == 5 and v.fecha in (cal.get("sabados") or ())):
+            return True
     if v.weekday == 5:
         desde, hasta = cal["desde_sab"], cal["hasta_sab"]
     else:
@@ -2269,9 +2371,16 @@ def _ventana_prohibida_para(cal, v: "Ventana") -> bool:
     return v.ini_dia < desde or v.fin_dia > hasta
 
 
+def _maquinas_del_sabado(cal, v: "Ventana"):
+    """Si esa ventana es un sábado de horas extra atado a máquinas, cuáles; si no, None."""
+    if v.weekday != 5 or 5 in cal["dias"]:
+        return None
+    return (cal.get("sabados") or {}).get(v.fecha)
+
+
 def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas, presente_vars=None,
                                operario_vars=None, calendarios=None, fin_vars=None,
-                               demoras_modelo=None, vueltas_virtuales=None):
+                               demoras_modelo=None, vueltas_virtuales=None, maq_vars=None):
     """
     Obliga a que cada proceso:
     - empiece dentro de una ventana laboral
@@ -2300,6 +2409,16 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
     vueltas = {dias: tabla_de_vuelta(ventanas, dias) for dias in set(demoras_modelo.values())}
     extendidas = ({dias: _vueltas_extendidas(ventanas, dias) for dias in vueltas}
                   if vueltas_virtuales is not None else {})
+    # Sábados abiertos SÓLO por horas extra (nadie trabaja los sábados de siempre): ahí
+    # trabajan las personas de esas horas extra y nadie más. Sin esto, el sábado quedaba
+    # abierto para todo el plan, y los pasos «sin persona» y los tercerizados se iban a
+    # ese sábado (la soldadura de la 13029, sin nadie, el sábado 31/10).
+    abiertos_sabado = {}
+    if calendarios and not any(5 in c["dias"] for c in calendarios.values()):
+        for v in ventanas:
+            if v.weekday == 5 and v.fecha not in abiertos_sabado:
+                abiertos_sabado[v.fecha] = sorted(
+                    op for op, c in calendarios.items() if not _ventana_prohibida_para(c, v))
 
     for (orden_id, proc_id, secuencia, *_resto) in procesos_norm:
         key = (orden_id, secuencia)
@@ -2326,6 +2445,9 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
                 v_fin = min(v_fin, v.tope - dur + 1)
                 if v_fin <= v_ini:
                     continue
+            solo_horas_extra = abiertos_sabado.get(v.fecha) if v.weekday == 5 else None
+            if v.weekday == 5 and v.fecha in abiertos_sabado and (op_var is None or not solo_horas_extra):
+                continue
 
             b = model.NewBoolVar(f"vent_{orden_id}_{secuencia}_{idx}")
             # Si b == 1 → el proceso está dentro de esta ventana
@@ -2342,11 +2464,31 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
                     if minuto is None:
                         sale_y_vuelve_despues.append(b)
 
+            if solo_horas_extra:
+                model.AddLinearExpressionInDomain(
+                    op_var, cp_model.Domain.FromValues(solo_horas_extra)).OnlyEnforceIf(b)
+
             # Nadie que no trabaje en ese horario puede quedarse con este proceso.
             if op_var is not None:
                 for op_id, cal in calendarios.items():
                     if _ventana_prohibida_para(cal, v):
                         model.Add(op_var != op_id).OnlyEnforceIf(b)
+                        continue
+                    # Sábado de horas extra en ciertas máquinas: ese día la persona sólo
+                    # hace pasos de esas máquinas (ver con_horas_extra).
+                    maquinas = _maquinas_del_sabado(cal, v)
+                    if not maquinas:
+                        continue
+                    maq_var = (maq_vars or {}).get(key)
+                    if maq_var is None:
+                        model.Add(op_var != op_id).OnlyEnforceIf(b)
+                        continue
+                    es_ella = model.NewBoolVar(f"sab_{orden_id}_{secuencia}_{idx}_{op_id}")
+                    model.Add(op_var == op_id).OnlyEnforceIf(es_ella)
+                    model.Add(op_var != op_id).OnlyEnforceIf(es_ella.Not())
+                    model.AddLinearExpressionInDomain(
+                        maq_var, cp_model.Domain.FromValues(sorted(maquinas))
+                    ).OnlyEnforceIf([b, es_ella])
 
         if vuelve_var is not None:
             # A lo sumo una ventana está prendida: la suma dice si vuelve después del plan.
@@ -3042,6 +3184,10 @@ def _reasignar_por_especialidad(solver, procesos_norm, partes, inicio_vars, fin_
             idx = ventana_de.get(k)
             if cal is not None and idx is not None and _ventana_prohibida_para(cal, ventanas[idx]):
                 return False
+            # El sábado de horas extra es de ciertas máquinas: no se le pasa otra cosa.
+            maquinas = _maquinas_del_sabado(cal, ventanas[idx]) if cal is not None and idx is not None else None
+            if maquinas and maq_actual[k] not in maquinas:
+                return False
             return True
 
         movibles = {}   # raíz -> (claves, candidatos, actual)
@@ -3245,6 +3391,11 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     reales = {op_id for (op_id, _r) in operarios}
     calendarios = {op: c for op, c in (calendarios or {}).items() if op in reales}
     hay_sabado = any(5 in c["dias"] for c in calendarios.values()) if calendarios else True
+    # Los sábados sueltos de horas extra (ver con_horas_extra) no hacen que «haya sábado»:
+    # siguen sin contar para la vuelta de los proveedores ni para el mínimo de días. Sólo
+    # suman sus ventanas (ver construir_ventanas_semanales).
+    sabados_extra = set().union(*[set((c.get("sabados") or {}).keys()) for c in calendarios.values()]) \
+        if calendarios else set()
     min_semana = 5 * MIN_LABORAL_DIA + (MIN_LABORAL_SABADO if hay_sabado else 0)
 
     # Qué calendarios se prueban, cada uno un intento: (fecha tope, horizonte en minutos,
@@ -3320,7 +3471,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         # días. `ventanas[-1].fin` es el cierre del último tramo que quedó.
         num_semanas = math.ceil((horizonte or H_peor) / min_semana) + 1
         ventanas = construir_ventanas_semanales(
-            num_semanas, start_date, blocked_dates, fecha_hasta=hasta_intento, incluir_sabado=hay_sabado
+            num_semanas, start_date, blocked_dates, fecha_hasta=hasta_intento, incluir_sabado=hay_sabado,
+            sabados_extra=sabados_extra,
         )
         if horizonte is not None:
             ventanas = [v for v in ventanas if v.ini < horizonte]
@@ -3416,7 +3568,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
             f"{len(ventanas)} ({dias_del_horizonte} días, hasta "
             f"{ventanas[-1].fecha if ventanas else '-'}; fecha_hasta={fecha_hasta}, "
             f"calendario={origen}, "
-            f"sábados={'sí' if hay_sabado else 'no, nadie trabaja'}, "
+            f"sábados={'sí' if hay_sabado else ('sólo horas extra ' + ','.join(str(f) for f in sorted(sabados_extra)) if sabados_extra else 'no, nadie trabaja')}, "
             f"operarios con horario propio={con_horario_propio})"
         )
 
@@ -3434,6 +3586,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
             fin_vars=fin_vars,
             demoras_modelo=demoras_modelo,
             vueltas_virtuales=vueltas_virtuales,
+            maq_vars=maq_vars,
         )
 
         # ---- Función objetivo ----
@@ -4224,7 +4377,12 @@ async def planificar(
     # orden_id -> {"unidades", "fecha"}: las OT de las que este plan fabrica una parte
     # (ver entrega_parcial_de).
     entregas_parciales = dict(_ajustes.get("entregas_parciales") or {})
-    if ajustes_procesos or ajustes_maquinarias or ajustes_skills or entregas_parciales:
+    # Horas extra (ver con_horas_extra): quién trabaja qué sábado, y qué puestos VACANTE
+    # cuentan como un eventual en este plan.
+    ajustes_sabados = list(_ajustes.get("sabados") or [])
+    ajustes_eventuales = sorted({int(e) for e in (_ajustes.get("eventuales") or [])})
+    if (ajustes_procesos or ajustes_maquinarias or ajustes_skills or entregas_parciales
+            or ajustes_sabados or ajustes_eventuales):
         # Este log va ARRIBA del early-return del guardado a propósito. Un plan con
         # ajustes sale distinto de lo que dicen los datos: si mañana alguien mira el
         # plan guardado y no le cierra con Recursos, esta línea es la única
@@ -4234,7 +4392,8 @@ async def planificar(
             f"Service - planificar() con ajustes SOLO para este plan (no se guardan "
             f"en Recursos): {len(ajustes_procesos)} proceso(s), "
             f"{len(ajustes_maquinarias)} máquina(s), {len(ajustes_skills)} habilidad(es), "
-            f"{len(entregas_parciales)} entrega(s) parcial(es)"
+            f"{len(entregas_parciales)} entrega(s) parcial(es), "
+            f"{len(ajustes_sabados)} sábado(s) de horas extra, {len(ajustes_eventuales)} eventual(es)"
         )
 
     # 🔹 Plan ya armado: se guarda TAL CUAL, sin pasar por el solver.
@@ -4341,7 +4500,8 @@ async def planificar(
     # 🔹 Quién sabe interpretar planos (id_operario -> bool)
     op_planos = await repo_operario.find_interpreta_planos()
     # 🔹 Horario de cada uno: turno y días que trabaja.
-    calendarios = calendarios_de_operarios(await repo_operario.find_all())
+    calendarios = con_horas_extra(
+        calendarios_de_operarios(await repo_operario.find_all()), ajustes_sabados, ajustes_eventuales)
     # 🔹 Feriados / días de mantenimiento, ahora desde la base.
     blocked_dates = await DiaBloqueadoRepository(db).listar()
 
@@ -4359,6 +4519,13 @@ async def planificar(
         ordenes = await repo_orden.find_with_procesos()
 
     operarios = await repo_operario.find_with_rangos()
+    # 🔹 Los eventuales de este plan: puestos VACANTE (no disponibles, por eso no
+    #    vienen en la lista) que en este cálculo cuentan como una persona con su rango.
+    if ajustes_eventuales:
+        operarios = operarios + [
+            (o, r) for o, r in await repo_operario.find_rangos_de(ajustes_eventuales)
+            if (o, r) not in set(operarios)
+        ]
 
     # 🔹 Los proveedores de los pasos tercerizados, con sus días (reunión con Lucas del
     #    17/10/2026). Sólo los que nombran estas OT: son pocos y se leen de una vez.
@@ -4704,6 +4871,15 @@ async def planificar(
             # de estos: son los únicos que dicen la verdad sobre Recursos.
             maq_rangos_reales=maq_rangos_reales,
             rangos_reales_por_proceso=rangos_reales_por_proceso,
+            # Para ofrecer horas extra cuando una máquina no alcanza (ver
+            # _soluciones_de_horas_extra): los sábados del período, los puestos
+            # VACANTE que podrían ser un eventual y los que ya lo son.
+            horas_extra={
+                "sabados": sabados_del_periodo(arranque, fecha_hasta, resultados, blocked_dates),
+                "vacantes": await _vacantes_con_rangos(repo_operario, operarios_all),
+                "eventuales": set(ajustes_eventuales),
+                "aplicados": ajustes_sabados,
+            },
         )
 
         # Las OTs de los diagnósticos salen con su número VISIBLE (id_otvieja), que

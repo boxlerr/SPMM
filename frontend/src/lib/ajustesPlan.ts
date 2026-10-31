@@ -58,6 +58,13 @@ export type ObjetivoDeAccion = {
      * y sin esto un ajuste no se guarda desde la tarjeta de ajustes.
      */
     suma_ids?: number[];
+    /**
+     * Para `sabado` y `eventual`: qué sábado (AAAA-MM-DD). Una acción de horas extra trae
+     * un objetivo por sábado del período, todos con la misma persona.
+     */
+    fecha?: string;
+    /** Para `sabado` y `eventual`: en qué máquinas son esas horas extra. */
+    maquinas?: number[];
 };
 
 /**
@@ -72,7 +79,13 @@ export type ObjetivoDeAccion = {
  * cuando la acción trae `suma_ids` (ver `ObjetivoDeAccion`).
  */
 export type AccionDeSolucion = {
-    tipo: "proceso" | "maquinaria" | "skill_nativa";
+    /**
+     * `sabado` y `eventual` son las horas extra (Lucas, 28/10/2026: «forzame horas
+     * extras» o un eventual del grupo Z cuando una máquina no alcanza): una persona, o
+     * un puesto VACANTE como eventual, trabaja el sábado de 7 a 12. Son SOLO de este
+     * plan: no tienen «Guardar en Recursos» (ver `seGuardaEnRecursos`).
+     */
+    tipo: "proceso" | "maquinaria" | "skill_nativa" | "sabado" | "eventual";
     id: number;
     nombre: string;
     rangos?: number[];
@@ -81,6 +94,22 @@ export type AccionDeSolucion = {
     /** Cada cosa a tocar. Sin esto la acción toca una sola: es el formato viejo. */
     objetivos?: ObjetivoDeAccion[];
 };
+
+/** Si la acción es de las que también se pueden dejar cargadas en Recursos. */
+export const seGuardaEnRecursos = (accion: AccionDeSolucion): boolean =>
+    accion.tipo !== "sabado" && accion.tipo !== "eventual";
+
+/** Las de horas extra: un sábado por objetivo. */
+const esDeHorasExtra = (accion: AccionDeSolucion): boolean => !seGuardaEnRecursos(accion);
+
+/** «el sábado 7/11» o «los sábados 7/11 y 14/11». */
+function cuandoDeHorasExtra(objetivos: ObjetivoDeAccion[]): string {
+    const dias = Array.from(new Set(objetivos.map((o) => o.fecha).filter(Boolean) as string[]))
+        .sort()
+        .map((f) => `${Number(f.slice(8, 10))}/${Number(f.slice(5, 7))}`);
+    if (dias.length === 0) return "el sábado";
+    return dias.length === 1 ? `el sábado ${dias[0]}` : `los sábados ${enumerar(dias)}`;
+}
 
 /** Un ajuste vigente: una solución aplicada SOLO a este cálculo. */
 export type AjusteDelPlan = {
@@ -164,6 +193,10 @@ export type AjustesDelPlanPayload = {
     skills_nativas: { operario_id: number; proceso_id: number; habilitado: boolean }[];
     /** orden_id -> piezas de la OT que se fabrican en este plan (ver `lib/entregaParcial`). */
     entregas_parciales?: Record<number, { unidades: number; fecha: string | null }>;
+    /** Horas extra: quién trabaja qué sábado (AAAA-MM-DD) y en qué máquinas. */
+    sabados?: { operario_id: number; fecha: string; maquinarias: number[] }[];
+    /** Puestos VACANTE que en este plan cuentan como un eventual. */
+    eventuales?: number[];
 };
 
 /**
@@ -191,7 +224,9 @@ export function objetivosDeAjuste(accion: AccionDeSolucion): string[] {
     return objetivosDe(accion).map((o) =>
         accion.tipo === "skill_nativa"
             ? `skill_nativa:${o.id}:${accion.id}`
-            : `${accion.tipo}:${o.id}`,
+            : esDeHorasExtra(accion)
+                ? `${accion.tipo}:${o.id}:${o.fecha ?? ""}`
+                : `${accion.tipo}:${o.id}`,
     );
 }
 
@@ -237,6 +272,7 @@ export function claveDeAjuste(accion: AccionDeSolucion): string {
             ? `skill_nativa:${o.id}:${accion.id}:${accion.habilitado === false ? "off" : "on"}`
             : `${accion.tipo}:${o.id}`;
         if (accion.tipo === "skill_nativa") return que;
+        if (esDeHorasExtra(accion)) return `${accion.tipo}:${o.id}:${o.fecha ?? ""}`;
         const rangos = [...(o.rangos ?? accion.rangos ?? [])].sort((a, b) => a - b);
         return `${que}=${rangos.join(",")}`;
     });
@@ -273,12 +309,26 @@ export function payloadDeAjustes(ajustes: AjusteDelPlan[]): AjustesDelPlanPayloa
     // habilidad tiene que quedar apagada, no mandar las dos órdenes y que decida el
     // orden en que el backend las lea.
     const skills = new Map<string, { operario_id: number; proceso_id: number; habilitado: boolean }>();
+    // Por (persona, sábado): el mismo sábado pedido desde dos avisos va una vez.
+    const sabados = new Map<string, { operario_id: number; fecha: string; maquinarias: number[] }>();
+    const eventuales = new Set<number>();
 
     for (const ajuste of ajustes ?? []) {
         const accion = ajuste?.accion;
         if (!accion) continue;
         for (const objetivo of objetivosDe(accion)) {
-            if (accion.tipo === "skill_nativa") {
+            if (esDeHorasExtra(accion)) {
+                if (!objetivo.fecha) continue;
+                const k = `${objetivo.id}-${objetivo.fecha}`;
+                // El mismo sábado desde dos avisos: las máquinas se suman.
+                const maquinas = new Set([...(sabados.get(k)?.maquinarias ?? []), ...(objetivo.maquinas ?? [])]);
+                sabados.set(k, {
+                    operario_id: objetivo.id,
+                    fecha: objetivo.fecha,
+                    maquinarias: Array.from(maquinas).sort((a, b) => a - b),
+                });
+                if (accion.tipo === "eventual") eventuales.add(objetivo.id);
+            } else if (accion.tipo === "skill_nativa") {
                 skills.set(`${objetivo.id}-${accion.id}`, {
                     operario_id: objetivo.id,
                     proceso_id: accion.id,
@@ -303,11 +353,19 @@ export function payloadDeAjustes(ajustes: AjusteDelPlan[]): AjustesDelPlanPayloa
     if (
         Object.keys(procesos).length === 0 &&
         Object.keys(maquinarias).length === 0 &&
-        skillsNativas.length === 0
+        skillsNativas.length === 0 &&
+        sabados.size === 0
     ) {
         return undefined;
     }
-    return { procesos, maquinarias, skills_nativas: skillsNativas };
+    const cuerpo: AjustesDelPlanPayload = { procesos, maquinarias, skills_nativas: skillsNativas };
+    // Sólo si hay: sin horas extra, el pedido tiene que ser exactamente el de antes.
+    if (sabados.size > 0) {
+        cuerpo.sabados = Array.from(sabados.values()).sort((a, b) =>
+            a.fecha.localeCompare(b.fecha) || a.operario_id - b.operario_id);
+        if (eventuales.size > 0) cuerpo.eventuales = Array.from(eventuales).sort((a, b) => a - b);
+    }
+    return cuerpo;
 }
 
 /** "A y B", "A, B y C", "A, B y 3 más" — para no tapar la tira con veinte nombres. */
@@ -357,6 +415,9 @@ export function etiquetaCortaDeAccion(accion: AccionDeSolucion): string {
     if (accion.tipo === "skill_nativa") {
         return `${listado}: ${accion.nombre} ${accion.habilitado === false ? "apagado" : "encendido"}`;
     }
+    if (esDeHorasExtra(accion)) {
+        return `${enumerar(Array.from(new Set(objetivos.map((o) => o.nombre))))}: ${cuandoDeHorasExtra(objetivos)}`;
+    }
     const suma = Array.from(new Set(objetivos.flatMap((o) => o.suma ?? [])));
     return suma.length > 0 ? `${listado} + ${enumerar(suma)}` : "";
 }
@@ -375,6 +436,15 @@ export function descripcionDeAccion(
             ? (varios ? "se les apaga" : "se le apaga")
             : (varios ? "se les vuelve a encender" : "se le vuelve a encender");
         return `A ${listado} ${verbo} ${accion.nombre}`;
+    }
+
+    if (esDeHorasExtra(accion)) {
+        const cuando = cuandoDeHorasExtra(objetivos);
+        if (accion.tipo === "eventual") {
+            return `Se suma un ${accion.nombre.replace(/^Eventual\b/, "eventual")} ${cuando}, de 7 a 12`;
+        }
+        const quien = enumerar(Array.from(new Set(objetivos.map((o) => o.nombre))));
+        return `${quien} hace horas extra ${cuando} en ${accion.nombre}, de 7 a 12`;
     }
 
     const quien = accion.tipo === "proceso"

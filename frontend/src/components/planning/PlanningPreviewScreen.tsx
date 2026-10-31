@@ -493,6 +493,33 @@ export function PlanningPreviewScreen({
      * recálculo, igual que los retoques y las tandas.
      */
     const [ajustesDelPlan, setAjustesDelPlan] = React.useState<AjusteDelPlan[]>(ajustesIniciales ?? []);
+    /**
+     * Las personas para el panel de carga, con las horas extra del plan que está en
+     * pantalla: sin esto, quien venía el sábado salía «pasado» (el sábado no estaba en sus
+     * días) y el eventual, que no está en Recursos, se medía de lunes a viernes.
+     */
+    const operariosParaCarga = React.useMemo(() => {
+        const sabados = new Map<number, Set<string>>();
+        const eventuales = new Map<number, string>();
+        for (const a of ajustesDelPlanMostrado(ajustesDelPlan)) {
+            if (a.accion.tipo !== "sabado" && a.accion.tipo !== "eventual") continue;
+            for (const o of a.accion.objetivos ?? []) {
+                if (!o.fecha) continue;
+                if (!sabados.has(o.id)) sabados.set(o.id, new Set());
+                sabados.get(o.id)!.add(o.fecha);
+                if (a.accion.tipo === "eventual") eventuales.set(o.id, o.nombre);
+            }
+        }
+        if (sabados.size === 0) return availableOperators;
+        const lista = availableOperators.map(op =>
+            sabados.has(op.id) ? { ...op, sabados_extra: [...sabados.get(op.id)!] } : op);
+        for (const [id, nombre] of eventuales) {
+            if (!lista.some(op => op.id === id)) {
+                lista.push({ id, nombre, apellido: "", solo_sabados_extra: true, sabados_extra: [...sabados.get(id)!] });
+            }
+        }
+        return lista;
+    }, [availableOperators, ajustesDelPlan]);
 
     /**
      * Lo guardado en Recursos desde el panel de avisos que el plan de la pantalla
@@ -6132,7 +6159,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                `lib/cargaDelPlan.ts`, que tiene su test. */
                             <PanelCargaRecursoHumano
                                 filas={filasParaCarga}
-                                operarios={availableOperators}
+                                operarios={operariosParaCarga}
                                 cargaPrevia={operatorLoads}
                                 feriados={feriados}
                                 span={spanPlan}

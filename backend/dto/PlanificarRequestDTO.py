@@ -18,6 +18,21 @@ class EntregaParcialDTO(BaseModel):
     fecha: Optional[date] = None
 
 
+class AjusteSabadoDTO(BaseModel):
+    """Que alguien trabaje un sábado (07 a 12) SOLO en este cálculo: horas extra.
+
+    Lucas, 28/10/2026, con la FRESADORA CNC cargada para 10 jornadas: «decís, bueno,
+    forzame horas extras». El sábado ya ocupa su lugar en la línea de tiempo del plan
+    (300 minutos, lo trabaje alguien o no), así que sumarlo no corre ninguna fecha.
+    """
+    operario_id: int
+    fecha: date
+    # En qué máquinas son esas horas extra. Vacío = en lo que sea. Con máquinas, ese
+    # sábado la persona sólo hace pasos de esas máquinas: si no, el plan la usaba para
+    # otra cosa (Vega el sábado soldando, cuando las horas eran para la FRESADORA CNC).
+    maquinarias: List[int] = []
+
+
 class AjustesDelPlanDTO(BaseModel):
     """Cambios que valen SOLO para este cálculo y no se guardan en Recursos.
 
@@ -39,6 +54,11 @@ class AjustesDelPlanDTO(BaseModel):
     # con los ajustes porque es lo mismo: vale para este cálculo, no se escribe en la OT
     # y tiene que viajar en TODOS los recálculos de la vista previa.
     entregas_parciales: Dict[int, EntregaParcialDTO] = {}
+    # Horas extra: quién trabaja qué sábado en este plan (ver AjusteSabadoDTO).
+    sabados: List[AjusteSabadoDTO] = []
+    # Un eventual (el «grupo Z» de Lucas): un puesto VACANTE que en este plan cuenta
+    # como una persona más. Trabaja sólo los sábados que le toquen en `sabados`.
+    eventuales: List[int] = []
 
 
 class PlanificarRequestDTO(BaseModel):

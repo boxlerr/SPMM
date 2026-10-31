@@ -63,7 +63,7 @@ import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { API_URL } from "@/config";
 import {
-    claveDeAjuste, descripcionDeAccion, estadoDeAjuste, etiquetaCortaDeAccion, objetivosConNombre, objetivosDeAjuste,
+    claveDeAjuste, descripcionDeAccion, estadoDeAjuste, etiquetaCortaDeAccion, objetivosConNombre, objetivosDeAjuste, seGuardaEnRecursos,
     type AccionDeSolucion, type AjusteDelPlan, type EstadoDeAjuste, type GuardadoSinRecalcular, type ObjetivoDeAccion,
 } from "@/lib/ajustesPlan";
 import { enlaceARecursos, enlaceDeLoHecho, pestaniaDe } from "@/lib/avisoEnRecursos";
@@ -265,6 +265,8 @@ const TIPO_DE_AJUSTE: Record<AccionDeSolucion["tipo"], string> = {
     maquinaria: "Máquinas",
     proceso: "Procesos",
     skill_nativa: "Recurso humano",
+    sabado: "Horas extra",
+    eventual: "Eventual",
 };
 
 /**
@@ -1324,7 +1326,9 @@ export function DiagnosticosPlan({
      */
     const { puedeSeccion } = usePermisos();
     const puedeGuardarEnRecursos = (accion: AccionDeSolucion) =>
-        accion.tipo === "skill_nativa"
+        !seGuardaEnRecursos(accion)
+            ? false
+            : accion.tipo === "skill_nativa"
             ? puedeSeccion("recursos_humano", "write")
             : puedeSeccion("recursos_rangos", "write");
     /**
@@ -1608,6 +1612,7 @@ export function DiagnosticosPlan({
     const motivoParaNoGuardar = (a: AjusteDelPlan): string | null => {
         if (yaGuardado(a)) return "ya está guardado en Recursos";
         if (estadoDeAjuste(a) === "por-quitar") return "lo estás sacando del plan";
+        if (!seGuardaEnRecursos(a.accion)) return "las horas extra son sólo de este plan: en Recursos no hay dónde cargarlas";
         const sinSuma = motivoSinLoQueSuma(a.accion);
         if (sinSuma) return sinSuma;
         if (!puedeGuardarEnRecursos(a.accion)) return "no tenés permiso para cambiarlo en Recursos";
