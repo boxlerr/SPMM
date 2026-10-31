@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
 import type { WorkOrder } from "@/lib/types";
 import { toast } from "@/lib/toast";
+import { aplicarPausa, pasosEnCola, ponerEnCola, reanudar, usePausasActivas } from "@/lib/pausas";
 import { API_URL } from "@/config";
 import { HORA_APERTURA, fechaDeLaApi, fechaDesdeMinutos, inicioDelPlan, minutosDesdeFecha } from "@/lib/plan-fechas";
 import { choquesDelPlan, ocupadoEn, type TramoDelPlan } from "@/lib/choquesDelPlan";
@@ -38,7 +39,7 @@ import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/Diagno
 import { PanelCargaRecursoHumano } from "@/components/planning/PanelCargaRecursoHumano";
 import { unificarPreparaciones } from "@/lib/unificarAvisos";
 import { huellaRecursos } from "@/lib/huellaRecursos";
-import { antiguedadTexto, type TandaManual } from "@/lib/borradorPlan";
+import { antiguedadTexto, lineasDeTandas, type TandaManual } from "@/lib/borradorPlan";
 import {
     aplicarRetoque, cambiarRetoque, hayCambios, horarioEscrito, horariosQueNoVan, retoquesAlDia,
     type CambiosDelRetoque, type Nombres, type Retoque,
@@ -318,16 +319,6 @@ const otsDeTandas = (tandas: TandaManual[]) => {
     return s;
 };
 
-/** Las pasadas sueltas de estas tandas, juntas y por OT. */
-const lineasDeTandas = (tandas: TandaManual[]) => {
-    const acc: Record<number, number[]> = {};
-    for (const t of tandas) {
-        for (const [oid, ids] of Object.entries(t.lineas)) {
-            acc[Number(oid)] = [...(acc[Number(oid)] || []), ...ids];
-        }
-    }
-    return acc;
-};
 
 /** Las mismas tandas sin rastro de estas OTs. Se usa al quitar una OT del plan. */
 const tandasSinOTs = (tandas: TandaManual[], quitar: Set<number>): TandaManual[] =>
@@ -493,6 +484,36 @@ export function PlanningPreviewScreen({
      * recálculo, igual que los retoques y las tandas.
      */
     const [ajustesDelPlan, setAjustesDelPlan] = React.useState<AjusteDelPlan[]>(ajustesIniciales ?? []);
+    /**
+     * La cola (Lucas, 28/10/2026): qué pasos están en cola ahora y el botón que los pone o
+     * los saca. Se guarda al toque, como una pausa del paso con motivo EN_COLA: no es un
+     * ajuste de este plan, es una decisión del taller que sigue después (la cola de
+     * Operaciones). El plan que se está mirando lo refleja al recalcular.
+     */
+    const fotoPausas = usePausasActivas();
+    /** Los pasos en cola que este plan saca de la cola («Planificar juntos»). */
+    const saleDeLaCola = React.useMemo(() => new Set(
+        ajustesDelPlan.filter(a => a.accion.tipo === "juntos")
+            .flatMap(a => (a.accion.objetivos ?? []).map(o => o.id))), [ajustesDelPlan]);
+    const lineasEnCola = React.useMemo(
+        () => new Set(pasosEnCola(fotoPausas).map(p => p.id_otp as number)), [fotoPausas]);
+    const [colaTrabajando, setColaTrabajando] = React.useState<number | null>(null);
+    const alternarCola = async (ordenId: number, lineaId: number, nombre: string, numeroOt: number | string) => {
+        setColaTrabajando(lineaId);
+        try {
+            if (lineasEnCola.has(lineaId)) {
+                aplicarPausa(await reanudar(ordenId, lineaId));
+                toast.success(`${nombre} de la OT ${numeroOt} salió de la cola. Recalculá para que vuelva al plan.`);
+            } else {
+                await ponerEnCola(ordenId, lineaId);
+                toast.success(`${nombre} de la OT ${numeroOt} quedó en cola. Al recalcular sale del plan, con lo que le sigue.`);
+            }
+        } catch (e) {
+            toast.error(`No se pudo: ${e instanceof Error ? e.message : String(e)}`);
+        } finally {
+            setColaTrabajando(null);
+        }
+    };
     /**
      * Las personas para el panel de carga, con las horas extra del plan que está en
      * pantalla: sin esto, quien venía el sábado salía «pasado» (el sábado no estaba en sus
@@ -4660,6 +4681,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     filas={results}
                                     onRecalcular={onRecalculate ? () => handleRecalculate() : undefined}
                                     recalculando={isCalculating}
+                                    saleDeLaCola={saleDeLaCola}
                                 />
                                 {/* Aviso compacto: hay OTs forzadas con procesos que el solver no pudo asignar.
                                     Explicamos el motivo real (datos faltantes) en vez de mostrarlo como "parcial". */}
@@ -5823,7 +5845,12 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                 nombre={nombreProceso}
                                                                                                 bloqueado={noSeEdita}
                                                                                                 motivoBloqueo={motivoNoSeEdita}
-                                                                                                trabajando={editandoEstaOT}
+                                                                                                trabajando={editandoEstaOT || colaTrabajando === lineaId}
+                                                                                                enCola={lineaId != null && lineasEnCola.has(lineaId)}
+                                                                                                onCola={lineaId != null && fotoPausas.estado === "si"
+                                                                                                    ? () => void alternarCola(ordenId, lineaId, nombreProceso,
+                                                                                                        effectiveItem.id_otvieja ?? ordenId)
+                                                                                                    : undefined}
                                                                                                 onBorrar={() => void procesosEnPlan.borrarLinea(
                                                                                                     ordenId, idProcesoActual, lineaId!, nombreProceso,
                                                                                                     effectiveItem.duracion_min ?? 0)}

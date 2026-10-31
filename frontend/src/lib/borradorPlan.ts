@@ -45,6 +45,17 @@ export type TandaManual = {
     lineas: Record<number, number[]>;
 };
 
+/** Las pasadas sueltas de estas tandas, juntas y por OT. */
+export const lineasDeTandas = (tandas: TandaManual[]) => {
+    const acc: Record<number, number[]> = {};
+    for (const t of tandas) {
+        for (const [oid, ids] of Object.entries(t.lineas)) {
+            acc[Number(oid)] = [...(acc[Number(oid)] || []), ...ids];
+        }
+    }
+    return acc;
+};
+
 /** El estado completo de la vista previa: lo que hace falta para reabrirla igual. */
 export type BorradorPlan = {
     /** id en la base. Ausente mientras solo existe en el navegador. */

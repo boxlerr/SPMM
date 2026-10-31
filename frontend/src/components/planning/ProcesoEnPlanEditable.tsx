@@ -14,7 +14,7 @@
  */
 
 import React from "react";
-import { Check, ChevronDown, ChevronUp, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Layers, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -207,13 +207,17 @@ export function MinutosDelProceso({ minutos, minutosLote, unidades, unidadesFalt
  * lista de Operaciones).
  */
 export function AccionesDeProcesoEnPlan({
-    nombre, bloqueado, motivoBloqueo, trabajando, onBorrar,
+    nombre, bloqueado, motivoBloqueo, trabajando, onBorrar, enCola, onCola,
 }: {
     nombre: string;
     bloqueado?: boolean;
     motivoBloqueo?: string;
     trabajando?: boolean;
     onBorrar: () => void;
+    /** Si el paso está en cola (ver lib/pausas: EN_COLA). */
+    enCola?: boolean;
+    /** Dejarlo en cola o sacarlo. Sin esto no hay botón (pasos agregados recién). */
+    onCola?: () => void;
 }) {
     const [confirmando, setConfirmando] = React.useState(false);
     const apagado = bloqueado || trabajando;
@@ -236,6 +240,25 @@ export function AccionesDeProcesoEnPlan({
                 className="flex items-center justify-end gap-0.5 text-gray-300 transition-colors group-hover/row:text-gray-500"
                 onClick={(e) => e.stopPropagation()}
             >
+                {/* La cola (Lucas, 28/10/2026): el amolado o la pintura que se deja para
+                    hacerlo junto con los de otras OT. Sin confirmar: se deshace con el
+                    mismo botón, y se ve en «Cola» de Operaciones. */}
+                {onCola && (
+                    <button
+                        type="button"
+                        className={cn(boton, enCola
+                            ? "bg-sky-100 text-sky-700 hover:bg-sky-200"
+                            : "hover:bg-sky-50 hover:text-sky-700")}
+                        disabled={apagado}
+                        onClick={onCola}
+                        aria-pressed={!!enCola}
+                        title={enCola
+                            ? `«${nombre}» está en cola. Tocá para sacarlo de la cola.`
+                            : `Dejar «${nombre}» en cola para hacerlo junto con los de otras OT. Este paso y lo que le sigue salen del plan al recalcular; lo de antes queda.`}
+                    >
+                        <Layers className="h-3.5 w-3.5" />
+                    </button>
+                )}
                 <button
                     type="button"
                     className={cn(boton, "hover:bg-red-50 hover:text-red-600")}

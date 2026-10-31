@@ -59,6 +59,10 @@ class AjustesDelPlanDTO(BaseModel):
     # Un eventual (el «grupo Z» de Lucas): un puesto VACANTE que en este plan cuenta
     # como una persona más. Trabaja sólo los sábados que le toquen en `sabados`.
     eventuales: List[int] = []
+    # La cola (Lucas, 28/10/2026): grupos de pasadas (orden_trabajo_proceso.id) que estaban
+    # EN_COLA y entran juntas en este plan, cada grupo con la misma persona y uno atrás
+    # del otro. Su pausa EN_COLA no las frena en este cálculo; se cierra al confirmar.
+    juntos: List[List[int]] = []
 
 
 class PlanificarRequestDTO(BaseModel):

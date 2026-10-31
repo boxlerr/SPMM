@@ -89,6 +89,7 @@ import { FranjaDeRecursos, SelectoresDeRecursos } from "@/components/planning/Fi
 import { SelectAlAbrir } from "@/components/planning/SelectAlAbrir";
 import { GlosarioDeColores } from "@/components/planning/GlosarioDeColores";
 import { FueraDelPlan, QuienLoMarco } from "@/components/planning/EstadoDelPaso";
+import { pasosEnCola, usePausasActivas } from "@/lib/pausas";
 import { choquesDelPlan, claveDelPlan, ocupadoEn, type TramoDelPlan } from "@/lib/choquesDelPlan";
 import { AvisoOcupado, FinDelPaso, OcupadoEnLaLista } from "@/components/planning/OcupadoEnElPlan";
 
@@ -585,6 +586,12 @@ function _PlanningListTable({
      * primera. Se cae al par viejo sólo para los planes guardados antes de que la
      * pasada existiera, donde la columna viene en NULL.
      */
+    // Los pasos en cola ahora (ver lib/pausas: EN_COLA), para decir «En cola» en vez de
+    // «Fuera del plan» (Lucas, 28/10/2026).
+    const fotoPausas = usePausasActivas();
+    const lineasEnCola = React.useMemo(
+        () => new Set(pasosEnCola(fotoPausas).map(p => p.id_otp as number)), [fotoPausas]);
+
     const filaDelPlan = (ordenId: number, proc: { id?: number; proceso: { id: number } }) => {
         if (!planificacion || planificacion.length === 0) return null;
         if (proc.id) {
@@ -1303,6 +1310,11 @@ function _PlanningListTable({
                             // terminado antes de planificar, o cargado/reabierto después.
                             // Antes salía «Sin asignar» y no se entendía por qué (15869).
                             const otEnElPlan = item.procesos.some(p => filaDelPlan(item.id, p) != null);
+                            // La cola: el primer paso de esta OT que está en cola. Ése dice «En
+                            // cola» y los que van después «Espera la cola».
+                            const ordenEnCola = Math.min(...item.procesos
+                                .filter(p => p.id != null && lineasEnCola.has(p.id))
+                                .map(p => p.orden ?? Infinity));
                             return item.procesos.map((proc, idx) => {
                                 const plannedItem = filaDelPlan(item.id, proc);
                                 const fueraDelPlan = otEnElPlan && !plannedItem;
@@ -1389,7 +1401,12 @@ function _PlanningListTable({
                                             <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Recurso humano</span>
                                             <div>
                                                 {fueraDelPlan ? (
-                                                    <FueraDelPlan terminado={proc.estado_proceso?.id === 3} />
+                                                    <FueraDelPlan
+                                                        terminado={proc.estado_proceso?.id === 3}
+                                                        cola={proc.estado_proceso?.id === 3 ? null
+                                                            : proc.id != null && lineasEnCola.has(proc.id) ? "en-cola"
+                                                                : (proc.orden ?? 0) > ordenEnCola ? "despues" : null}
+                                                    />
                                                 ) : onOperatorChange && operarios.length > 0 ? (() => {
                                                     const idOperario = pendingRes[resKey(plannedItem?.id)]?.operario ?? operarios.find(op => {
                                                         const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();

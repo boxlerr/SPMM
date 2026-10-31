@@ -24,10 +24,15 @@ interface FilaDelPlan {
   id_orden_trabajo_proceso?: number | null;
 }
 
-export function AvisoPausadasEnElPlan({ filas, onRecalcular, recalculando }: {
+export function AvisoPausadasEnElPlan({ filas, onRecalcular, recalculando, saleDeLaCola }: {
   filas: FilaDelPlan[];
   onRecalcular?: () => void;
   recalculando?: boolean;
+  /**
+   * Pasos en cola que este plan saca de la cola («Planificar juntos»): están adentro a
+   * propósito, se guardan al confirmar y ahí salen de la cola. No son «se pausó después».
+   */
+  saleDeLaCola?: ReadonlySet<number>;
 }) {
   const { estado, porOt } = usePausasActivas();
 
@@ -39,11 +44,12 @@ export function AvisoPausadasEnElPlan({ filas, onRecalcular, recalculando }: {
     porOt.forEach((pausas, idOt) => {
       if (!ots.has(idOt)) return;
       for (const p of pausas) {
+        if (p.id_otp != null && p.motivo === "EN_COLA" && saleDeLaCola?.has(p.id_otp)) continue;
         if (p.alcance === "ot" || (p.id_otp != null && pasos.has(p.id_otp))) salida.push(p);
       }
     });
     return salida;
-  }, [estado, porOt, filas]);
+  }, [estado, porOt, filas, saleDeLaCola]);
 
   if (!afectadas.length) return null;
 

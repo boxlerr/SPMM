@@ -85,7 +85,7 @@ export type AccionDeSolucion = {
      * un puesto VACANTE como eventual, trabaja el sábado de 7 a 12. Son SOLO de este
      * plan: no tienen «Guardar en Recursos» (ver `seGuardaEnRecursos`).
      */
-    tipo: "proceso" | "maquinaria" | "skill_nativa" | "sabado" | "eventual";
+    tipo: "proceso" | "maquinaria" | "skill_nativa" | "sabado" | "eventual" | "juntos";
     id: number;
     nombre: string;
     rangos?: number[];
@@ -95,12 +95,16 @@ export type AccionDeSolucion = {
     objetivos?: ObjetivoDeAccion[];
 };
 
-/** Si la acción es de las que también se pueden dejar cargadas en Recursos. */
+/**
+ * Si la acción es de las que también se pueden dejar cargadas en Recursos. Las horas
+ * extra y la cola (`juntos`) no: valen para un plan y no hay dónde cargarlas.
+ */
 export const seGuardaEnRecursos = (accion: AccionDeSolucion): boolean =>
-    accion.tipo !== "sabado" && accion.tipo !== "eventual";
+    accion.tipo !== "sabado" && accion.tipo !== "eventual" && accion.tipo !== "juntos";
 
 /** Las de horas extra: un sábado por objetivo. */
-const esDeHorasExtra = (accion: AccionDeSolucion): boolean => !seGuardaEnRecursos(accion);
+const esDeHorasExtra = (accion: AccionDeSolucion): boolean =>
+    accion.tipo === "sabado" || accion.tipo === "eventual";
 
 /** «el sábado 7/11» o «los sábados 7/11 y 14/11». */
 function cuandoDeHorasExtra(objetivos: ObjetivoDeAccion[]): string {
@@ -197,6 +201,11 @@ export type AjustesDelPlanPayload = {
     sabados?: { operario_id: number; fecha: string; maquinarias: number[] }[];
     /** Puestos VACANTE que en este plan cuentan como un eventual. */
     eventuales?: number[];
+    /**
+     * La cola: grupos de pasadas (orden_trabajo_proceso.id) que estaban en cola y entran
+     * juntas en este plan, con la misma persona y una atrás de la otra.
+     */
+    juntos?: number[][];
 };
 
 /**
@@ -226,7 +235,9 @@ export function objetivosDeAjuste(accion: AccionDeSolucion): string[] {
             ? `skill_nativa:${o.id}:${accion.id}`
             : esDeHorasExtra(accion)
                 ? `${accion.tipo}:${o.id}:${o.fecha ?? ""}`
-                : `${accion.tipo}:${o.id}`,
+                : accion.tipo === "juntos"
+                    ? `juntos:${o.id}`
+                    : `${accion.tipo}:${o.id}`,
     );
 }
 
@@ -273,6 +284,7 @@ export function claveDeAjuste(accion: AccionDeSolucion): string {
             : `${accion.tipo}:${o.id}`;
         if (accion.tipo === "skill_nativa") return que;
         if (esDeHorasExtra(accion)) return `${accion.tipo}:${o.id}:${o.fecha ?? ""}`;
+        if (accion.tipo === "juntos") return `juntos:${o.id}`;
         const rangos = [...(o.rangos ?? accion.rangos ?? [])].sort((a, b) => a - b);
         return `${que}=${rangos.join(",")}`;
     });
@@ -312,10 +324,16 @@ export function payloadDeAjustes(ajustes: AjusteDelPlan[]): AjustesDelPlanPayloa
     // Por (persona, sábado): el mismo sábado pedido desde dos avisos va una vez.
     const sabados = new Map<string, { operario_id: number; fecha: string; maquinarias: number[] }>();
     const eventuales = new Set<number>();
+    const juntos: number[][] = [];
 
     for (const ajuste of ajustes ?? []) {
         const accion = ajuste?.accion;
         if (!accion) continue;
+        if (accion.tipo === "juntos") {
+            const grupo = objetivosDe(accion).map((o) => o.id).sort((a, b) => a - b);
+            if (grupo.length > 0) juntos.push(grupo);
+            continue;
+        }
         for (const objetivo of objetivosDe(accion)) {
             if (esDeHorasExtra(accion)) {
                 if (!objetivo.fecha) continue;
@@ -354,7 +372,8 @@ export function payloadDeAjustes(ajustes: AjusteDelPlan[]): AjustesDelPlanPayloa
         Object.keys(procesos).length === 0 &&
         Object.keys(maquinarias).length === 0 &&
         skillsNativas.length === 0 &&
-        sabados.size === 0
+        sabados.size === 0 &&
+        juntos.length === 0
     ) {
         return undefined;
     }
@@ -365,6 +384,7 @@ export function payloadDeAjustes(ajustes: AjusteDelPlan[]): AjustesDelPlanPayloa
             a.fecha.localeCompare(b.fecha) || a.operario_id - b.operario_id);
         if (eventuales.size > 0) cuerpo.eventuales = Array.from(eventuales).sort((a, b) => a - b);
     }
+    if (juntos.length > 0) cuerpo.juntos = juntos;
     return cuerpo;
 }
 
@@ -418,6 +438,9 @@ export function etiquetaCortaDeAccion(accion: AccionDeSolucion): string {
     if (esDeHorasExtra(accion)) {
         return `${enumerar(Array.from(new Set(objetivos.map((o) => o.nombre))))}: ${cuandoDeHorasExtra(objetivos)}`;
     }
+    if (accion.tipo === "juntos") {
+        return `${accion.nombre} juntos: ${objetivos.length} OT`;
+    }
     const suma = Array.from(new Set(objetivos.flatMap((o) => o.suma ?? [])));
     return suma.length > 0 ? `${listado} + ${enumerar(suma)}` : "";
 }
@@ -436,6 +459,12 @@ export function descripcionDeAccion(
             ? (varios ? "se les apaga" : "se le apaga")
             : (varios ? "se les vuelve a encender" : "se le vuelve a encender");
         return `A ${listado} ${verbo} ${accion.nombre}`;
+    }
+
+    if (accion.tipo === "juntos") {
+        // Los objetivos se llaman «OT 15866»: en la frase va «de las OT 15866 y 15867».
+        const numeros = objetivos.map((o) => o.nombre.replace(/^OT\s*/, ""));
+        return `${accion.nombre} de ${numeros.length === 1 ? "la OT" : "las OT"} ${enumerar(numeros)}: la misma persona, uno atrás del otro`;
     }
 
     if (esDeHorasExtra(accion)) {

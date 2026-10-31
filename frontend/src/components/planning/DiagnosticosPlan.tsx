@@ -203,6 +203,7 @@ const SUBTIPO_POR_TIPO: Record<string, string> = {
     cuello_de_maquina: "capacidad",
     trabajo_tercerizado: "capacidad",
     ot_pausada: "pausa",
+    en_cola: "pausa",
 };
 
 const recursoDe = (d: Diagnostico) => RECURSO[d.recurso ?? RECURSO_POR_TIPO[d.tipo] ?? "maquina"];
@@ -258,6 +259,15 @@ const INSIGNIA = {
         chip: "bg-amber-50 text-amber-800 ring-amber-200",
         title: "Alguien la pausó a mano: no entra en el plan hasta que la reanuden.",
     },
+    // Lo que se dejó en cola para hacerlo junto (Lucas, 28/10/2026): no es una pausa
+    // ni un problema, es una decisión. Azul, como lo que «espera su turno».
+    cola: {
+        texto: "En cola",
+        icono: Layers,
+        circulo: "bg-sky-50 text-sky-600 ring-sky-200",
+        chip: "bg-sky-50 text-sky-800 ring-sky-200",
+        title: "Se dejó en cola para hacerlo junto con los de otras OT: entra cuando lo saques de la cola con «Planificar juntos».",
+    },
 } as const;
 
 /** Cómo se nombra cada tipo de ajuste en su chip, en el idioma de Recursos. */
@@ -267,6 +277,7 @@ const TIPO_DE_AJUSTE: Record<AccionDeSolucion["tipo"], string> = {
     skill_nativa: "Recurso humano",
     sabado: "Horas extra",
     eventual: "Eventual",
+    juntos: "Cola",
 };
 
 /**
@@ -1612,7 +1623,7 @@ export function DiagnosticosPlan({
     const motivoParaNoGuardar = (a: AjusteDelPlan): string | null => {
         if (yaGuardado(a)) return "ya está guardado en Recursos";
         if (estadoDeAjuste(a) === "por-quitar") return "lo estás sacando del plan";
-        if (!seGuardaEnRecursos(a.accion)) return "las horas extra son sólo de este plan: en Recursos no hay dónde cargarlas";
+        if (!seGuardaEnRecursos(a.accion)) return "es sólo de este plan: en Recursos no hay dónde cargarlo";
         const sinSuma = motivoSinLoQueSuma(a.accion);
         if (sinSuma) return sinSuma;
         if (!puedeGuardarEnRecursos(a.accion)) return "no tenés permiso para cambiarlo en Recursos";
@@ -2314,6 +2325,16 @@ export function DiagnosticosPlan({
                                             {ajustes.length === 1 ? "El ajuste temporal sale" : "Los ajustes temporales salen"} en
                                             el próximo recálculo y el plan pasa a usar el dato cargado.
                                         </>
+                                    ) : ajustes.every((a) => !seGuardaEnRecursos(a.accion)) ? (
+                                        // Horas extra y cola: no son datos de Recursos que
+                                        // falte cargar, valen para este plan y nada más.
+                                        <>
+                                            Vale sólo para este plan: en Recursos no cambia nada y se pierde si
+                                            descartás el borrador.
+                                            {hayPorAgregar && (
+                                                <> Lo que dice «Entra al recalcular» se ve en el plan recién cuando recalcules.</>
+                                            )}
+                                        </>
                                     ) : (
                                         <>
                                             {hayAMedias
@@ -2457,7 +2478,8 @@ export function DiagnosticosPlan({
                         const recurso = recursoDe(d);
                         const Icono = recurso?.icono ?? Info;
                         const subtipo = subtipoDe(d);
-                        const insignia = pausa ? INSIGNIA.pausa
+                        const insignia = d.tipo === "en_cola" ? INSIGNIA.cola
+                            : pausa ? INSIGNIA.pausa
                             : informativo ? (d.tipo === "trabajo_tercerizado" ? INSIGNIA.terceros : INSIGNIA.listo)
                                 : esBloq ? INSIGNIA.alta : INSIGNIA.media;
 

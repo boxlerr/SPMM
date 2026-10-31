@@ -347,9 +347,11 @@ def diagnosticos_de_pausas(saltadas):
     quedó afuera porque alguien la paró, y eso lo sabe el taller. Uno por OT y no uno
     agrupado: cada pausa tiene su motivo y su fecha, que es justo lo que se viene a leer.
     """
-    avisos = []
+    avisos = _avisos_de_la_cola([s for s in saltadas if s["pausa"].motivo == "EN_COLA"])
     for s in saltadas:
         p = s["pausa"]
+        if p.motivo == "EN_COLA":
+            continue
         cuando = fecha_corta(p.desde)
         quien = f"**{p.usuario_pausa}**" if p.usuario_pausa else "alguien"
         motivo = MOTIVO_EN_FRASE.get(p.motivo, "")
@@ -397,6 +399,55 @@ def diagnosticos_de_pausas(saltadas):
                 # pausa (frontend/src/components/pausas/PausasDeLaOT.tsx). Si se mueve,
                 # esto se cambia con él: el aviso no puede mandar a un botón que no está.
                 "donde": "Operaciones › abrí la OT › «Reanudar», arriba de todo",
+            }],
+        })
+    return avisos
+
+
+def _avisos_de_la_cola(saltadas):
+    """Lo que está en cola, un aviso por proceso: «Pintura: 3 pasos en cola».
+
+    Lucas, 28/10/2026: dejar el amolado o la pintura en cola y después hacer todo junto.
+    No es una traba —se dejó así a propósito— y no va uno por OT como las pausas: lo que
+    se viene a leer es cuánto se juntó de cada cosa, para decidir cuándo sacarlo.
+    """
+    por_proceso = {}
+    for s in saltadas:
+        nombre = _bonito(s["pausa"].nombre_proceso or "") or "Sin nombre"
+        g = por_proceso.setdefault(nombre, {"ots": [], "numeros": [], "minutos": 0, "procesos": 0, "despues": 0})
+        g["ots"].append(s["orden_id"])
+        g["numeros"].append(s["numero"])
+        g["minutos"] += s["minutos"]
+        g["procesos"] += s["procesos"]
+        g["despues"] += s.get("despues") or 0
+    avisos = []
+    for nombre, g in sorted(por_proceso.items()):
+        n = len(g["ots"])
+        titulo = f"{nombre}: {n} {_concuerda(n, 'paso', 'pasos')} en cola"
+        siguen = (f" Lo que va después en cada OT ({g['despues']} "
+                  f"{_concuerda(g['despues'], 'paso', 'pasos')}) espera con ellos."
+                  if g["despues"] else "")
+        avisos.append({
+            "id": f"en-cola-{_norm(nombre).replace(' ', '-').lower()}",
+            "tipo": "en_cola",
+            "severidad": ADVERTENCIA,
+            "recurso": ORDEN,
+            "subtipo": PAUSA,
+            "tiene": "Para hacer junto",
+            "pide": "",
+            "titulo": titulo,
+            "detalle": (f"Quedaron en cola para hacerlos todos juntos: OT {_listar([str(x) for x in g['numeros']])}."
+                        f"{siguen} Lo de antes de la cola se planifica igual."),
+            "resumen": "Se hacen todos juntos cuando los saques de la cola.",
+            "impacto": {
+                "procesos": g["procesos"],
+                "ots": g["ots"],
+                "minutos": g["minutos"],
+                "resumen": _resumen(g["procesos"], g["ots"], g["minutos"]),
+            },
+            "soluciones": [{
+                "texto": "Cuando quieras hacerlos, «Planificar juntos» los pone con la misma persona, uno atrás del otro.",
+                "donde": "Operaciones › «Cola», arriba de todo",
             }],
         })
     return avisos

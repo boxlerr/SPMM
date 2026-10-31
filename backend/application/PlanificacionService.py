@@ -748,6 +748,31 @@ def _partir_procesos_largos(procesos_norm, cant_op_map=None, preseleccion_maq=No
     return nuevos, nuevo_cant_op, nueva_presel, nueva_presel_op, partes
 
 
+def _agregar_juntos(model, juntos, operario_vars, op_domain_vals, presente_vars=None, dummy_op_id=None):
+    """La cola: los pasos de un grupo los hace la MISMA persona.
+
+    Lucas, 28/10/2026: dejar el amolado o la pintura de varias OT en cola y después
+    «pintar todo junto con un pasante». Al sacarlos de la cola con «Planificar juntos»
+    cada grupo (mismo proceso, distintas OT) va a una sola persona; que vayan uno atrás
+    del otro lo pide la función objetivo (ver `juntos` en _agregar_funcion_objetivo).
+
+    Sólo si hay alguien que pueda hacerlos TODOS: si no, atarlos los dejaría sin persona
+    —el único valor en común sería el operario de mentira— y es peor que repartirlos.
+    """
+    for grupo in juntos or ():
+        primeras = [paso[0] for paso in grupo if paso and paso[0] in operario_vars]
+        if len(primeras) < 2:
+            continue
+        comunes = set.intersection(*[set(op_domain_vals.get(k, ())) for k in primeras]) - {dummy_op_id}
+        if not comunes:
+            logger.info(f"PLANIFICADOR: la cola {primeras} no tiene a nadie que pueda hacer todo; va repartida.")
+            continue
+        for a, b in zip(primeras, primeras[1:]):
+            r = model.Add(operario_vars[a] == operario_vars[b])
+            if presente_vars is not None:
+                r.OnlyEnforceIf([presente_vars[a], presente_vars[b]])
+
+
 def _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars=None):
     """Las partes de un proceso partido van al mismo operario y a la misma máquina.
 
@@ -1795,6 +1820,7 @@ def _agregar_funcion_objetivo(
     ventanas=None,
     demoras_modelo=None,
     vueltas_virtuales=None,
+    juntos=None,
 ):
     """
     Construye la lista total_obj con todos los términos de la función objetivo
@@ -2102,6 +2128,25 @@ def _agregar_funcion_objetivo(
                     restr.OnlyEnforceIf(presente_vars[primera])
                 sumar(abierta, W_OT_DE_CORRIDO, "fechas")
         sumar(fin_plan, W_FIN_PLAN, "resto")
+
+    # --- La cola, uno atrás del otro (ver _agregar_juntos) ---
+    # Cada minuto que el grupo queda abierto, del arranque de su primer paso al fin del
+    # último, menos lo que trabaja. Mismo peso que la OT de corrido: es la misma idea
+    # («que no se corte»), aplicada a un grupo de pasos de distintas OT.
+    for n_grupo, grupo in enumerate(juntos or ()):
+        claves = [k for paso in grupo for k in paso if k in inicio_vars]
+        if len(claves) < 2:
+            continue
+        ini_g = model.NewIntVar(0, H, f"juntos_ini_{n_grupo}")
+        fin_g = model.NewIntVar(0, H, f"juntos_fin_{n_grupo}")
+        for k in claves:
+            r1 = model.Add(ini_g <= inicio_vars[k])
+            r2 = model.Add(fin_g >= fin_vars[k])
+            if presente_vars is not None:
+                r1.OnlyEnforceIf(presente_vars[k]); r2.OnlyEnforceIf(presente_vars[k])
+        abierto = model.NewIntVar(0, H, f"juntos_abierto_{n_grupo}")
+        model.Add(abierto >= fin_g - ini_g)
+        sumar(abierto, W_OT_DE_CORRIDO, "fechas")
 
     # --- El atraso de la OT más atrasada (ver ATRASO_MAX_EQUIV) ---
     # En minutos ponderados por la prioridad de cada OT: una urgente atrasada un día pesa
@@ -3117,7 +3162,7 @@ def _reasignar_por_especialidad(solver, procesos_norm, partes, inicio_vars, fin_
                                 operario_vars, maq_vars, presente_vars, op_extra_vars,
                                 op_domain_vals, pares, calendarios, ventanas, op_to_rangos,
                                 rangos_basicos, penal_overqual, DUMMY_OP_ID,
-                                max_seg: float = REPARTO_ESPECIALIDAD_SEG) -> dict:
+                                max_seg: float = REPARTO_ESPECIALIDAD_SEG, juntos=None) -> dict:
     """{clave del modelo: operario} con el reparto por especialidad (ver arriba).
 
     Vacío si no hay nada que mejorar o si algo no cierra: el plan del solver queda tal
@@ -3162,6 +3207,11 @@ def _reasignar_por_especialidad(solver, procesos_norm, partes, inicio_vars, fin_
                    for k in (a, s)):
                 continue
             unir(a, s)
+        # Los de la cola que entran juntos: la misma persona (ver _agregar_juntos).
+        for grupo in juntos or ():
+            claves = [k for paso in grupo for k in paso if k in padre]
+            for k in claves[1:]:
+                unir(claves[0], k)
 
         grupos: dict = {}
         for k in por_clave:
@@ -3305,7 +3355,7 @@ def _reasignar_por_especialidad(solver, procesos_norm, partes, inicio_vars, fin_
         return {}
 
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None, cant_ordenes: int | None = None, inicio_base: datetime | None = None, demoras=None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None, cant_ordenes: int | None = None, inicio_base: datetime | None = None, demoras=None, juntos=None):
     # Los días bloqueados los trae el servicio desde la base (ver DiaBloqueadoRepository).
     blocked_dates = list(blocked_dates or ())
     logger.info(f"PLANIFICADOR: Fechas bloqueadas cargadas: {blocked_dates}")
@@ -3375,6 +3425,11 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op, partes = _partir_y_heredar(
         procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op
     )
+    # Los grupos de la cola, en claves del modelo: cada paso con todas sus partes.
+    juntos_modelo = [
+        [list((partes.get(k) or {}).get("claves") or [k]) for k in grupo]
+        for grupo in (juntos or ()) if len(grupo) >= 2
+    ]
     # Qué trabajo prepara cada preparación: hereda también quién lo tiene cargado a mano.
     setup_de = _setup_hereda_de(procesos_norm, partes)
     demoras_modelo = _demoras_al_modelo(demoras, partes)
@@ -3552,6 +3607,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars, op_domain_vals,
                                         dummy_op_id=DUMMY_OP_ID, partes=partes,
                                         maq_domain_vals=maq_domain_vals)
+        _agregar_juntos(model, juntos_modelo, operario_vars, op_domain_vals, presente_vars,
+                        dummy_op_id=DUMMY_OP_ID)
         _agregar_misma_persona_preparacion_manual(model, procesos_norm, operario_vars, op_domain_vals,
                                                   dummy_op_id=DUMMY_OP_ID, partes=partes)
         _agregar_preparacion_pegada(model, procesos_norm, inicio_vars, fin_vars,
@@ -3613,6 +3670,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
             ventanas=ventanas,
             demoras_modelo=demoras_modelo,
             vueltas_virtuales=vueltas_virtuales,
+            juntos=juntos_modelo,
         )
 
 
@@ -3731,7 +3789,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
             op_override = _reasignar_por_especialidad(
                 solver, procesos_norm, partes, inicio_vars, fin_vars, operario_vars, maq_vars,
                 presente_vars, op_extra_vars, op_domain_vals, pares_ok, calendarios, ventanas,
-                op_to_rangos, RANGOS_BÁSICOS, PENAL_OVERQUAL, DUMMY_OP_ID)
+                op_to_rangos, RANGOS_BÁSICOS, PENAL_OVERQUAL, DUMMY_OP_ID, juntos=juntos_modelo)
             if op_override:
                 resultados = _extraer_resultados(
                     solver, status, procesos_norm, inicio_vars, fin_vars, operario_vars,
@@ -4015,7 +4073,7 @@ def _lineas_ordenadas(rels):
     return list(enumerate(ordenadas, start=1))
 
 
-def _indexar_pausas(pausas_abiertas):
+def _indexar_pausas(pausas_abiertas, sale_de_la_cola=None):
     """(pausa de la OT entera por orden_id, pausa del paso por id de pasada).
 
     `pausas_abiertas` es lo que devuelve PausaRepository.abiertas_sin_romper: una lista
@@ -4024,7 +4082,12 @@ def _indexar_pausas(pausas_abiertas):
     adentro que ningún plan.
     """
     por_ot, por_paso = {}, {}
+    sale_de_la_cola = set(sale_de_la_cola or ())
     for pausa, _nro in pausas_abiertas or ():
+        # Lo que sale de la cola en este plan («Planificar juntos», ver con_los_juntos):
+        # su pausa EN_COLA se cierra al confirmar, y hasta entonces no lo frena.
+        if pausa.motivo == "EN_COLA" and pausa.id_otp in sale_de_la_cola:
+            continue
         if pausa.id_otp is None:
             por_ot[pausa.id_orden_trabajo] = pausa
         else:
@@ -4085,7 +4148,7 @@ def _sacar_lo_pausado(orden, lineas, pausa_ot, pausas_paso):
     return entran, _saltado(pausas_paso[pausado.id], "paso", afuera, despues)
 
 
-async def _plan_armado_sin_lo_pausado(db, plan: list[dict]) -> tuple[list[dict], list[dict]]:
+async def _plan_armado_sin_lo_pausado(db, plan: list[dict], sale_de_la_cola=None) -> tuple[list[dict], list[dict]]:
     """RF-03 al CONFIRMAR: saca de un plan ya armado lo que se pausó después de calcularlo.
 
     El plan que se confirma sale de una vista previa o de un borrador, calculados antes.
@@ -4107,7 +4170,7 @@ async def _plan_armado_sin_lo_pausado(db, plan: list[dict]) -> tuple[list[dict],
     ids = sorted({r.get("orden_id") for r in plan if r.get("orden_id") is not None})
     repo = PausaRepository(db)
     abiertas = await repo.abiertas_sin_romper(ids)
-    pausas_ot, pausas_paso = _indexar_pausas(abiertas)
+    pausas_ot, pausas_paso = _indexar_pausas(abiertas, sale_de_la_cola)
     if not pausas_ot and not pausas_paso:
         return plan, []
     numeros = {p.id_orden_trabajo: nro for p, nro in abiertas or ()}
@@ -4381,8 +4444,12 @@ async def planificar(
     # cuentan como un eventual en este plan.
     ajustes_sabados = list(_ajustes.get("sabados") or [])
     ajustes_eventuales = sorted({int(e) for e in (_ajustes.get("eventuales") or [])})
+    # La cola (Lucas, 28/10/2026): pasos que estaban EN_COLA y entran juntos en este
+    # plan, cada grupo con la misma persona y uno atrás del otro (ver _agregar_juntos).
+    ajustes_juntos = [[int(i) for i in g] for g in (_ajustes.get("juntos") or []) if g]
+    sale_de_la_cola = {i for g in ajustes_juntos for i in g}
     if (ajustes_procesos or ajustes_maquinarias or ajustes_skills or entregas_parciales
-            or ajustes_sabados or ajustes_eventuales):
+            or ajustes_sabados or ajustes_eventuales or ajustes_juntos):
         # Este log va ARRIBA del early-return del guardado a propósito. Un plan con
         # ajustes sale distinto de lo que dicen los datos: si mañana alguien mira el
         # plan guardado y no le cierra con Recursos, esta línea es la única
@@ -4393,7 +4460,8 @@ async def planificar(
             f"en Recursos): {len(ajustes_procesos)} proceso(s), "
             f"{len(ajustes_maquinarias)} máquina(s), {len(ajustes_skills)} habilidad(es), "
             f"{len(entregas_parciales)} entrega(s) parcial(es), "
-            f"{len(ajustes_sabados)} sábado(s) de horas extra, {len(ajustes_eventuales)} eventual(es)"
+            f"{len(ajustes_sabados)} sábado(s) de horas extra, {len(ajustes_eventuales)} eventual(es), "
+            f"{len(ajustes_juntos)} grupo(s) de la cola"
         )
 
     # 🔹 Plan ya armado: se guarda TAL CUAL, sin pasar por el solver.
@@ -4437,7 +4505,7 @@ async def planificar(
         # RF-03: lo que se pausó DESPUÉS de calcular este plan no entra. Se avisa con el
         # mismo aviso que al calcular, en la respuesta (la pantalla lo muestra al
         # guardar).
-        plan, saltadas_por_pausa = await _plan_armado_sin_lo_pausado(db, plan)
+        plan, saltadas_por_pausa = await _plan_armado_sin_lo_pausado(db, plan, sale_de_la_cola)
         avisos = []
         if saltadas_por_pausa:
             for s_ in saltadas_por_pausa:
@@ -4534,7 +4602,7 @@ async def planificar(
     # 🔹 RF-03: lo pausado no se programa. Se lee en un savepoint: si la tabla de pausas
     #    no está (migración sin correr), el plan sale como antes, con todo adentro.
     pausas_ot, pausas_paso = _indexar_pausas(
-        await PausaRepository(db).abiertas_sin_romper([o.id for o in ordenes]))
+        await PausaRepository(db).abiertas_sin_romper([o.id for o in ordenes]), sale_de_la_cola)
     saltadas_por_pausa = []
 
     # OTs con plano REALMENTE adjunto: sus procesos exigen saber interpretar planos.
@@ -4800,6 +4868,7 @@ async def planificar(
         estimacion["ots_sin_procesos"] = sum(1 for o in ordenes if o.id not in con_pasos)
         return estimacion
 
+    clave_por_linea = {linea: clave for clave, linea in linea_por_clave.items() if linea is not None}
     resultados, rangos_efectivos = await asyncio.to_thread(
         _resolver_planificacion,
         procesos_para_solver,
@@ -4825,6 +4894,8 @@ async def planificar(
         # viaja a la pantalla y el que se guarda al confirmar.
         arranque,
         demoras,
+        # La cola que entra junta, en claves (orden, secuencia) del solver.
+        [[clave_por_linea[i] for i in g if i in clave_por_linea] for g in ajustes_juntos],
     )
 
     _marcar_lineas(resultados, linea_por_clave, lote_por_clave, a_mano=a_mano_por_clave)

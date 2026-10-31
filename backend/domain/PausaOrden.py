@@ -17,7 +17,15 @@ from backend.infrastructure.db import Base
 # contar, y lo primero que se va a preguntar es cuánto se para el taller por cada cosa.
 # Lo que no entra va como OTRO con su texto. La base lo cuida con un CHECK y no con un
 # ENUM de Postgres: agregar un motivo mañana es cambiar el CHECK, no migrar un tipo.
-MOTIVOS = ("FALTA_MATERIAL", "MAQUINA_ROTA", "ESPERA_CLIENTE", "CAMBIO_PRIORIDAD", "OTRO")
+MOTIVOS = ("FALTA_MATERIAL", "MAQUINA_ROTA", "ESPERA_CLIENTE", "CAMBIO_PRIORIDAD", "OTRO", "EN_COLA")
+
+# EN_COLA no es una parada: es un paso (amolado, pintura) que se deja para hacerlo junto
+# con los de otras OT (Lucas, 28/10/2026: «acá poner sin asignar y que me quede tipo en
+# cola… y pintamos todo junto con un pasante»). Se guarda como una pausa porque hace lo
+# mismo: el paso y los que le siguen no entran en el plan hasta que salga de la cola, y
+# los de antes sí. No se ofrece en el «Pausar» de la ficha: se pone desde la vista previa
+# y se saca desde la cola de Operaciones (ver ColaDeProcesos).
+EN_COLA = "EN_COLA"
 
 # Cómo terminó una pausa. NULL mientras sigue abierta.
 #   REANUDADA        alguien apretó «Reanudar».
@@ -47,6 +55,7 @@ MOTIVO_TEXTO = {
     "ESPERA_CLIENTE": "Espera del cliente",
     "CAMBIO_PRIORIDAD": "Cambió la prioridad",
     "OTRO": "Otro",
+    "EN_COLA": "En cola",
 }
 
 # Dentro de una frase: «OT 15279: pausada por falta de material desde el 22/09».
@@ -56,6 +65,7 @@ MOTIVO_EN_FRASE = {
     "ESPERA_CLIENTE": "esperando al cliente",
     "CAMBIO_PRIORIDAD": "porque cambió la prioridad",
     "OTRO": "por otro motivo",
+    "EN_COLA": "en cola, para hacerlo junto con otros",
 }
 
 CIERRE_TEXTO = {

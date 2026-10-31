@@ -55,6 +55,14 @@ def _firmas(sql: str) -> set[str]:
     # fallaba pidiendo un ADD COLUMN que esa migración no tiene por qué tener.
     for tabla in re.findall(r"create table if not exists (\w+)", t):
         firmas.add(f"tabla:{tabla}")
+    # Cambiar la lista de valores de un CHECK (el motivo EN_COLA de las pausas, 31/10): se
+    # saca y se vuelve a poner. La firma lleva los valores: si el .sql y el módulo no
+    # permiten lo mismo, la base de producción queda distinta del archivo.
+    for nombre in re.findall(r"drop constraint if exists (\w+)", t):
+        firmas.add(f"saca_restriccion:{nombre}")
+    for nombre, cuerpo in re.findall(r"add constraint (\w+) check \((.*?)\)\s*\)", t):
+        valores = ",".join(sorted(re.findall(r"'([^']*)'", cuerpo)))
+        firmas.add(f"restriccion:{nombre}:{valores}")
     # Una migración que sólo agrega filas a un catálogo (la sección confidencial de
     # Ingresos, 23/09): cada fila por su primer valor, el código.
     for tabla, valores in re.findall(r"insert into (\w+) \([^)]*\) values (.*?) on conflict", t):

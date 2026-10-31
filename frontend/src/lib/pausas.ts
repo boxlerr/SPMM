@@ -17,9 +17,13 @@ import { useEffect, useSyncExternalStore } from "react";
 import { API_URL } from "@/config";
 import { parseApiError } from "@/lib/utils";
 
-export type MotivoPausa = "FALTA_MATERIAL" | "MAQUINA_ROTA" | "ESPERA_CLIENTE" | "CAMBIO_PRIORIDAD" | "OTRO";
+export type MotivoPausa = "FALTA_MATERIAL" | "MAQUINA_ROTA" | "ESPERA_CLIENTE" | "CAMBIO_PRIORIDAD" | "OTRO" | "EN_COLA";
 
-/** Los mismos de domain/PausaOrden.py (el backend los valida igual). */
+/**
+ * Los mismos de domain/PausaOrden.py (el backend los valida igual), menos EN_COLA: un paso
+ * en cola no es una parada y no se ofrece en «Pausar». Se pone desde la vista previa
+ * («Dejar en cola») y se saca desde la cola de Operaciones (ver `ColaDeProcesos`).
+ */
 export const MOTIVOS_PAUSA: { codigo: MotivoPausa; texto: string }[] = [
   { codigo: "FALTA_MATERIAL", texto: "Falta material" },
   { codigo: "MAQUINA_ROTA", texto: "Máquina rota" },
@@ -204,4 +208,29 @@ export async function reanudar(idOrden: number, idOtp: number | null): Promise<P
 export function listaDePasos(pasos: number[]): string {
   if (pasos.length === 1) return `el paso ${pasos[0]}`;
   return `los pasos ${pasos.slice(0, -1).join(", ")} y ${pasos[pasos.length - 1]}`;
+}
+
+// ── La cola (Lucas, 28/10/2026) ──────────────────────────────────────────────
+//
+// Un paso «en cola» es una pausa del paso con motivo EN_COLA: el amolado o la pintura que
+// se deja para hacerlo junto con los de otras OT. El paso y los que le siguen no entran en
+// el plan hasta que salga de la cola; los de antes, sí.
+
+export const EN_COLA: MotivoPausa = "EN_COLA";
+
+export const esDeLaCola = (p: Pick<Pausa, "motivo" | "alcance">): boolean =>
+  p.motivo === EN_COLA && p.alcance === "paso";
+
+/** Deja un paso en cola. Avisa al store: la cola de Operaciones lo muestra ya. */
+export async function ponerEnCola(idOrden: number, idOtp: number): Promise<Pausa> {
+  const p = await pausar(idOrden, { motivo: EN_COLA, observacion: null, id_otp: idOtp });
+  aplicarPausa(p);
+  return p;
+}
+
+/** Todo lo que está en cola ahora, sacado del store de pausas. */
+export function pasosEnCola(f: Foto): Pausa[] {
+  const lista: Pausa[] = [];
+  for (const pausas of f.porOt.values()) for (const p of pausas) if (esDeLaCola(p)) lista.push(p);
+  return lista;
 }

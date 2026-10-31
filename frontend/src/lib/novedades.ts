@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "procesos-en-cola",
+        fecha: "2026-10-31",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Dejar el amolado o la pintura en cola y hacerlos todos juntos",
+        detalle:
+            "En la vista previa, cada paso tiene un botón para dejarlo en cola: la OT se planifica hasta ahí, y ese paso y lo que le sigue esperan. Arriba de Operaciones aparece «Cola» con lo que se juntó, por proceso. «Planificar juntos» arma un plan con esos pasos, con la misma persona y uno atrás del otro, y al confirmarlo salen de la cola. Cada uno también se puede «Sacar» de la cola suelto.",
+        href: "/operaciones",
+    },
+    {
         id: "horas-extra-sabado",
         fecha: "2026-10-31",
         tipo: "nuevo",

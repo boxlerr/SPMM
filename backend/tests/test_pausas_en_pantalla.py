@@ -181,8 +181,12 @@ def _path() -> str:
 
 
 def test_los_motivos_de_la_pantalla_son_los_del_backend(store):
-    assert [m["codigo"] for m in store["motivos"]] == list(MOTIVOS)
-    assert {m["codigo"]: m["texto"] for m in store["motivos"]} == MOTIVO_TEXTO
+    # Menos EN_COLA, a propósito (31/10/2026): un paso en cola no es una parada y no se
+    # ofrece en «Pausar»; se pone desde la vista previa y se saca desde «Cola».
+    ofrecidos = [m for m in MOTIVOS if m != "EN_COLA"]
+    assert [m["codigo"] for m in store["motivos"]] == ofrecidos
+    assert {m["codigo"]: m["texto"] for m in store["motivos"]} == {
+        k: v for k, v in MOTIVO_TEXTO.items() if k in ofrecidos}
 
 
 def test_con_un_backend_de_antes_las_pausas_se_ocultan(store):

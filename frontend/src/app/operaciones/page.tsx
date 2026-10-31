@@ -32,11 +32,13 @@ import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/ty
 import { ProgresoPlanificacion } from "@/components/planning/ProgresoPlanificacion"
 import { BorradoresPlan } from "@/components/planning/BorradoresPlan"
 import { useBorradorPlan } from "@/hooks/useBorradorPlan"
-import type { BorradorPlan, TandaManual } from "@/lib/borradorPlan"
+import { lineasDeTandas, type BorradorPlan, type TandaManual } from "@/lib/borradorPlan"
 import {
-  payloadDeAjustes, ajustesDelPlanMostrado, ajustesComoCalculados,
-  type AjusteDelPlan, type AjustesDelPlanPayload,
+  payloadDeAjustes, ajustesDelPlanMostrado, ajustesComoCalculados, claveDeAjuste, descripcionDeAccion,
+  type AccionDeSolucion, type AjusteDelPlan, type AjustesDelPlanPayload,
 } from "@/lib/ajustesPlan"
+import { aplicarPausa, pasosEnCola, reanudar, usePausasActivas, type Pausa } from "@/lib/pausas"
+import { ColaDeProcesos, type GrupoDeLaCola } from "@/components/planning/ColaDeProcesos"
 import { conEntregasParciales, entregasDeLasFilas, type EntregasParciales } from "@/lib/entregaParcial"
 import { huellaRecursos } from "@/lib/huellaRecursos"
 import { FILTRO_RECURSOS_VACIO, type FiltroRecursos } from "@/lib/filtroRecursos"
@@ -1399,8 +1401,90 @@ export default function OperacionesPage() {
     }
   };
 
-  const handlePlanSelection = async (ids: number[], range: { fecha_desde?: string, fecha_hasta?: string } = {}) => {
+  // ── La cola (Lucas, 28/10/2026) ──
+  const fotoPausas = usePausasActivas()
+  /** Los minutos de un paso en cola, de la OT cargada en pantalla. */
+  const minutosDeLaCola = useCallback((p: Pausa) => {
+    const ot = ordenesTrabajo.find(o => o.id === p.id_orden_trabajo)
+    return Number(ot?.procesos?.find(x => x.id === p.id_otp)?.tiempo_proceso) || 0
+  }, [ordenesTrabajo])
+
+  /**
+   * «Planificar juntos»: un plan nuevo con esos pasos en cola y lo que les sigue en cada
+   * OT (lo de antes ya está planificado en otro lote), y el ajuste `juntos` para que los
+   * haga la misma persona, uno atrás del otro. La vista previa es la de siempre: se
+   * revisa, se recalcula y se confirma; al confirmar salen de la cola.
+   */
+  const planificarJuntos = (grupo: GrupoDeLaCola) => {
+    const lineas: Record<number, number[]> = {}
+    // Las OT que todavía tienen pasos ANTES de la cola sin terminar: el plan de la cola
+    // no los espera (sólo planifica la cola y lo que le sigue), así que se avisa.
+    const conPasosAntes: number[] = []
+    for (const p of grupo.pausas) {
+      const ot = ordenesTrabajo.find(o => o.id === p.id_orden_trabajo)
+      const pasos = [...(ot?.procesos ?? [])].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+      const desde = pasos.find(x => x.id === p.id_otp)?.orden
+      if (desde != null && pasos.some(x => (x.orden ?? 0) < desde && x.estado_proceso?.id !== 3)) {
+        conPasosAntes.push(p.numero_ot)
+      }
+      const ids = pasos
+        .filter(x => x.id != null && x.estado_proceso?.id !== 3 && desde != null && (x.orden ?? 0) >= desde)
+        .map(x => x.id as number)
+      lineas[p.id_orden_trabajo] = ids.length > 0 ? ids : [p.id_otp as number]
+    }
+    const accion: AccionDeSolucion = {
+      tipo: "juntos",
+      id: 0,
+      nombre: grupo.nombre,
+      objetivos: grupo.pausas.map(p => ({ id: p.id_otp as number, nombre: `OT ${p.numero_ot}` })),
+    }
+    const ajuste: AjusteDelPlan = {
+      clave: claveDeAjuste(accion),
+      titulo: `${grupo.nombre}: ${grupo.pausas.length} ${grupo.pausas.length === 1 ? "paso" : "pasos"} en cola`,
+      descripcion: descripcionDeAccion(accion),
+      accion,
+      estado: "calculado",
+    }
+    if (conPasosAntes.length) {
+      toast.warning(`Ojo: ${conPasosAntes.length === 1 ? "la OT" : "las OT"} ${conPasosAntes.join(", ")} todavía ${conPasosAntes.length === 1 ? "tiene" : "tienen"} pasos antes de la cola sin terminar`, {
+        description: "El plan de la cola no los espera: mirá que los horarios de la cola queden después.",
+        duration: 15_000,
+      })
+    }
+    setIsReplanning(false)
+    void handlePlanSelection(Object.keys(lineas).map(Number), {}, { tandas: [{ ots: [], lineas }], ajustes: [ajuste] })
+  }
+
+  /** Al confirmar: lo de la cola que entró en el plan sale de la cola. */
+  const sacarDeLaColaLoPlanificado = async (juntos: number[][]) => {
+    const ids = new Set(juntos.flat())
+    if (ids.size === 0) return
+    const pausas = pasosEnCola(fotoPausas).filter(p => p.id_otp != null && ids.has(p.id_otp))
+    const fallaron: string[] = []
+    for (const p of pausas) {
+      try { aplicarPausa(await reanudar(p.id_orden_trabajo, p.id_otp)) }
+      catch { fallaron.push(`OT ${p.numero_ot}`) }
+    }
+    if (fallaron.length) {
+      toast.warning("El plan se guardó, pero algunos pasos siguen en cola", {
+        description: `${fallaron.join(", ")}: sacalos a mano desde «Cola».`,
+        duration: 15_000,
+      })
+    }
+  }
+
+  const handlePlanSelection = async (
+    ids: number[],
+    range: { fecha_desde?: string, fecha_hasta?: string } = {},
+    // Con qué arranca la vista previa además de las OT: pasos sueltos y ajustes. Lo usa
+    // «Planificar juntos» de la cola: sólo los pasos en cola (y lo que les sigue) de
+    // esas OT, con la misma persona. Sin esto, un plan nuevo arranca vacío de los dos.
+    inicial?: { tandas: TandaManual[]; ajustes: AjusteDelPlan[] },
+  ) => {
     if (ids.length === 0) return;
+    const tandasDeInicio = inicial?.tandas ?? [];
+    const ajustesDeInicio = inicial?.ajustes ?? [];
+    const lineasDeInicio = lineasDeTandas(tandasDeInicio);
 
     // Set selected IDs and range locally so we know what to verify/save later
     setSelectedOrderIds(ids);
@@ -1445,6 +1529,8 @@ export default function OperacionesPage() {
           preview: true,
           fecha_desde: range.fecha_desde,
           fecha_hasta: range.fecha_hasta,
+          lineas_por_orden: Object.keys(lineasDeInicio).length > 0 ? lineasDeInicio : undefined,
+          ajustes_del_plan: payloadDeAjustes(ajustesDeInicio),
         }),
       });
 
@@ -1538,20 +1624,20 @@ export default function OperacionesPage() {
       // anterior y no habría forma de saber por qué no coincide con los datos.
       setEdicionesIniciales({});
       setForzarIdsIniciales([]);
-      setTandasIniciales([]);
-      setAjustesIniciales([]);
+      setTandasIniciales(tandasDeInicio);
+      setAjustesIniciales(ajustesDeInicio);
       setEntregasIniciales({});
       retoquesBorrador.current = { ediciones: {}, forzarOrdenIds: [] };
-      tandasBorrador.current = [];
-      ajustesBorrador.current = [];
+      tandasBorrador.current = tandasDeInicio;
+      ajustesBorrador.current = ajustesDeInicio;
       entregasBorrador.current = {};
       setPlanCalculadoEn(new Date().toISOString());
       void guardarYa({
         ...baseBorrador.current,
         ediciones: {},
         forzarOrdenIds: [],
-        tandasManuales: [],
-        ajustesDelPlan: [],
+        tandasManuales: tandasDeInicio,
+        ajustesDelPlan: ajustesDeInicio,
         entregasParciales: {},
         guardadoEn: new Date().toISOString(),
       });
@@ -2032,6 +2118,11 @@ export default function OperacionesPage() {
       } else {
         toast.success("Planificación guardada exitosamente");
       }
+      // La cola: lo que entró junto en este plan ya está planificado, sale de la cola.
+      // Después de guardar y no antes: si se descartaba la vista previa, los pasos tenían
+      // que seguir en cola. Si alguno no se puede sacar, se dice y queda en cola (se saca
+      // a mano desde «Cola»), pero el plan ya está guardado.
+      if (loteNuevo) void sacarDeLaColaLoPlanificado(ajustesDelPlanGuardado?.juntos ?? []);
       // Dejó de ser un borrador: ahora es el plan. Si no se olvida acá, la próxima
       // vez Planificar Órdenes ofrece "retomar" algo que ya está confirmado.
       olvidar();
@@ -3088,6 +3179,7 @@ export default function OperacionesPage() {
                   borradores, así que casi todos los días la cabecera queda igual. */}
               {!editaOrdenes && !planifica && <MarcaSoloLectura que="las órdenes y el plan" />}
               {planifica && <BorradoresPlan onAbrir={handleAbrirBorrador} />}
+              <ColaDeProcesos minutosDe={minutosDeLaCola} onPlanificarJuntos={planificarJuntos} puedePlanificar={planifica} />
               {planifica && <Button
                 variant="outline"
                 size="sm"

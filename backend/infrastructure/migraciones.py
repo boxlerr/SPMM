@@ -1511,6 +1511,16 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "Desde ahí manda SPMM: el espejo del Integral no lo vuelve a pisar. NULL = lo sigue trayendo el espejo.'",
         ],
     ),
+    (
+        # Un paso «en cola» (Lucas, 28/10/2026): EN_COLA entra en la lista de motivos de
+        # pausa. Se saca y se vuelve a poner el CHECK: corre en cada arranque igual.
+        "2026-10-31_pausa_en_cola",
+        [
+            "ALTER TABLE orden_trabajo_pausa DROP CONSTRAINT IF EXISTS ck_pausa_motivo",
+            "ALTER TABLE orden_trabajo_pausa ADD CONSTRAINT ck_pausa_motivo CHECK (motivo IN ('FALTA_MATERIAL', "
+            "'MAQUINA_ROTA', 'ESPERA_CLIENTE', 'CAMBIO_PRIORIDAD', 'OTRO', 'EN_COLA'))",
+        ],
+    ),
 ]
 
 

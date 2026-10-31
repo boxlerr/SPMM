@@ -51,8 +51,27 @@ export function QuienLoMarco({ marcado, estado }: { marcado?: EstadoMarcado | nu
     );
 }
 
-/** En lugar de «Sin asignar» cuando el paso no tiene fila en el plan de su OT. */
-export function FueraDelPlan({ terminado }: { terminado: boolean }) {
+/**
+ * En lugar de «Sin asignar» cuando el paso no tiene fila en el plan de su OT.
+ *
+ * `cola`: el paso está en cola («en-cola», ver lib/pausas: EN_COLA) o va después de uno
+ * que lo está («despues»). Ahí no es que falte recalcular: se dejó así a propósito y
+ * entra cuando se lo saque de la cola.
+ */
+export function FueraDelPlan({ terminado, cola }: { terminado: boolean; cola?: "en-cola" | "despues" | null }) {
+    if (cola) {
+        return (
+            <span
+                className="block rounded border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs text-sky-900"
+                title={cola === "en-cola"
+                    ? "Se dejó en cola para hacerlo junto con los de otras OT. Entra al plan con «Planificar juntos», desde «Cola» arriba de todo."
+                    : "Un paso anterior de esta OT está en cola: este espera con él."}
+            >
+                <span className="block font-semibold">{cola === "en-cola" ? "En cola" : "Espera la cola"}</span>
+                <span className="block text-[10px]">{cola === "en-cola" ? "Se hace junto con otros" : "Va después de un paso en cola"}</span>
+            </span>
+        );
+    }
     if (terminado) {
         return (
             <span

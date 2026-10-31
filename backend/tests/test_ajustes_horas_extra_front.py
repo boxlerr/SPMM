@@ -37,6 +37,8 @@ EVENTUAL = {
     "tipo": "eventual", "id": VACANTE_CNC, "nombre": "Eventual OFICIAL CNC",
     "objetivos": [{"id": VACANTE_CNC, "nombre": "Eventual OFICIAL CNC", "fecha": "2026-11-07", "maquinas": [12]}],
 }
+JUNTOS = {"tipo": "juntos", "id": 0, "nombre": "PREPARACION DE PINTURA",
+          "objetivos": [{"id": 5952, "nombre": "OT 15867"}, {"id": 5943, "nombre": "OT 15866"}]}
 RANGO = {"tipo": "maquinaria", "id": 3, "nombre": "PRENSA 1",
          "objetivos": [{"id": 3, "nombre": "PRENSA 1", "rangos": [1, 2], "suma": ["OFICIAL"], "suma_ids": [2]}]}
 
@@ -58,6 +60,11 @@ const out = {
   texto_sabado: A.descripcionDeAccion(d.sabado),
   texto_eventual: A.descripcionDeAccion(d.eventual),
   corta_sabado: A.etiquetaCortaDeAccion(d.sabado),
+  con_juntos: A.payloadDeAjustes([aj(d.juntos)]),
+  clave_juntos: A.claveDeAjuste(d.juntos),
+  clave_juntos_otro_orden: A.claveDeAjuste({ ...d.juntos, objetivos: [...d.juntos.objetivos].reverse() }),
+  texto_juntos: A.descripcionDeAccion(d.juntos),
+  se_guarda_juntos: A.seGuardaEnRecursos(d.juntos),
   cap_sin: D.capacidadEnElPeriodo(HORARIO, "2026-10-29", "2026-10-31"),
   cap_con: D.capacidadEnElPeriodo({ ...HORARIO, sabados_extra: ["2026-10-31"] }, "2026-10-29", "2026-10-31"),
   cap_eventual: D.capacidadEnElPeriodo({ solo_sabados_extra: true, sabados_extra: ["2026-10-31"] }, "2026-10-26", "2026-10-31"),
@@ -80,7 +87,7 @@ def front():
         )
         assert compilado.returncode == 0, f"ajustesPlan.ts no compila:\n{compilado.stdout}\n{compilado.stderr}"
         (Path(tmp) / "driver.js").write_text(DRIVER)
-        datos = {"sabado": SABADO_VEGA, "eventual": EVENTUAL, "rango": RANGO}
+        datos = {"sabado": SABADO_VEGA, "eventual": EVENTUAL, "rango": RANGO, "juntos": JUNTOS}
         salida = subprocess.run(["node", "driver.js", json.dumps(datos)],
                                 cwd=tmp, capture_output=True, text=True, timeout=120, check=True)
         return json.loads(salida.stdout)
@@ -123,3 +130,13 @@ def test_el_panel_de_carga_cuenta_el_sabado_de_horas_extra(front):
     assert front["cap_con"]["minutos"] == 1290 and front["cap_con"]["dias"] == 3
     # El eventual: sólo su sábado, aunque la semana entera esté en el período.
     assert front["cap_eventual"]["minutos"] == 300 and front["cap_eventual"]["dias"] == 1
+
+
+def test_la_cola_viaja_como_un_grupo_y_no_se_guarda_en_recursos(front):
+    """«Planificar juntos» (Lucas, 28/10): las pasadas de la cola, un grupo por proceso."""
+    assert front["con_juntos"]["juntos"] == [[5943, 5952]]
+    assert "sabados" not in front["con_juntos"]
+    assert front["clave_juntos"] == front["clave_juntos_otro_orden"]
+    assert front["se_guarda_juntos"] is False
+    assert front["texto_juntos"] == ("PREPARACION DE PINTURA de las OT 15867 y 15866: "
+                                     "la misma persona, uno atrás del otro")
