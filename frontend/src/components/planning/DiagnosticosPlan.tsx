@@ -278,6 +278,7 @@ const TIPO_DE_AJUSTE: Record<AccionDeSolucion["tipo"], string> = {
     sabado: "Horas extra",
     eventual: "Eventual",
     juntos: "Cola",
+    en_lo_suyo: "Plan",
 };
 
 /**

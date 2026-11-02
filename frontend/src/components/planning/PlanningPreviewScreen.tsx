@@ -2,7 +2,7 @@ import React from 'react';
 import { PantallaPlanificador, CifraPlan } from "./PantallaPlanificador";
 import { SelectorFechasPlan } from "./SelectorFechasPlan";
 import { rangoParaElPlan, type FechasDelPlan } from "@/lib/fechasDelPlan";
-import { CalendarRange } from "lucide-react";
+import { CalendarRange, UserCheck } from "lucide-react";
 import { nombreLindo, nombrePersona } from "@/lib/nombres";
 import { limitacionDeMaquina } from "@/lib/maquinas";
 import { Button } from "@/components/ui/button";
@@ -47,7 +47,7 @@ import {
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
     payloadDeAjustes, descripcionDeAccion, claveDeAjuste, objetivosDeAjuste,
-    ajustesParaElProximo, ajustesDelPlanMostrado, estadoDeAjuste,
+    ajustesParaElProximo, ajustesDelPlanMostrado, estadoDeAjuste, ajusteEnLoSuyo, esEnLoSuyo, CLAVE_EN_LO_SUYO,
     type AjusteDelPlan, type AjustesDelPlanPayload, type AccionDeSolucion, type GuardadoSinRecalcular,
 } from "@/lib/ajustesPlan";
 import { duracionEstimada } from "@/components/planning/ProgresoPlanificacion";
@@ -484,6 +484,13 @@ export function PlanningPreviewScreen({
      * recálculo, igual que los retoques y las tandas.
      */
     const [ajustesDelPlan, setAjustesDelPlan] = React.useState<AjusteDelPlan[]>(ajustesIniciales ?? []);
+    /**
+     * Los ajustes que se cuentan y se muestran en la tarjeta: todos menos «Cada uno en lo
+     * suyo», que es una opción del plan con su propio botón (ver lib/ajustesPlan).
+     */
+    const ajustesVisibles = React.useMemo(() => ajustesDelPlan.filter(a => !esEnLoSuyo(a)), [ajustesDelPlan]);
+    const enLoSuyo = ajustesDelPlan.find(esEnLoSuyo);
+    const enLoSuyoPrendido = !!enLoSuyo && estadoDeAjuste(enLoSuyo) !== "por-quitar";
     /**
      * La cola (Lucas, 28/10/2026): qué pasos están en cola ahora y el botón que los pone o
      * los saca. Se guarda al toque, como una pausa del paso con motivo EN_COLA: no es un
@@ -949,7 +956,7 @@ export function PlanningPreviewScreen({
     const seguirGuardando = () => {
         // Los que el plan de la pantalla YA tiene: si se guarda sin recalcular, los
         // recién marcados no están en lo que se guarda.
-        if (ajustesDelPlanMostrado(ajustesDelPlan).length > 0) { setShowAjustesWarn(true); return; }
+        if (ajustesDelPlanMostrado(ajustesVisibles).length > 0) { setShowAjustesWarn(true); return; }
         seguirDespuesDeAjustes();
     };
     /**
@@ -1471,7 +1478,7 @@ export function PlanningPreviewScreen({
      */
     const resumenDeAjustes = React.useMemo(() => {
         // Los del plan que se va a guardar, no los recién marcados (ver `seguirGuardando`).
-        const textos = ajustesDelPlanMostrado(ajustesDelPlan).map(a => a.descripcion?.trim()).filter(Boolean) as string[];
+        const textos = ajustesDelPlanMostrado(ajustesVisibles).map(a => a.descripcion?.trim()).filter(Boolean) as string[];
         if (textos.length === 0) return "";
         const muestra = textos.slice(0, 3).join("; ");
         const resto = textos.length - 3;
@@ -3831,7 +3838,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             {/* Índigo: los ajustes que valen sólo para este plan. El número es
                                 cuántos hay en la tarjeta —contando los que entran o salen al
                                 recalcular—, para que coincida con lo que se ve al llegar. */}
-                            {ajustesDelPlan.length > 0 && (
+                            {ajustesVisibles.length > 0 && (
                                 <button
                                     type="button"
                                     onClick={irAAjustes}
@@ -3840,7 +3847,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 >
                                     Ajustes del plan
                                     <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-600 px-1 text-[10px] font-bold leading-none text-white tabular-nums">
-                                        {ajustesDelPlan.length}
+                                        {ajustesVisibles.length}
                                     </span>
                                 </button>
                             )}
@@ -4635,7 +4642,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                        si el dato estuviera cargado y nada más—, así que
                                        no pide confirmación y se deshace con un botón.
                                        Pedido de Julián (17/09/2026). Ver lib/ajustesPlan. */
-                                    ajustes={ajustesDelPlan}
+                                    ajustes={ajustesVisibles}
                                     onAplicarSoloEstePlan={aplicarAjusteDelPlan}
                                     onQuitarAjuste={quitarAjusteDelPlan}
                                     /* El traductor de rangos, para que el panel pueda escribir
@@ -5006,6 +5013,36 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     </Button>
 
                                     <GlosarioDeColores pantalla="vista-previa" align="start" />
+
+                                    {/* «Cada uno en lo suyo» (Lucas, 28/10/2026, tarea 4): con el
+                                        fresador ocupado, el plan le daba la fresadora al tornero.
+                                        Prendido, el paso espera a su especialista. Se prende y
+                                        se apaga como un ajuste: entra al recalcular. */}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        aria-pressed={enLoSuyoPrendido}
+                                        disabled={isCalculating}
+                                        onClick={() => enLoSuyo && estadoDeAjuste(enLoSuyo) !== "por-quitar"
+                                            ? quitarAjusteDelPlan(CLAVE_EN_LO_SUYO)
+                                            : aplicarAjusteDelPlan(ajusteEnLoSuyo())}
+                                        title={enLoSuyoPrendido
+                                            ? "Prendido: si hay alguien de SKILL 1 para un proceso, el paso lo espera (el tornero no agarra la fresadora). Pueden terminar menos OT en la semana. Tocá para apagarlo."
+                                            : "Apagado: si el de SKILL 1 está ocupado, el plan se lo da al de SKILL 2 para terminar antes. Tocá para que cada uno haga lo suyo."}
+                                        className={cn("h-8 gap-1.5 text-xs", enLoSuyoPrendido
+                                            ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                                            : "text-gray-600")}
+                                    >
+                                        <UserCheck className="h-3.5 w-3.5" />
+                                        Cada uno en lo suyo
+                                        <span className={cn("rounded px-1 text-[10px] font-semibold",
+                                            enLoSuyoPrendido ? "bg-emerald-600 text-white" : "bg-gray-200 text-gray-600")}>
+                                            {enLoSuyoPrendido ? "Sí" : "No"}
+                                        </span>
+                                        {enLoSuyo && estadoDeAjuste(enLoSuyo) !== "calculado" && (
+                                            <span className="text-[10px] font-medium text-amber-700">· falta recalcular</span>
+                                        )}
+                                    </Button>
 
                                     {/* Columnas: trece entran en un monitor de escritorio y en ninguna
                                         otra cosa. Lo elegido queda guardado en el navegador. */}
@@ -6277,7 +6314,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
             onConfirm={seguirDespuesDeAjustes}
             title="Este plan salió con arreglos que no están cargados"
             description={
-                `Para destrabar este plan se aplicaron ${ajustesDelPlanMostrado(ajustesDelPlan).length} ${ajustesDelPlanMostrado(ajustesDelPlan).length === 1 ? "arreglo que vale" : "arreglos que valen"} `
+                `Para destrabar este plan se aplicaron ${ajustesDelPlanMostrado(ajustesVisibles).length} ${ajustesDelPlanMostrado(ajustesVisibles).length === 1 ? "arreglo que vale" : "arreglos que valen"} `
                 // Sin descripción no se inventa una lista vacía: se dice igual cuántos son.
                 + (resumenDeAjustes ? `solo para él: ${resumenDeAjustes}. ` : "solo para él. ")
                 + "Eso NO quedó cargado en el sistema: en Recursos los datos siguen como estaban. "

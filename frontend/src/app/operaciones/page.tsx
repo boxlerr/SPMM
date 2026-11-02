@@ -34,7 +34,7 @@ import { BorradoresPlan } from "@/components/planning/BorradoresPlan"
 import { useBorradorPlan } from "@/hooks/useBorradorPlan"
 import { lineasDeTandas, type BorradorPlan, type TandaManual } from "@/lib/borradorPlan"
 import {
-  payloadDeAjustes, ajustesDelPlanMostrado, ajustesComoCalculados, claveDeAjuste, descripcionDeAccion,
+  payloadDeAjustes, ajustesDelPlanMostrado, ajustesComoCalculados, claveDeAjuste, descripcionDeAccion, ajusteEnLoSuyo, esEnLoSuyo,
   type AccionDeSolucion, type AjusteDelPlan, type AjustesDelPlanPayload,
 } from "@/lib/ajustesPlan"
 import { aplicarPausa, pasosEnCola, reanudar, usePausasActivas, type Pausa } from "@/lib/pausas"
@@ -1483,7 +1483,12 @@ export default function OperacionesPage() {
   ) => {
     if (ids.length === 0) return;
     const tandasDeInicio = inicial?.tandas ?? [];
-    const ajustesDeInicio = inicial?.ajustes ?? [];
+    // «Cada uno en lo suyo» prendido de entrada en todo plan nuevo (tarea 4 de la reunión
+    // del 28/10): se apaga desde la vista previa cuando hace falta terminar más OT.
+    const ajustesDeInicio = [
+      ...(inicial?.ajustes ?? []),
+      ...((inicial?.ajustes ?? []).some(esEnLoSuyo) ? [] : [ajusteEnLoSuyo()]),
+    ];
     const lineasDeInicio = lineasDeTandas(tandasDeInicio);
 
     // Set selected IDs and range locally so we know what to verify/save later

@@ -811,6 +811,7 @@ def _crear_variables_y_dominios(
     maquinas_por_proceso=None,
     setup_de=None,
     demoras_modelo=None,
+    cada_uno_en_lo_suyo=False,
 ):
     """
     Crea variables de inicio/fin/intervalos, dominios de operarios/maquinarias
@@ -1007,6 +1008,14 @@ def _crear_variables_y_dominios(
         # asignar y el diagnóstico lo muestra: preferimos eso a que lo agarre otro sin
         # que nadie se entere de que la elección se ignoró.
         _presel_op = (preseleccion_op or {}).get((orden_id, secuencia))
+        # «Cada uno en lo suyo» (opción del plan, ver `cada_uno_en_lo_suyo`): si para este
+        # proceso hay alguien de SKILL 1 en el plan, los demás no lo agarran y el paso
+        # espera a su especialista.
+        if cada_uno_en_lo_suyo:
+            _niv = lambda op: (lambda e: e if isinstance(e, int) else (e or (None,))[0])((op_skill_levels or {}).get(op))
+            _de_skill1 = [op for op in operarios_validos if op != DUMMY_OP_ID and _niv(op) == 1]
+            if _de_skill1:
+                operarios_validos = _de_skill1 + [DUMMY_OP_ID]
         # Los acompañantes se eligen del conjunto SIN forzar: la elección de la carga es
         # sobre quién hace el trabajo, no sobre con quién. Si los slots extra heredaran
         # el dominio de un solo valor, los dos serían la misma persona y
@@ -3355,7 +3364,7 @@ def _reasignar_por_especialidad(solver, procesos_norm, partes, inicio_vars, fin_
         return {}
 
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None, cant_ordenes: int | None = None, inicio_base: datetime | None = None, demoras=None, juntos=None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None, cant_ordenes: int | None = None, inicio_base: datetime | None = None, demoras=None, juntos=None, cada_uno_en_lo_suyo=False):
     # Los días bloqueados los trae el servicio desde la base (ver DiaBloqueadoRepository).
     blocked_dates = list(blocked_dates or ())
     logger.info(f"PLANIFICADOR: Fechas bloqueadas cargadas: {blocked_dates}")
@@ -3578,6 +3587,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
             maquinas_por_proceso,
             setup_de=setup_de,
             demoras_modelo=demoras_modelo,
+            cada_uno_en_lo_suyo=cada_uno_en_lo_suyo,
         )
 
         # El reparto rápido como punto de partida: el solver arranca con todo adentro.
@@ -4448,6 +4458,8 @@ async def planificar(
     # plan, cada grupo con la misma persona y uno atrás del otro (ver _agregar_juntos).
     ajustes_juntos = [[int(i) for i in g] for g in (_ajustes.get("juntos") or []) if g]
     sale_de_la_cola = {i for g in ajustes_juntos for i in g}
+    # «Cada uno en lo suyo» (tarea 4 de la reunión del 28/10): ver _crear_variables_y_dominios.
+    cada_uno_en_lo_suyo = bool(_ajustes.get("cada_uno_en_lo_suyo"))
     if (ajustes_procesos or ajustes_maquinarias or ajustes_skills or entregas_parciales
             or ajustes_sabados or ajustes_eventuales or ajustes_juntos):
         # Este log va ARRIBA del early-return del guardado a propósito. Un plan con
@@ -4896,6 +4908,7 @@ async def planificar(
         demoras,
         # La cola que entra junta, en claves (orden, secuencia) del solver.
         [[clave_por_linea[i] for i in g if i in clave_por_linea] for g in ajustes_juntos],
+        cada_uno_en_lo_suyo,
     )
 
     _marcar_lineas(resultados, linea_por_clave, lote_por_clave, a_mano=a_mano_por_clave)

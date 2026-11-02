@@ -63,6 +63,10 @@ class AjustesDelPlanDTO(BaseModel):
     # EN_COLA y entran juntas en este plan, cada grupo con la misma persona y uno atrás
     # del otro. Su pausa EN_COLA no las frena en este cálculo; se cierra al confirmar.
     juntos: List[List[int]] = []
+    # «Cada uno en lo suyo» (tarea 4 de la reunión del 28/10/2026): si para un proceso hay
+    # alguien de SKILL 1 en el plan, los de SKILL 2 no lo agarran y el paso lo espera. Sin
+    # esto, cuando el fresador estaba ocupado el plan le daba la fresadora al tornero.
+    cada_uno_en_lo_suyo: bool = False
 
 
 class PlanificarRequestDTO(BaseModel):

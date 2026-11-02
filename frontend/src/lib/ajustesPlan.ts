@@ -85,7 +85,7 @@ export type AccionDeSolucion = {
      * un puesto VACANTE como eventual, trabaja el sábado de 7 a 12. Son SOLO de este
      * plan: no tienen «Guardar en Recursos» (ver `seGuardaEnRecursos`).
      */
-    tipo: "proceso" | "maquinaria" | "skill_nativa" | "sabado" | "eventual" | "juntos";
+    tipo: "proceso" | "maquinaria" | "skill_nativa" | "sabado" | "eventual" | "juntos" | "en_lo_suyo";
     id: number;
     nombre: string;
     rangos?: number[];
@@ -100,7 +100,28 @@ export type AccionDeSolucion = {
  * extra y la cola (`juntos`) no: valen para un plan y no hay dónde cargarlas.
  */
 export const seGuardaEnRecursos = (accion: AccionDeSolucion): boolean =>
-    accion.tipo !== "sabado" && accion.tipo !== "eventual" && accion.tipo !== "juntos";
+    accion.tipo !== "sabado" && accion.tipo !== "eventual" && accion.tipo !== "juntos"
+    && accion.tipo !== "en_lo_suyo";
+
+/**
+ * «Cada uno en lo suyo» (reunión con Lucas del 28/10/2026, tarea 4): si para un proceso hay
+ * alguien de SKILL 1 en el plan, los de SKILL 2 no lo agarran y el paso lo espera. Sin
+ * esto, con el fresador ocupado el plan le daba la fresadora al tornero: la preferencia
+ * por el SKILL 1 pesa casi nada y quién lo agarra cambiaba de un cálculo al otro.
+ *
+ * Es una opción del plan y no una solución de un aviso, pero viaja como un ajuste más
+ * (recálculos, borrador, guardado) y se prende y apaga con su botón de la vista previa.
+ * No se muestra en la tarjeta de ajustes.
+ */
+export const CLAVE_EN_LO_SUYO = "en_lo_suyo";
+export const esEnLoSuyo = (a: AjusteDelPlan): boolean => a?.accion?.tipo === "en_lo_suyo";
+export const ajusteEnLoSuyo = (): AjusteDelPlan => ({
+    clave: CLAVE_EN_LO_SUYO,
+    titulo: "Cada uno en lo suyo",
+    descripcion: "Cada uno en lo suyo: si hay alguien de SKILL 1 para el proceso, el paso lo espera",
+    accion: { tipo: "en_lo_suyo", id: 0, nombre: "Cada uno en lo suyo" },
+    estado: "calculado",
+});
 
 /** Las de horas extra: un sábado por objetivo. */
 const esDeHorasExtra = (accion: AccionDeSolucion): boolean =>
@@ -206,6 +227,8 @@ export type AjustesDelPlanPayload = {
      * juntas en este plan, con la misma persona y una atrás de la otra.
      */
     juntos?: number[][];
+    /** Ver `ajusteEnLoSuyo`. */
+    cada_uno_en_lo_suyo?: boolean;
 };
 
 /**
@@ -230,6 +253,7 @@ function objetivosDe(accion: AccionDeSolucion): ObjetivoDeAccion[] {
  */
 export function objetivosDeAjuste(accion: AccionDeSolucion): string[] {
     if (!accion) return [];
+    if (accion.tipo === "en_lo_suyo") return [CLAVE_EN_LO_SUYO];
     return objetivosDe(accion).map((o) =>
         accion.tipo === "skill_nativa"
             ? `skill_nativa:${o.id}:${accion.id}`
@@ -271,6 +295,7 @@ export function objetivosConNombre(accion: AccionDeSolucion): { clave: string; n
  */
 export function claveDeAjuste(accion: AccionDeSolucion): string {
     if (!accion) return "";
+    if (accion.tipo === "en_lo_suyo") return CLAVE_EN_LO_SUYO;
     // Los rangos propuestos van DENTRO de la clave, no sólo a qué cosa apuntan.
     //
     // Con la clave hecha nada más que de objetivos, dos soluciones DISTINTAS sobre la
@@ -325,10 +350,15 @@ export function payloadDeAjustes(ajustes: AjusteDelPlan[]): AjustesDelPlanPayloa
     const sabados = new Map<string, { operario_id: number; fecha: string; maquinarias: number[] }>();
     const eventuales = new Set<number>();
     const juntos: number[][] = [];
+    let enLoSuyo = false;
 
     for (const ajuste of ajustes ?? []) {
         const accion = ajuste?.accion;
         if (!accion) continue;
+        if (accion.tipo === "en_lo_suyo") {
+            enLoSuyo = true;
+            continue;
+        }
         if (accion.tipo === "juntos") {
             const grupo = objetivosDe(accion).map((o) => o.id).sort((a, b) => a - b);
             if (grupo.length > 0) juntos.push(grupo);
@@ -373,7 +403,8 @@ export function payloadDeAjustes(ajustes: AjusteDelPlan[]): AjustesDelPlanPayloa
         Object.keys(maquinarias).length === 0 &&
         skillsNativas.length === 0 &&
         sabados.size === 0 &&
-        juntos.length === 0
+        juntos.length === 0 &&
+        !enLoSuyo
     ) {
         return undefined;
     }
@@ -385,6 +416,7 @@ export function payloadDeAjustes(ajustes: AjusteDelPlan[]): AjustesDelPlanPayloa
         if (eventuales.size > 0) cuerpo.eventuales = Array.from(eventuales).sort((a, b) => a - b);
     }
     if (juntos.length > 0) cuerpo.juntos = juntos;
+    if (enLoSuyo) cuerpo.cada_uno_en_lo_suyo = true;
     return cuerpo;
 }
 
@@ -429,6 +461,7 @@ function enumerar(nombres: string[]): string {
  */
 export function etiquetaCortaDeAccion(accion: AccionDeSolucion): string {
     if (!accion) return "";
+    if (accion.tipo === "en_lo_suyo") return "Cada uno en lo suyo";
     const objetivos = objetivosDe(accion);
     const listado = enumerar(objetivos.map((o) => o.nombre));
     if (!listado) return "";
@@ -450,6 +483,7 @@ export function descripcionDeAccion(
     nombreDeRango?: (id: number) => string,
 ): string {
     if (!accion) return "";
+    if (accion.tipo === "en_lo_suyo") return ajusteEnLoSuyo().descripcion;
     const objetivos = objetivosDe(accion);
     const listado = enumerar(objetivos.map((o) => o.nombre));
     const varios = objetivos.length > 1;

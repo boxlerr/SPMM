@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "cada-uno-en-lo-suyo",
+        fecha: "2026-11-02",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "«Cada uno en lo suyo»: el tornero ya no agarra la fresadora",
+        detalle:
+            "Cuando el fresador estaba ocupado, el plan le daba la fresadora al tornero (o al revés) para terminar antes, y quién la agarraba cambiaba de un cálculo al otro. En la vista previa hay un botón «Cada uno en lo suyo»: prendido, si hay alguien de SKILL 1 para ese proceso, el paso lo espera. Viene prendido en cada plan nuevo; se apaga cuando hace falta terminar más OT en la semana.",
+        href: "/operaciones",
+    },
+    {
         id: "procesos-en-cola",
         fecha: "2026-10-31",
         tipo: "nuevo",

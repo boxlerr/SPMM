@@ -61,6 +61,9 @@ const out = {
   texto_eventual: A.descripcionDeAccion(d.eventual),
   corta_sabado: A.etiquetaCortaDeAccion(d.sabado),
   con_juntos: A.payloadDeAjustes([aj(d.juntos)]),
+  en_lo_suyo: A.payloadDeAjustes([A.ajusteEnLoSuyo()]),
+  en_lo_suyo_y_rango: A.payloadDeAjustes([A.ajusteEnLoSuyo(), aj(d.rango)]),
+  en_lo_suyo_se_guarda: A.seGuardaEnRecursos(A.ajusteEnLoSuyo().accion),
   clave_juntos: A.claveDeAjuste(d.juntos),
   clave_juntos_otro_orden: A.claveDeAjuste({ ...d.juntos, objetivos: [...d.juntos.objetivos].reverse() }),
   texto_juntos: A.descripcionDeAccion(d.juntos),
@@ -140,3 +143,12 @@ def test_la_cola_viaja_como_un_grupo_y_no_se_guarda_en_recursos(front):
     assert front["se_guarda_juntos"] is False
     assert front["texto_juntos"] == ("PREPARACION DE PINTURA de las OT 15867 y 15866: "
                                      "la misma persona, uno atrás del otro")
+
+
+def test_cada_uno_en_lo_suyo_viaja_como_opcion_del_plan(front):
+    """Tarea 4 (reunión del 28/10): la opción va en el cuerpo aunque no haya otro ajuste."""
+    assert front["en_lo_suyo"] == {"procesos": {}, "maquinarias": {}, "skills_nativas": [],
+                                   "cada_uno_en_lo_suyo": True}
+    assert front["en_lo_suyo_y_rango"]["cada_uno_en_lo_suyo"] is True
+    assert front["en_lo_suyo_y_rango"]["maquinarias"] == {"3": [1, 2]}
+    assert front["en_lo_suyo_se_guarda"] is False
