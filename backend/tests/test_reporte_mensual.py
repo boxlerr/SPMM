@@ -259,6 +259,7 @@ async def base(request):
 @pytest.fixture(autouse=True)
 def reloj(monkeypatch):
     """El reloj del taller, el mismo para el reporte y para lo que reusa (RF-06/07)."""
+    monkeypatch.setattr(rm, "ahora_ar", lambda: AHORA)          # el que dice si el mes ya empezó
     monkeypatch.setattr(rendimiento_mod, "ahora_ar", lambda: AHORA)
     monkeypatch.setattr(ausencia_mod, "ahora_ar", lambda: AHORA)
     monkeypatch.setattr(api, "ahora_ar", lambda: AHORA)
